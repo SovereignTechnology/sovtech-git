@@ -20,7 +20,6 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
-  Pin,
   Search,
   Lock,
   Settings2,
@@ -39,7 +38,6 @@ import { useUserActivity } from "@/hooks/useUserActivity";
 import { useUserRepositories } from "@/hooks/useUserRepositories";
 import { useUserFollowedRepos } from "@/hooks/useUserFollowedRepos";
 import { useAccessiblePrivateRepositories } from "@/hooks/useAccessiblePrivateRepositories";
-import { useUserPinnedCoords } from "@/hooks/useUserPinnedRepos";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useUserProfileSubscription } from "@/hooks/useUserProfileSubscription";
@@ -89,11 +87,9 @@ function GreetingHeader({ pubkey }: { pubkey: string }) {
  */
 function RepoListItem({
   repo,
-  isPinned,
   hideAuthor,
 }: {
   repo: ResolvedRepo;
-  isPinned?: boolean;
   hideAuthor?: boolean;
 }) {
   const repoPath = useDefaultRepoPath(repo);
@@ -106,9 +102,6 @@ function RepoListItem({
       to={repoPath}
       className="group flex items-center gap-1.5 px-1.5 py-1 -mx-1.5 rounded-md hover:bg-muted/50 transition-colors min-w-0"
     >
-      {isPinned && (
-        <Pin className="h-3 w-3 text-muted-foreground/50 shrink-0 -rotate-45" />
-      )}
       {!hideAuthor && (
         <>
           <UserAvatar
@@ -153,29 +146,15 @@ const INITIAL_VISIBLE = 15;
 
 function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const repos = useUserRepositories(pubkey);
-  const pinnedCoords = useUserPinnedCoords(pubkey);
   const userPath = useUserPath(pubkey);
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const pinnedSet = useMemo(() => new Set(pinnedCoords ?? []), [pinnedCoords]);
-
   const sorted = useMemo(
     () =>
-      repos
-        ? [...repos].sort((a, b) => {
-            const aCoord = `30617:${a.selectedMaintainer}:${a.dTag}`;
-            const bCoord = `30617:${b.selectedMaintainer}:${b.dTag}`;
-            const aPin = pinnedCoords?.indexOf(aCoord) ?? -1;
-            const bPin = pinnedCoords?.indexOf(bCoord) ?? -1;
-            if (aPin !== -1 && bPin !== -1) return aPin - bPin;
-            if (aPin !== -1) return -1;
-            if (bPin !== -1) return 1;
-            return b.updatedAt - a.updatedAt;
-          })
-        : undefined,
-    [repos, pinnedCoords],
+      repos ? [...repos].sort((a, b) => b.updatedAt - a.updatedAt) : undefined,
+    [repos],
   );
 
   const trimmed = search.trim().toLowerCase();
@@ -241,17 +220,9 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
         ) : displayRepos && displayRepos.length > 0 ? (
           <>
             <div className="space-y-0.5">
-              {displayRepos.map((repo) => {
-                const coord = `30617:${repo.selectedMaintainer}:${repo.dTag}`;
-                return (
-                  <RepoListItem
-                    key={repo.componentId}
-                    repo={repo}
-                    isPinned={pinnedSet.has(coord)}
-                    hideAuthor
-                  />
-                );
-              })}
+              {displayRepos.map((repo) => (
+                <RepoListItem key={repo.componentId} repo={repo} hideAuthor />
+              ))}
             </div>
             {hasMore && (
               <div className="mt-3 pt-2 border-t border-border/40">
