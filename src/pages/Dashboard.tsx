@@ -45,6 +45,8 @@ import { useUserPath } from "@/hooks/useUserPath";
 import { useActiveAccount } from "applesauce-react/hooks";
 import { useProfile } from "@/hooks/useProfile";
 import { useDefaultRepoPath } from "@/hooks/useRepoPath";
+import { useRepoSelectionScores } from "@/hooks/useRepoSelectionScores";
+import { compareBySelection } from "@/lib/repoSelectionScore";
 
 import { useState, useMemo } from "react";
 import type { ResolvedRepo } from "@/lib/nip34";
@@ -88,9 +90,11 @@ function GreetingHeader({ pubkey }: { pubkey: string }) {
 function RepoListItem({
   repo,
   hideAuthor,
+  onSelect,
 }: {
   repo: ResolvedRepo;
   hideAuthor?: boolean;
+  onSelect?: () => void;
 }) {
   const repoPath = useDefaultRepoPath(repo);
   const name = repo.name || repo.dTag;
@@ -100,6 +104,7 @@ function RepoListItem({
   return (
     <Link
       to={repoPath}
+      onClick={onSelect}
       className="group flex items-center gap-1.5 px-1.5 py-1 -mx-1.5 rounded-md hover:bg-muted/50 transition-colors min-w-0"
     >
       {!hideAuthor && (
@@ -150,11 +155,14 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const { scores, recordSelection } = useRepoSelectionScores();
 
   const sorted = useMemo(
     () =>
-      repos ? [...repos].sort((a, b) => b.updatedAt - a.updatedAt) : undefined,
-    [repos],
+      repos
+        ? [...repos].sort(compareBySelection(scores, Date.now()))
+        : undefined,
+    [repos, scores],
   );
 
   const trimmed = search.trim().toLowerCase();
@@ -221,7 +229,12 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
           <>
             <div className="space-y-0.5">
               {displayRepos.map((repo) => (
-                <RepoListItem key={repo.componentId} repo={repo} hideAuthor />
+                <RepoListItem
+                  key={repo.componentId}
+                  repo={repo}
+                  hideAuthor
+                  onSelect={() => recordSelection(repo.selectedCoordinate)}
+                />
               ))}
             </div>
             {hasMore && (
