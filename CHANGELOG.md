@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Add typo-tolerant, relevance-ranked local search for repository, issue, and pull request lists while preserving exact event ID and facet filtering behavior.
+
 ### Fixed
 
 - Restart stalled repository preflight queries when manually rechecking a merge, without replacing covered queries or automatically signing another merge.

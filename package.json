@@ -79,6 +79,7 @@
     "diff": "^8.0.4",
     "embla-carousel-react": "^8.6.0",
     "fflate": "0.8.2",
+    "fuse.js": "^7.5.0",
     "highlight.js": "^11.11.1",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",

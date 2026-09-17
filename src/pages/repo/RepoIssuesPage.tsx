@@ -1,5 +1,6 @@
 import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
+import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
 import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
@@ -52,8 +53,20 @@ import {
   RepoItemAttributionIndicator,
   RepoItemAttributionWarning,
 } from "@/components/RepoItemAttributionWarning";
+import { useFuzzySearch } from "@/hooks/useFuzzySearch";
 
 const DEFAULT_STATUS_FILTER: IssueStatus[] = ["open"];
+const ISSUE_SEARCH_OPTIONS: IFuseOptions<ResolvedIssueLite> = {
+  keys: [
+    { name: "currentSubject", weight: 4 },
+    { name: "originalSubject", weight: 2 },
+    { name: "content", weight: 1 },
+  ],
+  threshold: 0.35,
+  ignoreDiacritics: true,
+  useTokenSearch: true,
+  tokenMatch: "all",
+};
 
 export default function RepoIssuesPage() {
   const { pubkey, repoId, resolved, issues, basePath } = useRepoContext();
@@ -134,43 +147,47 @@ export default function RepoIssuesPage() {
     label: l,
   }));
 
-  // Apply filters
+  const facetFilteredIssues = useMemo(
+    () =>
+      issues?.filter(
+        (issue) =>
+          (statusFilter.length === 0 || statusFilter.includes(issue.status)) &&
+          !(
+            labelFilter.length > 0 &&
+            !labelFilter.some((label) => issue.labels.includes(label))
+          ) &&
+          (!authorFilter || issue.pubkey === authorFilter),
+      ),
+    [issues, statusFilter, labelFilter, authorFilter],
+  );
+  const fuzzyIssues = useFuzzySearch(
+    facetFilteredIssues,
+    searchQuery,
+    ISSUE_SEARCH_OPTIONS,
+  );
+
+  // Exact event IDs remain authoritative and can bypass active facets.
   const { filteredIssues, idMatchesOutsideFilters } = useMemo(() => {
-    if (!issues) {
+    if (!issues || !fuzzyIssues) {
       return { filteredIssues: undefined, idMatchesOutsideFilters: 0 };
     }
-    let outsideFilterCount = 0;
-    const filtered = issues.filter((issue) => {
-      const matchesFacets =
-        (statusFilter.length === 0 || statusFilter.includes(issue.status)) &&
-        !(
-          labelFilter.length > 0 &&
-          !labelFilter.some((label) => issue.labels.includes(label))
-        ) &&
-        (!authorFilter || issue.pubkey === authorFilter);
-      const matchesId = eventIdMatchesSearch(issue.id, searchQuery);
 
-      if (matchesId) {
-        if (!matchesFacets) outsideFilterCount++;
-        return true;
-      }
-      if (!matchesFacets) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !issue.currentSubject.toLowerCase().includes(q) &&
-          !issue.originalSubject.toLowerCase().includes(q) &&
-          !issue.content.toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    });
+    const facetIds = new Set(facetFilteredIssues?.map((issue) => issue.id));
+    const idMatches = issues.filter((issue) =>
+      eventIdMatchesSearch(issue.id, searchQuery),
+    );
+    const idMatchIds = new Set(idMatches.map((issue) => issue.id));
+
     return {
-      filteredIssues: filtered,
-      idMatchesOutsideFilters: outsideFilterCount,
+      filteredIssues: [
+        ...idMatches,
+        ...fuzzyIssues.filter((issue) => !idMatchIds.has(issue.id)),
+      ],
+      idMatchesOutsideFilters: idMatches.filter(
+        (issue) => !facetIds.has(issue.id),
+      ).length,
     };
-  }, [issues, statusFilter, labelFilter, authorFilter, searchQuery]);
+  }, [issues, facetFilteredIssues, fuzzyIssues, searchQuery]);
 
   const { visibleAcceptedIssues, visibleUnconfirmedIssues } = useMemo(() => {
     if (!filteredIssues || !repo) {

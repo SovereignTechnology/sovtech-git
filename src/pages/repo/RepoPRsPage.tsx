@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
 import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
@@ -51,6 +52,7 @@ import {
   getInferredPRStackLayer,
 } from "@/lib/inferredPRParents";
 import { useGitPool } from "@/hooks/useGitPool";
+import { useFuzzySearch } from "@/hooks/useFuzzySearch";
 
 const TYPE_OPTIONS: MultiSelectOption[] = [
   { value: "pr", label: "Pull Requests" },
@@ -58,6 +60,18 @@ const TYPE_OPTIONS: MultiSelectOption[] = [
 ];
 
 const DEFAULT_STATUS_FILTER: IssueStatus[] = ["open", "draft"];
+const PR_SEARCH_OPTIONS: IFuseOptions<ResolvedPRLite> = {
+  keys: [
+    { name: "currentSubject", weight: 4 },
+    { name: "originalSubject", weight: 2 },
+    { name: "targetBranch", weight: 2 },
+    { name: "content", weight: 1 },
+  ],
+  threshold: 0.35,
+  ignoreDiacritics: true,
+  useTokenSearch: true,
+  tokenMatch: "all",
+};
 
 export default function RepoPRsPage() {
   const { pubkey, repoId, resolved, prs, basePath, repoState, cloneUrls } =
@@ -153,14 +167,12 @@ export default function RepoPRsPage() {
     label: l,
   }));
 
-  // Apply filters
-  const { filteredPRs, idMatchesOutsideFilters } = useMemo(() => {
-    if (!prs) return { filteredPRs: undefined, idMatchesOutsideFilters: 0 };
-    let outsideFilterCount = 0;
-    const filtered = prs.filter((pr) => {
-      const matchesFacets =
-        (statusFilter.length === 0 || statusFilter.includes(pr.status)) &&
-        (typeFilter.length === 0 || typeFilter.includes(pr.itemType)) &&
+  const facetFilteredPRs = useMemo(
+    () =>
+      prs?.filter(
+        (pr) =>
+          (statusFilter.length === 0 || statusFilter.includes(pr.status)) &&
+          (typeFilter.length === 0 || typeFilter.includes(pr.itemType)) &&
         !(
           labelFilter.length > 0 &&
           !labelFilter.some((label) => pr.labels.includes(label))
@@ -169,39 +181,44 @@ export default function RepoPRsPage() {
         (targetBranchFilter === null ||
           (targetBranchFilter === ""
             ? !pr.targetBranch
-            : pr.targetBranch === targetBranchFilter));
-      const matchesId = eventIdMatchesSearch(pr.id, searchQuery);
-
-      if (matchesId) {
-        if (!matchesFacets) outsideFilterCount++;
-        return true;
-      }
-      if (!matchesFacets) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !pr.currentSubject.toLowerCase().includes(q) &&
-          !pr.originalSubject.toLowerCase().includes(q) &&
-          !pr.content.toLowerCase().includes(q) &&
-          !pr.targetBranch?.toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    });
-    return {
-      filteredPRs: filtered,
-      idMatchesOutsideFilters: outsideFilterCount,
-    };
-  }, [
-    prs,
-    statusFilter,
-    typeFilter,
-    labelFilter,
-    authorFilter,
-    targetBranchFilter,
+            : pr.targetBranch === targetBranchFilter)),
+      ),
+    [
+      prs,
+      statusFilter,
+      typeFilter,
+      labelFilter,
+      authorFilter,
+      targetBranchFilter,
+    ],
+  );
+  const fuzzyPRs = useFuzzySearch(
+    facetFilteredPRs,
     searchQuery,
-  ]);
+    PR_SEARCH_OPTIONS,
+  );
+
+  // Exact event IDs remain authoritative and can bypass active facets.
+  const { filteredPRs, idMatchesOutsideFilters } = useMemo(() => {
+    if (!prs || !fuzzyPRs) {
+      return { filteredPRs: undefined, idMatchesOutsideFilters: 0 };
+    }
+
+    const facetIds = new Set(facetFilteredPRs?.map((pr) => pr.id));
+    const idMatches = prs.filter((pr) =>
+      eventIdMatchesSearch(pr.id, searchQuery),
+    );
+    const idMatchIds = new Set(idMatches.map((pr) => pr.id));
+
+    return {
+      filteredPRs: [
+        ...idMatches,
+        ...fuzzyPRs.filter((pr) => !idMatchIds.has(pr.id)),
+      ],
+      idMatchesOutsideFilters: idMatches.filter((pr) => !facetIds.has(pr.id))
+        .length,
+    };
+  }, [prs, facetFilteredPRs, fuzzyPRs, searchQuery]);
 
   const { visibleAcceptedItems, visibleUnconfirmedItems } = useMemo(() => {
     if (!filteredPRs || !repo) {
