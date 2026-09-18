@@ -1,7 +1,11 @@
 import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
+import {
+  eventIdMatchesSearch,
+  eventIdToNevent,
+  searchQueryToPubkey,
+} from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
 import { useSeoMeta } from "@unhead/react";
 import { useProfile } from "@/hooks/useProfile";
@@ -134,6 +138,13 @@ export default function RepoIssuesPage() {
     label: l,
   }));
 
+  // A query that names a pubkey filters by author instead of matching text.
+  // Decoded once here rather than per issue.
+  const searchPubkey = useMemo(
+    () => searchQueryToPubkey(searchQuery),
+    [searchQuery],
+  );
+
   // Apply filters
   const { filteredIssues, idMatchesOutsideFilters } = useMemo(() => {
     if (!issues) {
@@ -156,13 +167,17 @@ export default function RepoIssuesPage() {
       }
       if (!matchesFacets) return false;
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !issue.currentSubject.toLowerCase().includes(q) &&
-          !issue.originalSubject.toLowerCase().includes(q) &&
-          !issue.content.toLowerCase().includes(q)
-        )
-          return false;
+        if (searchPubkey) {
+          if (issue.pubkey !== searchPubkey) return false;
+        } else {
+          const q = searchQuery.toLowerCase();
+          if (
+            !issue.currentSubject.toLowerCase().includes(q) &&
+            !issue.originalSubject.toLowerCase().includes(q) &&
+            !issue.content.toLowerCase().includes(q)
+          )
+            return false;
+        }
       }
       return true;
     });
@@ -170,7 +185,14 @@ export default function RepoIssuesPage() {
       filteredIssues: filtered,
       idMatchesOutsideFilters: outsideFilterCount,
     };
-  }, [issues, statusFilter, labelFilter, authorFilter, searchQuery]);
+  }, [
+    issues,
+    statusFilter,
+    labelFilter,
+    authorFilter,
+    searchQuery,
+    searchPubkey,
+  ]);
 
   const { visibleAcceptedIssues, visibleUnconfirmedIssues } = useMemo(() => {
     if (!filteredIssues || !repo) {
@@ -250,7 +272,7 @@ export default function RepoIssuesPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search issues or event ID..."
+            placeholder="Search issues, event ID or npub..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-background/60"

@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
+import {
+  eventIdMatchesSearch,
+  eventIdToNevent,
+  searchQueryToPubkey,
+} from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
 import { useSeoMeta } from "@unhead/react";
 import { useProfile } from "@/hooks/useProfile";
@@ -153,6 +157,13 @@ export default function RepoPRsPage() {
     label: l,
   }));
 
+  // A query that names a pubkey filters by author instead of matching text.
+  // Decoded once here rather than per PR.
+  const searchPubkey = useMemo(
+    () => searchQueryToPubkey(searchQuery),
+    [searchQuery],
+  );
+
   // Apply filters
   const { filteredPRs, idMatchesOutsideFilters } = useMemo(() => {
     if (!prs) return { filteredPRs: undefined, idMatchesOutsideFilters: 0 };
@@ -178,14 +189,18 @@ export default function RepoPRsPage() {
       }
       if (!matchesFacets) return false;
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !pr.currentSubject.toLowerCase().includes(q) &&
-          !pr.originalSubject.toLowerCase().includes(q) &&
-          !pr.content.toLowerCase().includes(q) &&
-          !pr.targetBranch?.toLowerCase().includes(q)
-        )
-          return false;
+        if (searchPubkey) {
+          if (pr.pubkey !== searchPubkey) return false;
+        } else {
+          const q = searchQuery.toLowerCase();
+          if (
+            !pr.currentSubject.toLowerCase().includes(q) &&
+            !pr.originalSubject.toLowerCase().includes(q) &&
+            !pr.content.toLowerCase().includes(q) &&
+            !pr.targetBranch?.toLowerCase().includes(q)
+          )
+            return false;
+        }
       }
       return true;
     });
@@ -201,6 +216,7 @@ export default function RepoPRsPage() {
     authorFilter,
     targetBranchFilter,
     searchQuery,
+    searchPubkey,
   ]);
 
   const { visibleAcceptedItems, visibleUnconfirmedItems } = useMemo(() => {
@@ -257,7 +273,7 @@ export default function RepoPRsPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search PRs or event ID..."
+            placeholder="Search PRs, event ID or npub..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-background/60"

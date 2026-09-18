@@ -211,6 +211,30 @@ export function eventIdMatchesSearch(id: string, search: string): boolean {
  * Extract relay hints from a nevent1 identifier.
  * Returns an empty array for note1 or invalid identifiers.
  */
+/**
+ * Decode a search box query into the pubkey it identifies, if it identifies one.
+ *
+ * Accepts npub1…, nprofile1… and a raw 64-char hex pubkey, with an optional
+ * `nostr:` prefix, so a pubkey copied from any client can be pasted as-is.
+ *
+ * Short hex prefixes are deliberately rejected, unlike in eventIdMatchesSearch:
+ * "add", "fed", "beef" and "face" are ordinary words as well as valid hex, and
+ * treating them as an author would silently discard text matches.
+ */
+export function searchQueryToPubkey(search: string): string | undefined {
+  const query = search.trim().toLowerCase();
+  const identifier = query.startsWith("nostr:") ? query.slice(6) : query;
+  if (isHexPubkey(identifier)) return identifier;
+  try {
+    const decoded = nip19.decode(identifier);
+    if (decoded.type === "npub") return decoded.data;
+    if (decoded.type === "nprofile") return decoded.data.pubkey;
+  } catch {
+    // not a pubkey identifier
+  }
+  return undefined;
+}
+
 export function relaysFromEventIdentifier(s: string): string[] {
   try {
     const decoded = nip19.decode(s);
