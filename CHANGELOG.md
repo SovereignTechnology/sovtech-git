@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
+
 ### Fixed
 
 - Restart stalled repository preflight queries when manually rechecking a merge, without replacing covered queries or automatically signing another merge.

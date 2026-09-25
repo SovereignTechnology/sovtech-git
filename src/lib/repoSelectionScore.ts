@@ -1,26 +1,23 @@
 /**
  * Decaying selection scores for ranking the dashboard's "My repositories" list.
  *
- * Each selection adds 1 to a repo's score, and the score halves every
- * SELECTION_HALF_LIFE_MS. Because decay is exponential, only the score and the
- * time it was last updated need storing — it is decayed forward on read.
+ * Scores retain 90% of their value each week. Because decay is exponential,
+ * only a score and reference time are needed; time passing alone never
+ * requires a write. Click weighting lives in repoSelectionState.ts.
  */
 
-import { z } from "zod";
 import type { ResolvedRepo } from "@/lib/nip34";
 
-export const SELECTION_HALF_LIFE_MS = 14 * 24 * 60 * 60 * 1000;
+export const SELECTION_HALF_LIFE_MS =
+  (7 * 24 * 60 * 60 * 1000 * Math.log(0.5)) / Math.log(0.9);
 
-/** Entries that have decayed below this are dropped on the next write. */
+/** Scores below this are inactive on read and dropped on the next write. */
 const PRUNE_BELOW = 0.01;
 
-const entrySchema = z.object({
-  score: z.number().finite().nonnegative(),
-  at: z.number().finite(),
-});
-const scoresSchema = z.record(z.string(), entrySchema);
-
-export type SelectionEntry = z.infer<typeof entrySchema>;
+export interface SelectionEntry {
+  score: number;
+  at: number;
+}
 /** Keyed by repository coordinate (`30617:<pubkey>:<dTag>`). */
 export type SelectionScores = Record<string, SelectionEntry>;
 
@@ -30,44 +27,27 @@ export function decayedScore(
 ): number {
   if (!entry) return 0;
   const age = Math.max(0, now - entry.at);
-  return entry.score * 0.5 ** (age / SELECTION_HALF_LIFE_MS);
+  const score = entry.score * 0.5 ** (age / SELECTION_HALF_LIFE_MS);
+  return score < PRUNE_BELOW ? 0 : score;
 }
 
-export function recordSelection(
+/** Usage first; equal scores follow pin order, then recent repository activity. */
+export function compareBySelection(
   scores: SelectionScores,
-  coordinate: string,
   now: number,
-): SelectionScores {
-  const next: SelectionScores = {};
-  for (const [key, entry] of Object.entries(scores)) {
-    if (key !== coordinate && decayedScore(entry, now) >= PRUNE_BELOW) {
-      next[key] = entry;
-    }
-  }
-  next[coordinate] = {
-    score: decayedScore(scores[coordinate], now) + 1,
-    at: now,
-  };
-  return next;
-}
-
-export function parseSelectionScores(raw: string | null): SelectionScores {
-  if (raw === null) return {};
-  try {
-    const parsed = scoresSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : {};
-  } catch {
-    return {};
-  }
-}
-
-/** Most-selected first; ties (including never-selected repos) by recent activity. */
-export function compareBySelection(scores: SelectionScores, now: number) {
+  pinnedCoordinates: readonly string[] = [],
+) {
+  const pinOrder = new Map<string, number>();
+  pinnedCoordinates.forEach((coordinate, index) => {
+    if (!pinOrder.has(coordinate)) pinOrder.set(coordinate, index);
+  });
   return (
     a: Pick<ResolvedRepo, "selectedCoordinate" | "updatedAt">,
     b: Pick<ResolvedRepo, "selectedCoordinate" | "updatedAt">,
   ): number =>
     decayedScore(scores[b.selectedCoordinate], now) -
       decayedScore(scores[a.selectedCoordinate], now) ||
+    (pinOrder.get(a.selectedCoordinate) ?? pinnedCoordinates.length) -
+      (pinOrder.get(b.selectedCoordinate) ?? pinnedCoordinates.length) ||
     b.updatedAt - a.updatedAt;
 }

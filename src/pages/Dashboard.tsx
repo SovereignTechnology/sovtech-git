@@ -36,6 +36,7 @@ import { UserAvatar, UserName } from "@/components/UserAvatar";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { useUserActivity } from "@/hooks/useUserActivity";
 import { useUserRepositories } from "@/hooks/useUserRepositories";
+import { useUserPinnedCoords } from "@/hooks/useUserPinnedRepos";
 import { useUserFollowedRepos } from "@/hooks/useUserFollowedRepos";
 import { useAccessiblePrivateRepositories } from "@/hooks/useAccessiblePrivateRepositories";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
@@ -151,6 +152,7 @@ const INITIAL_VISIBLE = 15;
 
 function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const repos = useUserRepositories(pubkey);
+  const pinnedCoordinates = useUserPinnedCoords(pubkey);
   const userPath = useUserPath(pubkey);
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -160,9 +162,11 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const sorted = useMemo(
     () =>
       repos
-        ? [...repos].sort(compareBySelection(scores, Date.now()))
+        ? [...repos].sort(
+            compareBySelection(scores, Date.now(), pinnedCoordinates),
+          )
         : undefined,
-    [repos, scores],
+    [repos, scores, pinnedCoordinates],
   );
 
   const trimmed = search.trim().toLowerCase();
