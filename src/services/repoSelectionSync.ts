@@ -54,6 +54,12 @@ export function startRepoSelectionSync(
   let failedRemoteId: string | undefined;
   let appliedId: string | undefined;
   let author: string | undefined;
+  /**
+   * Explicit, in-memory request to create the notification key. Persisted
+   * scores never count as intent: they would turn every keyless session into
+   * a standing bootstrap request. Cleared once a key exists or on stop.
+   */
+  let keyRequested = false;
   let remote = emptySelectionState();
   function schedule() {
     if (stopped || timer || publishDue) return;
@@ -78,10 +84,25 @@ export function startRepoSelectionSync(
         store.setStatus({
           ...status,
           message:
-            status.status === "ready"
+            status.status === "ready" || status.status === "local"
               ? status.message
               : `Repository ordering sync is waiting for the shared notification key and relay checks. ${status.message}`,
         });
+    },
+    /** Whether the user asked this session to create the notification key. */
+    keyRequested: () => keyRequested,
+    /** Ask the notification owner to create the key and publish right away. */
+    enable() {
+      if (stopped) return;
+      keyRequested = true;
+      publishDue = true;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      store.setStatus({
+        status: "checking",
+        message: "Enabling repository ordering sync…",
+      });
+      requestReconcile();
     },
     retry() {
       failed = false;
@@ -99,6 +120,7 @@ export function startRepoSelectionSync(
       try {
         const nextAuthor = await signer.getPublicKey();
         if (!isCurrent()) return;
+        keyRequested = false;
         if (nextAuthor !== author) {
           author = nextAuthor;
           appliedId = undefined;
@@ -239,6 +261,7 @@ export function startRepoSelectionSync(
     },
     stop() {
       stopped = true;
+      keyRequested = false;
       if (timer) clearTimeout(timer);
       unsubscribe();
       release();

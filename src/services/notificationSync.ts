@@ -102,6 +102,8 @@ export interface NotificationSyncController {
   enqueue(update: NotificationStateUpdater): void;
   /** Retry only the currently failed decrypt, coverage, or publish step. */
   retry(): void;
+  /** Create the notification key on the user's explicit request for ordering sync. */
+  enableRepoSelectionSync(): void;
   stop(): void;
 }
 
@@ -888,14 +890,14 @@ export function startNotificationSync(
       }
       // Confirmed envelope absence means no derived state coordinate exists.
       // Keep the envelope lease warm without prompting the account signer until
-      // the user actually changes notification state for the first time.
-      // Repository selections never create the key: a passive dashboard click
-      // must not replace an envelope that this relay scope cannot see.
-      if (pendingUpdates.length === 0) {
+      // the user changes notification state for the first time or explicitly
+      // enables ordering sync. A passive dashboard click never creates the key:
+      // a persisted score would be a standing request to replace an envelope
+      // that this relay scope merely fails to return.
+      if (pendingUpdates.length === 0 && !selectionSync.keyRequested()) {
         selectionSync.availability({
-          status: "ready",
-          message:
-            "Repository ordering is stored on this device. Cross-device sync starts once a notification key exists.",
+          status: "local",
+          message: "Repository ordering is stored on this device.",
         });
         emitReady();
         return;
@@ -1061,6 +1063,10 @@ export function startNotificationSync(
       });
       if (restartCoverage) restartWarmOwner(scopeNotificationPubkey);
       else requestReconcile();
+    },
+    enableRepoSelectionSync() {
+      if (stopped) return;
+      selectionSync.enable();
     },
     stop() {
       if (stopped) return;

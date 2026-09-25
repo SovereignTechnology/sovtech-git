@@ -491,10 +491,14 @@ this coordinate in its single unpaginated request. All three filters start
 together when the key is cached. Discovering a key replaces the envelope-only
 lease with a fresh three-filter lease; previous coverage never authorizes the
 new coordinate. Cache hydration, mailbox discovery, relay groups, and quorum
-follow the notification policy above. Repository selections never request key
-bootstrap: until a notification action creates the key, ordering stays local
-to each device. A passive dashboard click is not enough intent to replace an
-envelope that the current relay scope merely fails to return.
+follow the notification policy above. A passive dashboard click never requests
+key bootstrap: a persisted score would be a standing request to replace an
+envelope that the current relay scope merely fails to return. Instead, once
+routine coverage proves the envelope absent, the panel reports ordering as
+device-local and offers an explicit "Sync across devices" action. That action
+is a bounded in-memory request, cleared once a key exists or the owner stops,
+and it goes through the same bootstrap threshold, cache re-check, and account
+signer prompt as a first notification action.
 
 The score controller consumes the winner and signer supplied by that owner,
 without loaders or extra relay subscriptions. Its own three-minute batch timer, validation,

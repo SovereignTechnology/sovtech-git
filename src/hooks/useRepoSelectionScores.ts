@@ -35,5 +35,7 @@ export function useRepoSelectionScores() {
     recordSelection: store.record,
     sync,
     retrySync: () => owner.current?.notificationSync?.retry(),
+    enableSync: () =>
+      owner.current?.notificationSync?.enableRepoSelectionSync(),
   };
 }

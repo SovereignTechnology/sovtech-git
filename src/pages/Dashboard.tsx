@@ -158,7 +158,8 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { scores, recordSelection, sync, retrySync } = useRepoSelectionScores();
+  const { scores, recordSelection, sync, retrySync, enableSync } =
+    useRepoSelectionScores();
 
   const sorted = useMemo(
     () =>
@@ -218,6 +219,23 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
         >
           <p>{sync.message}</p>
           <ManualRetryAction onRetry={retrySync} />
+        </div>
+      )}
+
+      {sync.status === "local" && (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
+          role="status"
+        >
+          <span>{sync.message}</span>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-sm"
+            onClick={enableSync}
+          >
+            Sync across devices
+          </Button>
         </div>
       )}
 

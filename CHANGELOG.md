@@ -4,7 +4,7 @@
 
 ### Added
 
-- Sync private dashboard repository usage across devices through a separate encrypted event using the notification key, with compact device contributions, reduced weight for rapid repeat visits, slow historical decay, three-minute publication batches, offline persistence, and manual sync recovery.
+- Sync private dashboard repository usage across devices through a separate encrypted event using the notification key, with compact device contributions, reduced weight for rapid repeat visits, slow historical decay, three-minute publication batches, offline persistence, and manual sync recovery. Accounts without a notification key see their ordering as device-local and can enable sync explicitly.
 
 ### Changed
 

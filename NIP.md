@@ -156,6 +156,11 @@ receiving each other's relay events. Merging them never doubles the score.
 Unknown schemas and malformed relay payloads pause publication rather than
 replacing the event with empty state.
 
+Recording a visit never creates the notification key. Accounts without a key
+keep ordering on each device until the user explicitly enables sync, which
+creates the key under the same relay-coverage evidence as a first notification
+action.
+
 This is eventual reconciliation, not compare-and-swap. A device whose concurrent
 relay replacement loses must reconnect with its local state to restore unseen
 contributions. Expired contributions are pruned before merging; a new click

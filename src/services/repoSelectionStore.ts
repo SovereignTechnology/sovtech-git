@@ -8,7 +8,8 @@ import {
 } from "@/lib/repoSelectionState";
 
 export interface SelectionSyncStatus {
-  status: "checking" | "ready" | "paused";
+  /** "local": coverage is ready but no key exists; the user may enable sync. */
+  status: "checking" | "ready" | "paused" | "local";
   message: string;
 }
 
