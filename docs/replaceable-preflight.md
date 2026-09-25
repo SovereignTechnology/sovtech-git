@@ -427,9 +427,14 @@ instead of user-index relays, because generic indexes commonly reject kind
 
 Once this threshold is warm for the current two-filter lease, writers consume
 the EventStore winners and decrypted projection without an action-time relay
-request. A missing envelope may create a fresh random derived key only after the
-envelope-only lease proves absence at the same threshold and a bounded exact
-cache read has also found no cached envelope. Both exact notification
+request. A missing envelope may create a fresh random derived key only after
+absence is proven at a stricter bootstrap threshold and a bounded exact cache
+read has also found no cached envelope. Creating a key replaces the envelope
+for every device, so the bootstrap threshold requires an observed kind `10002`
+relay list rather than inferred absence of one, EOSE from every outbox relay
+(all but one when there are at least three), and the usual backup-relay
+quorum. Routine reads and publishes keep the lighter threshold above because a
+lost publication race is repaired by merge, while a replaced envelope is not. Both exact notification
 coordinates are hydrated from the cache when their owner starts, with cached
 events routed through the EventStore. Once per owner revision, its first
 bootstrap attempt checks the envelope and kind `10002` mailbox coordinates
