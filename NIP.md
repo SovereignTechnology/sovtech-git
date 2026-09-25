@@ -78,6 +78,98 @@ This is the same model used by [gitworkshop.dev](https://gitworkshop.dev) for no
 
 ---
 
+## Private repository selection scores (kind 30078)
+
+Dashboard usage is stored separately from notification read/archive state as
+NIP-78 application data. The `d` tag is `gitworkshop-repo-selections-v1`.
+The author is the existing notification keypair recovered from
+`git-notifications-nsec`; content is NIP-44 encrypted to that same pubkey.
+The notification envelope and `git-notifications-state` schema are unchanged.
+Repository coordinates and writer identifiers appear only inside ciphertext.
+
+The compact version-3 payload stores each repository coordinate once:
+
+```json
+{
+  "v": 3,
+  "r": {
+    "30617:<64-character-hex-pubkey>:<identifier>": {
+      "0123456789abcdef01234567": [1240, 1790000000]
+    }
+  }
+}
+```
+
+The inner key is a random 96-bit device identifier, persisted per account in
+localStorage. Each tuple is `[scoreHundredths, lastClickUnixSeconds]`: `1240`
+means 12.40 credits. A device's last-click time only moves forward, so clients
+merge contributions by repository and device, keeping the later time; the same
+second keeps the higher score, which already includes the earlier click's
+credit. Repository and device keys are sorted for deterministic serialization.
+Repeated snapshots are idempotent: clients never add a received whole-state
+total to their local score.
+
+Repository coordinates retain the full identifier, including empty identifiers
+and line breaks. Writers reject malformed kind/pubkey prefixes before recording
+a visit. Unreadable local caches, including unknown schema versions, are left
+intact rather than replaced with empty state; unknown remote versions still
+pause publication so older clients cannot overwrite a newer client's schema.
+
+Frequent visits raise a repository's rank. Rapid repeat visits count less, and
+older usage gradually fades. A first visit earns 100 hundredths. Later visits
+on the same device earn `round(10 + 90 * min(1, elapsedMilliseconds / 300000))`,
+where elapsed time since the previous click is clamped to zero. An immediate
+repeat earns 10 hundredths, a visit after one minute earns 28, and a visit after
+five minutes earns 100. The tuple's own second-resolution time is the previous
+click, so no separate click history is kept.
+
+Before adding a credit, decay that device's previous contribution to the new
+click time, retaining 90% per seven elapsed days, and round to the nearest
+hundredth. This is smooth elapsed-time decay, with no calendar-week switch.
+Clamp negative elapsed time to zero. Reads apply the same decay without
+rounding or writing; contributions below 0.01 credits are ignored and pruned.
+Sum surviving device contributions to rank repositories. Equal scores use the
+user's existing pin order, then recent repository activity. Public pins are
+never modified by usage.
+
+Tabs in one browser profile share the device identifier and one merged state
+in localStorage. Every merge that changes state rewrites that cache, and the
+storage event carries it to the other tabs, so a click in one tab is the
+previous click for the next tab. Two tabs that click the same repository within
+the same second before either has merged the other keep only one credit.
+Without persistent storage, or once a cache write fails, a session-only
+identifier is used so tabs never build on an unshared copy of one device.
+That fallback cannot preserve unpublished clicks or repeat-visit timing across
+reloads. New sessions contribute separate entries, which remain until they decay
+below the cutoff; clients do not cap them by silently deleting live scores.
+
+The merged local state stays after publication. Start a three-minute
+batch window with the first pending change; subsequent clicks join that batch
+without restarting the timer. When coverage is ready, publish only if live local
+contributions differ from the remote winner. Expiry alone never triggers an
+event. Offline updates survive reloads; restarting the owner starts a new batch
+window. The durable outbox retries the same signed event, and explicit sync retry
+can bypass the batch wait. Remote events remain continuously subscribed.
+Each tab owns its publisher, so tabs may publish equivalent snapshots before
+receiving each other's relay events. Merging them never doubles the score.
+
+Unknown schemas and malformed relay payloads pause publication rather than
+replacing the event with empty state.
+
+Recording a visit never creates the notification key. Accounts without a key
+keep ordering on each device until the user explicitly enables sync, which
+creates the key under the same relay-coverage evidence as a first notification
+action.
+
+This is eventual reconciliation, not compare-and-swap. A device whose concurrent
+relay replacement loses must reconnect with its local state to restore unseen
+contributions. Expired contributions are pruned before merging; a new click
+always carries a later time than anything it replaced. Payload size scales with
+repositories and devices; unusually large histories can still exceed encryption/relay limits
+and pause sync instead of silently discarding live contributions.
+
+---
+
 ## Pinned Git Repositories (kind 10617)
 
 A NIP-51 standard replaceable list that stores a user's curated, ordered set of their own repositories to highlight on their profile page.

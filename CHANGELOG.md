@@ -6,6 +6,13 @@
 
 - Search and filter repository workflow runs by workflow, trigger, status, branch, requester and coordinator, with responsive rows and expandable run details.
 
+- Sync private dashboard repository usage across devices through a separate encrypted event using the notification key, with compact device contributions, reduced weight for rapid repeat visits, slow historical decay, three-minute publication batches, offline persistence, and manual sync recovery. Accounts without a notification key see their ordering as device-local and can enable sync explicitly.
+
+### Changed
+
+- Require an observed relay list and coverage of every outbox relay (all but one when there are at least three) before creating the shared notification key. Routine notification sync keeps its existing relay quorum.
+- Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
+
 ### Fixed
 
 - Keep mention suggestions clickable inside dialogs, dismiss suggestions first with Escape, and fit them within the visible viewport.

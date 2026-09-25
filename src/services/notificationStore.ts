@@ -33,7 +33,10 @@
  *      by the dedicated notification keypair. Fetched once the notification
  *      pubkey is known (after the nsec envelope is decrypted).
  *
- * One account-owned subscription in notificationSync.ts covers both exact
+ * A separate gitworkshop-repo-selections-v1 event uses the same dedicated
+ * keypair for private dashboard ordering, without changing notification data.
+ *
+ * One account-owned subscription in notificationSync.ts covers all three exact
  * coordinates on outbox and fallback relays. It owns EOSE evidence,
  * decrypt/retry state, local-delta replay, and debounced publication.
  * Action implementations (markAsRead, etc.) live in notificationActions.ts.

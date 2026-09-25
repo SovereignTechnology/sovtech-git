@@ -58,6 +58,11 @@ import {
   userIdentityCoverage,
 } from "@/services/userIdentityCoverage";
 
+import {
+  repoSelectionFilter,
+  startRepoSelectionSync,
+} from "./repoSelectionSync";
+
 interface NotificationKeyEnvelope {
   "nsec-for-notification-state"?: string;
   /** Legacy field written before the purpose-specific field was introduced. */
@@ -97,6 +102,8 @@ export interface NotificationSyncController {
   enqueue(update: NotificationStateUpdater): void;
   /** Retry only the currently failed decrypt, coverage, or publish step. */
   retry(): void;
+  /** Create the notification key on the user's explicit request for ordering sync. */
+  enableRepoSelectionSync(): void;
   stop(): void;
 }
 
@@ -106,6 +113,8 @@ export interface NotificationRelayScope {
   lookups: string[];
   relays: string[];
   mailboxDiscovery: MailboxDiscovery;
+  /** A kind 10002 relay list was actually observed, not merely proven absent. */
+  hasMailboxEvent: boolean;
 }
 
 interface NsecCache {
@@ -283,7 +292,8 @@ function notificationGroupIds(pubkey: string): string[] {
 
 async function createNotificationSigner(
   pubkey: string,
-): Promise<ResolvedNotificationSigner> {
+  canCreate: () => boolean,
+): Promise<ResolvedNotificationSigner | null> {
   const userSigner = await activeUserSigner(pubkey);
   const secretKey = generateSecretKey();
   const hexKey = bytesToHex(secretKey);
@@ -301,6 +311,10 @@ async function createNotificationSigner(
     )
     .sign();
 
+  const { outboxStore } = await import("@/services/outbox");
+  // A signer prompt may outlive the owner or the evidence of key absence.
+  if (!canCreate()) return null;
+
   const signer = PrivateKeySigner.fromKey(secretKey);
   const resolved = { signer, envelopeEventId: signed.id };
   signerCache.set(pubkey, resolved);
@@ -311,7 +325,6 @@ async function createNotificationSigner(
   });
   eventStore.add(signed);
 
-  const { outboxStore } = await import("@/services/outbox");
   await outboxStore.publish(signed, notificationGroupIds(pubkey), {
     hidden: true,
   });
@@ -325,7 +338,7 @@ async function createNotificationSigner(
 async function resolveNotificationSigner(
   pubkey: string,
   envelope: NostrEvent | undefined,
-  allowCreate: boolean,
+  allowCreate: false | (() => boolean),
 ): Promise<ResolvedNotificationSigner | null> {
   const nsecCache = loadNsecCache(pubkey);
   const usableCache =
@@ -374,7 +387,7 @@ async function resolveNotificationSigner(
       return resolved;
     }
 
-    return allowCreate ? createNotificationSigner(pubkey) : null;
+    return allowCreate ? createNotificationSigner(pubkey, allowCreate) : null;
   })().finally(() => signerInFlight.delete(inFlightKey));
 
   signerInFlight.set(inFlightKey, promise);
@@ -418,6 +431,7 @@ export function notificationRelayScopeObservable(
           lookups,
           mailboxOutboxes !== undefined,
         ),
+        hasMailboxEvent: mailboxOutboxes !== undefined,
       };
     }),
     distinctUntilChanged(
@@ -434,7 +448,8 @@ export function notificationRelayScopeObservable(
         first.lookups.every(
           (relay, index) => relay === second.lookups[index],
         ) &&
-        first.mailboxDiscovery === second.mailboxDiscovery,
+        first.mailboxDiscovery === second.mailboxDiscovery &&
+        first.hasMailboxEvent === second.hasMailboxEvent,
     ),
   );
 }
@@ -453,6 +468,47 @@ function meetsNotificationCoverageThreshold(
   return coveredOutboxes >= 3 || coveredOutboxes / totalOutboxes >= 0.5;
 }
 
+/**
+ * Creating a key replaces the envelope for every device, so absence must be
+ * proven on the relays the envelope would live on: an observed relay list
+ * rather than an inferred lack of one, every outbox relay (all but one when
+ * there are at least three), and the usual backup-relay quorum.
+ */
+function meetsBootstrapCoverageThreshold(
+  coveredOutboxes: number,
+  totalOutboxes: number,
+  coveredFallbacks: number,
+  totalFallbacks: number,
+): boolean {
+  if (totalOutboxes === 0) return false;
+  const requiredOutboxes =
+    totalOutboxes >= 3 ? totalOutboxes - 1 : totalOutboxes;
+  if (coveredOutboxes < requiredOutboxes) return false;
+  return (
+    totalFallbacks === 0 ||
+    meetsBoundedTwoThirdsThreshold(coveredFallbacks, totalFallbacks)
+  );
+}
+
+function countRelayCoverage(
+  scope: NotificationRelayScope,
+  coverage: RelaySubscriptionCoverage,
+) {
+  const covered = (relays: string[]) =>
+    relays.filter((relay) => coverage.isCovered(relay)).length;
+  const inFlight = (relays: string[]) =>
+    relays.filter((relay) => isRelayCoverageInFlight(coverage, relay)).length;
+  const coveredOutboxes = covered(scope.outboxes);
+  const coveredFallbacks = covered(scope.fallbacks);
+  return {
+    coveredOutboxes,
+    coveredFallbacks,
+    possibleOutboxes: coveredOutboxes + inFlight(scope.outboxes),
+    possibleFallbacks: coveredFallbacks + inFlight(scope.fallbacks),
+    summary: `Outbox relays: ${coveredOutboxes}/${scope.outboxes.length} ready. Backup relays: ${coveredFallbacks}/${scope.fallbacks.length} ready.`,
+  };
+}
+
 function assessCoverage(
   scope: NotificationRelayScope,
   coverage: RelaySubscriptionCoverage,
@@ -468,44 +524,66 @@ function assessCoverage(
     };
   }
 
-  const coveredOutboxes = scope.outboxes.filter((relay) =>
-    coverage.isCovered(relay),
-  ).length;
-  const coveredFallbacks = scope.fallbacks.filter((relay) =>
-    coverage.isCovered(relay),
-  ).length;
-  const possibleOutboxes =
-    coveredOutboxes +
-    scope.outboxes.filter((relay) => isRelayCoverageInFlight(coverage, relay))
-      .length;
-  const possibleFallbacks =
-    coveredFallbacks +
-    scope.fallbacks.filter((relay) => isRelayCoverageInFlight(coverage, relay))
-      .length;
-  const summary = `Outbox relays: ${coveredOutboxes}/${scope.outboxes.length} ready. Backup relays: ${coveredFallbacks}/${scope.fallbacks.length} ready.`;
-
+  const counts = countRelayCoverage(scope, coverage);
   return {
     met: meetsNotificationCoverageThreshold(
-      coveredOutboxes,
+      counts.coveredOutboxes,
       scope.outboxes.length,
-      coveredFallbacks,
+      counts.coveredFallbacks,
       scope.fallbacks.length,
     ),
     possible: meetsNotificationCoverageThreshold(
-      possibleOutboxes,
+      counts.possibleOutboxes,
       scope.outboxes.length,
-      possibleFallbacks,
+      counts.possibleFallbacks,
       scope.fallbacks.length,
     ),
-    summary,
+    summary: counts.summary,
   };
 }
+
+/** Stricter evidence for the one destructive step: minting a new key. */
+function assessBootstrapCoverage(
+  scope: NotificationRelayScope,
+  coverage: RelaySubscriptionCoverage,
+): PreflightCoverageAssessment {
+  if (!scope.hasMailboxEvent) {
+    return {
+      met: false,
+      possible: scope.mailboxDiscovery === "checking",
+      summary:
+        scope.mailboxDiscovery === "checking"
+          ? "Mailbox discovery is still looking for your relay list."
+          : "No relay list (kind 10002) was found for your account. Publish your relay list in settings before a shared notification key can be created.",
+    };
+  }
+
+  const counts = countRelayCoverage(scope, coverage);
+  return {
+    met: meetsBootstrapCoverageThreshold(
+      counts.coveredOutboxes,
+      scope.outboxes.length,
+      counts.coveredFallbacks,
+      scope.fallbacks.length,
+    ),
+    possible: meetsBootstrapCoverageThreshold(
+      counts.possibleOutboxes,
+      scope.outboxes.length,
+      counts.possibleFallbacks,
+      scope.fallbacks.length,
+    ),
+    summary: `Creating the key needs every outbox relay checked. ${counts.summary}`,
+  };
+}
+
+type CoveragePurpose = "check" | "create";
 
 function coverageState(
   stage: NotificationSyncStage,
   assessment: PreflightCoverageAssessment,
   pendingChanges: boolean,
   relayCoverage: RelayCoverageGroup[],
+  purpose: CoveragePurpose,
 ): NotificationSyncState {
   if (assessment.possible) {
     return {
@@ -513,7 +591,10 @@ function coverageState(
       stage,
       pendingChanges,
       relayCoverage,
-      message: `Checking the encrypted notification ${stage}. ${assessment.summary}`,
+      message:
+        purpose === "create"
+          ? `Checking relay coverage before creating the shared notification key. ${assessment.summary}`
+          : `Checking the encrypted notification ${stage}. ${assessment.summary}`,
     };
   }
   return {
@@ -521,7 +602,10 @@ function coverageState(
     stage,
     pendingChanges,
     relayCoverage,
-    message: `Cross-device notification state cannot be checked safely yet. ${assessment.summary}`,
+    message:
+      purpose === "create"
+        ? `The shared notification key cannot be created safely yet. ${assessment.summary}`
+        : `Cross-device notification state cannot be checked safely yet. ${assessment.summary}`,
   };
 }
 
@@ -535,7 +619,7 @@ async function decryptStateEvent(
   return parseReadState(content);
 }
 
-/** Start the one account-owned warm owner for both notification coordinates. */
+/** Own the notification envelope, notification state, and repository scores. */
 export function startNotificationSync(
   pubkey: string,
   readState$: BehaviorSubject<NotificationReadState>,
@@ -553,6 +637,7 @@ export function startNotificationSync(
     lookups: [],
     relays: [],
     mailboxDiscovery: "checking",
+    hasMailboxEvent: false,
   };
   let coverage: RelaySubscriptionCoverage | undefined;
   let coverageChangesSub: Subscription | undefined;
@@ -584,10 +669,17 @@ export function startNotificationSync(
 
   const currentFilters = (notificationPubkey: string | null): Filter[] => [
     envelopeFilter(pubkey),
-    ...(notificationPubkey ? [stateFilter(notificationPubkey)] : []),
+    ...(notificationPubkey
+      ? [
+          stateFilter(notificationPubkey),
+          repoSelectionFilter(notificationPubkey),
+        ]
+      : []),
   ];
 
   const emitState = (next: NotificationSyncState) => {
+    if (next.stage === "envelope" || next.relayCoverage)
+      selectionSync.availability(next);
     if (!syncStateEquals(state$.getValue(), next)) state$.next(next);
   };
 
@@ -616,6 +708,7 @@ export function startNotificationSync(
   const emitCoverageState = (
     stage: NotificationSyncStage,
     assessment: PreflightCoverageAssessment,
+    purpose: CoveragePurpose = "check",
   ) => {
     const relayCoverage = [
       ...(relayScope.mailboxDiscovery === "known"
@@ -635,6 +728,7 @@ export function startNotificationSync(
       assessment,
       pendingUpdates.length > 0,
       relayCoverage,
+      purpose,
     );
     coverageBlocked = next.status === "paused";
     emitState(next);
@@ -656,6 +750,8 @@ export function startNotificationSync(
       }
     })();
   };
+
+  const selectionSync = startRepoSelectionSync(pubkey, requestReconcile);
 
   const restartWarmOwner = (notificationPubkey: string | null) => {
     ownerRevision += 1;
@@ -798,9 +894,24 @@ export function startNotificationSync(
       }
       // Confirmed envelope absence means no derived state coordinate exists.
       // Keep the envelope lease warm without prompting the account signer until
-      // the user actually changes notification state for the first time.
-      if (pendingUpdates.length === 0) {
+      // the user changes notification state for the first time or explicitly
+      // enables ordering sync. A passive dashboard click never creates the key:
+      // a persisted score would be a standing request to replace an envelope
+      // that this relay scope merely fails to return.
+      if (pendingUpdates.length === 0 && !selectionSync.keyRequested()) {
+        selectionSync.availability({
+          status: "local",
+          message: "Repository ordering is stored on this device.",
+        });
         emitReady();
+        return;
+      }
+
+      // Replacing the envelope orphans every other device's encrypted state,
+      // so absence needs stronger evidence than a routine publish.
+      const bootstrap = assessBootstrapCoverage(relayScope, activeCoverage);
+      if (!bootstrap.met) {
+        emitCoverageState("envelope", bootstrap, "create");
         return;
       }
 
@@ -824,7 +935,11 @@ export function startNotificationSync(
         resolvedSigner = await resolveNotificationSigner(
           pubkey,
           envelope,
-          true,
+          () =>
+            !stopped &&
+            revision === ownerRevision &&
+            !currentEvent(envelopeFilter(pubkey)) &&
+            assessBootstrapCoverage(relayScope, activeCoverage).met,
         );
       } catch (error) {
         if (stopped || revision !== ownerRevision) return;
@@ -852,6 +967,19 @@ export function startNotificationSync(
       emitCoverageState("state", assessment);
       return;
     }
+
+    const selectionSigner = resolvedSigner;
+    await selectionSync.reconcile(
+      selectionSigner.signer,
+      () =>
+        !stopped &&
+        revision === ownerRevision &&
+        resolvedSigner === selectionSigner &&
+        (currentEvent(envelopeFilter(pubkey))?.id ?? "absent") ===
+          envelopeSourceId &&
+        assessCoverage(relayScope, activeCoverage).met,
+    );
+    if (stopped || revision !== ownerRevision) return;
 
     const latest = currentEvent(stateFilter(notificationPubkey));
     if (latest?.id === lastPublishedEventId) {
@@ -929,6 +1057,7 @@ export function startNotificationSync(
     },
     retry() {
       if (stopped) return;
+      selectionSync.retry();
       const restartCoverage = coverageBlocked;
       failedEnvelopeId = null;
       failedStateId = null;
@@ -943,9 +1072,14 @@ export function startNotificationSync(
       if (restartCoverage) restartWarmOwner(scopeNotificationPubkey);
       else requestReconcile();
     },
+    enableRepoSelectionSync() {
+      if (stopped) return;
+      selectionSync.enable();
+    },
     stop() {
       if (stopped) return;
       stopped = true;
+      selectionSync.stop();
       ownerRevision += 1;
       if (publishTimer) clearTimeout(publishTimer);
       relayScopeSub.unsubscribe();

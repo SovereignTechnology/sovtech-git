@@ -20,7 +20,6 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
-  Pin,
   Search,
   Lock,
   Settings2,
@@ -37,9 +36,9 @@ import { UserAvatar, UserName } from "@/components/UserAvatar";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { useUserActivity } from "@/hooks/useUserActivity";
 import { useUserRepositories } from "@/hooks/useUserRepositories";
+import { useUserPinnedCoords } from "@/hooks/useUserPinnedRepos";
 import { useUserFollowedRepos } from "@/hooks/useUserFollowedRepos";
 import { useAccessiblePrivateRepositories } from "@/hooks/useAccessiblePrivateRepositories";
-import { useUserPinnedCoords } from "@/hooks/useUserPinnedRepos";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useUserProfileSubscription } from "@/hooks/useUserProfileSubscription";
@@ -47,6 +46,9 @@ import { useUserPath } from "@/hooks/useUserPath";
 import { useActiveAccount } from "applesauce-react/hooks";
 import { useProfile } from "@/hooks/useProfile";
 import { useDefaultRepoPath } from "@/hooks/useRepoPath";
+import { useRepoSelectionScores } from "@/hooks/useRepoSelectionScores";
+import { ManualRetryAction } from "@/components/ErrorRetryAction";
+import { compareBySelection } from "@/lib/repoSelectionScore";
 
 import { useState, useMemo } from "react";
 import type { ResolvedRepo } from "@/lib/nip34";
@@ -89,12 +91,12 @@ function GreetingHeader({ pubkey }: { pubkey: string }) {
  */
 function RepoListItem({
   repo,
-  isPinned,
   hideAuthor,
+  onSelect,
 }: {
   repo: ResolvedRepo;
-  isPinned?: boolean;
   hideAuthor?: boolean;
+  onSelect?: () => void;
 }) {
   const repoPath = useDefaultRepoPath(repo);
   const name = repo.name || repo.dTag;
@@ -104,11 +106,9 @@ function RepoListItem({
   return (
     <Link
       to={repoPath}
+      onClick={onSelect}
       className="group flex items-center gap-1.5 px-1.5 py-1 -mx-1.5 rounded-md hover:bg-muted/50 transition-colors min-w-0"
     >
-      {isPinned && (
-        <Pin className="h-3 w-3 text-muted-foreground/50 shrink-0 -rotate-45" />
-      )}
       {!hideAuthor && (
         <>
           <UserAvatar
@@ -153,29 +153,22 @@ const INITIAL_VISIBLE = 15;
 
 function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const repos = useUserRepositories(pubkey);
-  const pinnedCoords = useUserPinnedCoords(pubkey);
+  const pinnedCoordinates = useUserPinnedCoords(pubkey);
   const userPath = useUserPath(pubkey);
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
-
-  const pinnedSet = useMemo(() => new Set(pinnedCoords ?? []), [pinnedCoords]);
+  const { scores, recordSelection, sync, retrySync, enableSync } =
+    useRepoSelectionScores();
 
   const sorted = useMemo(
     () =>
       repos
-        ? [...repos].sort((a, b) => {
-            const aCoord = `30617:${a.selectedMaintainer}:${a.dTag}`;
-            const bCoord = `30617:${b.selectedMaintainer}:${b.dTag}`;
-            const aPin = pinnedCoords?.indexOf(aCoord) ?? -1;
-            const bPin = pinnedCoords?.indexOf(bCoord) ?? -1;
-            if (aPin !== -1 && bPin !== -1) return aPin - bPin;
-            if (aPin !== -1) return -1;
-            if (bPin !== -1) return 1;
-            return b.updatedAt - a.updatedAt;
-          })
+        ? [...repos].sort(
+            compareBySelection(scores, Date.now(), pinnedCoordinates),
+          )
         : undefined,
-    [repos, pinnedCoords],
+    [repos, scores, pinnedCoordinates],
   );
 
   const trimmed = search.trim().toLowerCase();
@@ -219,6 +212,33 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
         </div>
       </div>
 
+      {sync.status === "paused" && (
+        <div
+          className="mb-3 space-y-2 text-sm text-muted-foreground"
+          role="status"
+        >
+          <p>{sync.message}</p>
+          <ManualRetryAction onRetry={retrySync} />
+        </div>
+      )}
+
+      {sync.status === "local" && (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
+          role="status"
+        >
+          <span>{sync.message}</span>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-sm"
+            onClick={enableSync}
+          >
+            Sync across devices
+          </Button>
+        </div>
+      )}
+
       {sorted && sorted.length > 0 && (
         <div className="relative mb-3">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
@@ -241,17 +261,14 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
         ) : displayRepos && displayRepos.length > 0 ? (
           <>
             <div className="space-y-0.5">
-              {displayRepos.map((repo) => {
-                const coord = `30617:${repo.selectedMaintainer}:${repo.dTag}`;
-                return (
-                  <RepoListItem
-                    key={repo.componentId}
-                    repo={repo}
-                    isPinned={pinnedSet.has(coord)}
-                    hideAuthor
-                  />
-                );
-              })}
+              {displayRepos.map((repo) => (
+                <RepoListItem
+                  key={repo.componentId}
+                  repo={repo}
+                  hideAuthor
+                  onSelect={() => recordSelection(repo.selectedCoordinate)}
+                />
+              ))}
             </div>
             {hasMore && (
               <div className="mt-3 pt-2 border-t border-border/40">
