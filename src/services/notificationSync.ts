@@ -292,7 +292,8 @@ function notificationGroupIds(pubkey: string): string[] {
 
 async function createNotificationSigner(
   pubkey: string,
-): Promise<ResolvedNotificationSigner> {
+  canCreate: () => boolean,
+): Promise<ResolvedNotificationSigner | null> {
   const userSigner = await activeUserSigner(pubkey);
   const secretKey = generateSecretKey();
   const hexKey = bytesToHex(secretKey);
@@ -310,6 +311,10 @@ async function createNotificationSigner(
     )
     .sign();
 
+  const { outboxStore } = await import("@/services/outbox");
+  // A signer prompt may outlive the owner or the evidence of key absence.
+  if (!canCreate()) return null;
+
   const signer = PrivateKeySigner.fromKey(secretKey);
   const resolved = { signer, envelopeEventId: signed.id };
   signerCache.set(pubkey, resolved);
@@ -320,7 +325,6 @@ async function createNotificationSigner(
   });
   eventStore.add(signed);
 
-  const { outboxStore } = await import("@/services/outbox");
   await outboxStore.publish(signed, notificationGroupIds(pubkey), {
     hidden: true,
   });
@@ -334,7 +338,7 @@ async function createNotificationSigner(
 async function resolveNotificationSigner(
   pubkey: string,
   envelope: NostrEvent | undefined,
-  allowCreate: boolean,
+  allowCreate: false | (() => boolean),
 ): Promise<ResolvedNotificationSigner | null> {
   const nsecCache = loadNsecCache(pubkey);
   const usableCache =
@@ -383,7 +387,7 @@ async function resolveNotificationSigner(
       return resolved;
     }
 
-    return allowCreate ? createNotificationSigner(pubkey) : null;
+    return allowCreate ? createNotificationSigner(pubkey, allowCreate) : null;
   })().finally(() => signerInFlight.delete(inFlightKey));
 
   signerInFlight.set(inFlightKey, promise);
@@ -931,7 +935,11 @@ export function startNotificationSync(
         resolvedSigner = await resolveNotificationSigner(
           pubkey,
           envelope,
-          true,
+          () =>
+            !stopped &&
+            revision === ownerRevision &&
+            !currentEvent(envelopeFilter(pubkey)) &&
+            assessBootstrapCoverage(relayScope, activeCoverage).met,
         );
       } catch (error) {
         if (stopped || revision !== ownerRevision) return;
