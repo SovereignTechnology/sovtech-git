@@ -473,6 +473,45 @@ between concurrent clients are excluded. Warm-subscription events reconcile
 cross-client updates, while the durable outbox reports publication delivery
 separately.
 
+## Repository selection state
+
+Private dashboard ordering is **convergent application state** with the same
+confidential-scope, derived-signer, and high-frequency-merge modifiers as
+notification state. It uses a separate kind `30078` coordinate,
+`gitworkshop-repo-selections-v1`, authored and NIP-44 encrypted by the existing
+notification keypair. Neither notification coordinate nor its payload changes.
+
+The notification owner now includes a third exact author/identifier filter for
+this coordinate in its single unpaginated request. All three filters start
+together when the key is cached. Discovering a key replaces the envelope-only
+lease with a fresh three-filter lease; previous coverage never authorizes the
+new coordinate. Cache hydration, mailbox discovery, relay groups, and quorum
+follow the notification policy above. Repository selections never request key
+bootstrap: until a notification action creates the key, ordering stays local
+to each device. A passive dashboard click is not enough intent to replace an
+envelope that the current relay scope merely fails to return.
+
+The score controller consumes the winner and signer supplied by that owner,
+without loaders or extra relay subscriptions. Its own three-minute batch timer, validation,
+failed-decrypt/publish latch, and dashboard manual retry keep its errors separate
+from notification read/archive state. Notification payload errors do not block
+score synchronization. Envelope and coverage failures apply to both writers.
+After asynchronous decryption/signing, verify the owner revision, envelope,
+coverage, and current score winner before handing a write to the durable outbox.
+Teardown cancels queued work and prevents stale account publication.
+
+Writers merge time-ordered contributions from each stable device;
+see `NIP.md` for the compact integer schema, click weighting, decay, and merge
+rules. Tabs share one device ID and converge through the merged localStorage
+cache, which survives reloads and losing concurrent relay replacements. The first pending change starts a
+three-minute batch window; later changes do not extend it. Manual retry can
+bypass batching. Time passing alone never triggers a publication. A merged
+snapshot is republished only when it contributes live data absent from the remote
+winner. This is eventual reconciliation; losing data can only be recovered while
+some client still retains it. No compare-and-swap, deletion discovery, automatic
+UI mutation retry, or post-write relay query is introduced. Both writers retain
+the durable outbox's delivery retries, independently of preflight readiness.
+
 ## Software publication
 
 NIP-82 software metadata is a **publisher-owned addressable** category with two
@@ -544,16 +583,16 @@ owned by the GitWorkshop browser application. Adding a writer or making one of
 the read-only rows writable requires updating this table and its category
 policy in the same change.
 
-| Writer family                         | Kinds                                                                           | Classification and coverage                                                                                                                                                          |
-| ------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Account identity and lists            | `0`, `3`, `10002`, `10017`, `10018`, `10063`, `10317`, `10318`, `10617`         | Personal singleton; one account-owned identity lease plus the shared deletion lease where required. Initial account creation of `0` and `10002` is the bootstrap-identity exception. |
-| Notification sync                     | Two `30078` coordinates                                                         | Convergent application state; one account-owned encrypted envelope/state owner.                                                                                                      |
-| Repository metadata and state         | `30617`, `30618`                                                                | Repository authority graph and repository operational state; one page-owned repository evidence scope plus focused evidence only for genuinely new author coordinates.               |
-| Software applications and releases    | `32267`, `30063`                                                                | Publisher-owned addressable; one publisher lease plus one debounced exact release-candidate lease.                                                                                   |
-| Software assets                       | `3063`                                                                          | Regular append-only event; no replaceable preflight.                                                                                                                                 |
-| Collaboration and repository controls | `5`, `7`, `1111`, `1621`, `1624`, `1630`-`1633`, `1985`, `9840`, `9843`, `9844` | Regular events. They may need authorization and delivery checks, but cannot overwrite an earlier event by NIP-01 replacement.                                                        |
-| Repository secret updates             | `29846`                                                                         | Ephemeral encrypted mutation; recipient advertisement freshness and relay acceptance are its safeguards.                                                                             |
-| CI advertisements and progress        | `19843`, `19844`, `19845`, `39842`, `39844`                                     | Read-only in GitWorkshop. External CI services own these replaceable/addressable writers and their consistency policy.                                                               |
+| Writer family                              | Kinds                                                                           | Classification and coverage                                                                                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Account identity and lists                 | `0`, `3`, `10002`, `10017`, `10018`, `10063`, `10317`, `10318`, `10617`         | Personal singleton; one account-owned identity lease plus the shared deletion lease where required. Initial account creation of `0` and `10002` is the bootstrap-identity exception. |
+| Notification and repository selection sync | Three `30078` coordinates                                                       | Convergent application state; one account-owned encrypted envelope/state owner.                                                                                                      |
+| Repository metadata and state              | `30617`, `30618`                                                                | Repository authority graph and repository operational state; one page-owned repository evidence scope plus focused evidence only for genuinely new author coordinates.               |
+| Software applications and releases         | `32267`, `30063`                                                                | Publisher-owned addressable; one publisher lease plus one debounced exact release-candidate lease.                                                                                   |
+| Software assets                            | `3063`                                                                          | Regular append-only event; no replaceable preflight.                                                                                                                                 |
+| Collaboration and repository controls      | `5`, `7`, `1111`, `1621`, `1624`, `1630`-`1633`, `1985`, `9840`, `9843`, `9844` | Regular events. They may need authorization and delivery checks, but cannot overwrite an earlier event by NIP-01 replacement.                                                        |
+| Repository secret updates                  | `29846`                                                                         | Ephemeral encrypted mutation; recipient advertisement freshness and relay acceptance are its safeguards.                                                                             |
+| CI advertisements and progress             | `19843`, `19844`, `19845`, `39842`, `39844`                                     | Read-only in GitWorkshop. External CI services own these replaceable/addressable writers and their consistency policy.                                                               |
 
 The inventory also covers the read path immediately surrounding each
 writer. Warm preflight code must read an in-memory EventStore timeline or

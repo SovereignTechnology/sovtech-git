@@ -47,6 +47,7 @@ import { useActiveAccount } from "applesauce-react/hooks";
 import { useProfile } from "@/hooks/useProfile";
 import { useDefaultRepoPath } from "@/hooks/useRepoPath";
 import { useRepoSelectionScores } from "@/hooks/useRepoSelectionScores";
+import { ManualRetryAction } from "@/components/ErrorRetryAction";
 import { compareBySelection } from "@/lib/repoSelectionScore";
 
 import { useState, useMemo } from "react";
@@ -157,7 +158,7 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const [expanded, setExpanded] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { scores, recordSelection } = useRepoSelectionScores();
+  const { scores, recordSelection, sync, retrySync } = useRepoSelectionScores();
 
   const sorted = useMemo(
     () =>
@@ -209,6 +210,16 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
           </Button>
         </div>
       </div>
+
+      {sync.status === "paused" && (
+        <div
+          className="mb-3 space-y-2 text-sm text-muted-foreground"
+          role="status"
+        >
+          <p>{sync.message}</p>
+          <ManualRetryAction onRetry={retrySync} />
+        </div>
+      )}
 
       {sorted && sorted.length > 0 && (
         <div className="relative mb-3">

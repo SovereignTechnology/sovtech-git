@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { decayedScore, type SelectionScores } from "./repoSelectionScore";
 
+export const REPO_SELECTION_D_TAG = "gitworkshop-repo-selections-v1";
 export const CLICK_RECOVERY_MS = 5 * 60 * 1000;
 const coordinateSchema = z.string().regex(/^30617:[0-9a-f]{64}:.*$/s);
 const deviceSchema = z.string().regex(/^[0-9a-f]{24}$/);

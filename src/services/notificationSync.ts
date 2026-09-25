@@ -58,6 +58,11 @@ import {
   userIdentityCoverage,
 } from "@/services/userIdentityCoverage";
 
+import {
+  repoSelectionFilter,
+  startRepoSelectionSync,
+} from "./repoSelectionSync";
+
 interface NotificationKeyEnvelope {
   "nsec-for-notification-state"?: string;
   /** Legacy field written before the purpose-specific field was introduced. */
@@ -535,7 +540,7 @@ async function decryptStateEvent(
   return parseReadState(content);
 }
 
-/** Start the one account-owned warm owner for both notification coordinates. */
+/** Own the notification envelope, notification state, and repository scores. */
 export function startNotificationSync(
   pubkey: string,
   readState$: BehaviorSubject<NotificationReadState>,
@@ -584,10 +589,17 @@ export function startNotificationSync(
 
   const currentFilters = (notificationPubkey: string | null): Filter[] => [
     envelopeFilter(pubkey),
-    ...(notificationPubkey ? [stateFilter(notificationPubkey)] : []),
+    ...(notificationPubkey
+      ? [
+          stateFilter(notificationPubkey),
+          repoSelectionFilter(notificationPubkey),
+        ]
+      : []),
   ];
 
   const emitState = (next: NotificationSyncState) => {
+    if (next.stage === "envelope" || next.relayCoverage)
+      selectionSync.availability(next);
     if (!syncStateEquals(state$.getValue(), next)) state$.next(next);
   };
 
@@ -656,6 +668,8 @@ export function startNotificationSync(
       }
     })();
   };
+
+  const selectionSync = startRepoSelectionSync(pubkey, requestReconcile);
 
   const restartWarmOwner = (notificationPubkey: string | null) => {
     ownerRevision += 1;
@@ -799,7 +813,14 @@ export function startNotificationSync(
       // Confirmed envelope absence means no derived state coordinate exists.
       // Keep the envelope lease warm without prompting the account signer until
       // the user actually changes notification state for the first time.
+      // Repository selections never create the key: a passive dashboard click
+      // must not replace an envelope that this relay scope cannot see.
       if (pendingUpdates.length === 0) {
+        selectionSync.availability({
+          status: "ready",
+          message:
+            "Repository ordering is stored on this device. Cross-device sync starts once a notification key exists.",
+        });
         emitReady();
         return;
       }
@@ -852,6 +873,19 @@ export function startNotificationSync(
       emitCoverageState("state", assessment);
       return;
     }
+
+    const selectionSigner = resolvedSigner;
+    await selectionSync.reconcile(
+      selectionSigner.signer,
+      () =>
+        !stopped &&
+        revision === ownerRevision &&
+        resolvedSigner === selectionSigner &&
+        (currentEvent(envelopeFilter(pubkey))?.id ?? "absent") ===
+          envelopeSourceId &&
+        assessCoverage(relayScope, activeCoverage).met,
+    );
+    if (stopped || revision !== ownerRevision) return;
 
     const latest = currentEvent(stateFilter(notificationPubkey));
     if (latest?.id === lastPublishedEventId) {
@@ -929,6 +963,7 @@ export function startNotificationSync(
     },
     retry() {
       if (stopped) return;
+      selectionSync.retry();
       const restartCoverage = coverageBlocked;
       failedEnvelopeId = null;
       failedStateId = null;
@@ -946,6 +981,7 @@ export function startNotificationSync(
     stop() {
       if (stopped) return;
       stopped = true;
+      selectionSync.stop();
       ownerRevision += 1;
       if (publishTimer) clearTimeout(publishTimer);
       relayScopeSub.unsubscribe();

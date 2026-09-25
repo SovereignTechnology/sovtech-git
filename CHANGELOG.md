@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Sync private dashboard repository usage across devices through a separate encrypted event using the notification key, with compact device contributions, reduced weight for rapid repeat visits, slow historical decay, three-minute publication batches, offline persistence, and manual sync recovery.
+
 ### Changed
 
 - Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.

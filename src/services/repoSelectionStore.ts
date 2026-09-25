@@ -7,6 +7,11 @@ import {
   type RepoSelectionState,
 } from "@/lib/repoSelectionState";
 
+export interface SelectionSyncStatus {
+  status: "checking" | "ready" | "paused";
+  message: string;
+}
+
 /**
  * One merged state per account in localStorage. Tabs converge through storage
  * events: every merge that changes state rewrites the cache, and each device
@@ -17,10 +22,15 @@ function createStore(pubkey: string) {
   const cacheKey = `${prefix}cache`;
   const deviceKey = `${prefix}device`;
   const listeners = new Set<() => void>();
+  const statusListeners = new Set<() => void>();
   let state = emptySelectionState();
   let sessionDevice: string | undefined;
   /** Once a cache write fails, clicks stay on a session-only device. */
   let sessionOnly = false;
+  let status: SelectionSyncStatus = {
+    status: "checking",
+    message: "Checking repository ordering sync…",
+  };
 
   function read(raw: string | null): RepoSelectionState | undefined {
     if (raw === null) return emptySelectionState();
@@ -78,6 +88,12 @@ function createStore(pubkey: string) {
       if (--consumers === 0) window.removeEventListener("storage", onStorage);
     };
   }
+  function setStatus(next: SelectionSyncStatus) {
+    if (status.status === next.status && status.message === next.message)
+      return;
+    status = next;
+    statusListeners.forEach((listener) => listener());
+  }
   const randomDevice = () =>
     bytesToHex(crypto.getRandomValues(new Uint8Array(12)));
   /** Stable per browser profile; a session-only ID when storage is absent. */
@@ -102,6 +118,14 @@ function createStore(pubkey: string) {
         listeners.delete(listener);
       };
     },
+    getStatus: () => status,
+    subscribeStatus: (listener: () => void) => {
+      statusListeners.add(listener);
+      return () => {
+        statusListeners.delete(listener);
+      };
+    },
+    setStatus,
     merge,
     record(coordinate: string) {
       restore();
