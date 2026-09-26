@@ -1,0 +1,20 @@
+# Upstream paths the fork deletes. The sync script re-deletes every entry
+# after each upstream merge, because upstream keeps editing them. A trailing
+# slash means the whole directory, including files upstream adds later.
+#
+# Upstream publishing identity and deploy jobs (a third-party ngit-ci could
+# run the workflows once this repository is announced on GRASP):
+.ngit/
+.nsite/
+zapstore.yaml
+# Agent and MCP config that auto-loads in editors and agent sessions
+# (unpinned npx MCP server, a remote MCP, a skill that instructs a forbidden
+# login command, a stale theming skill):
+.mcp.json
+.vscode/mcp.json
+opencode.json
+.claude/skills/ngit/
+.agents/skills/ngit/
+.opencode/skills/theming/
+# Android App Links file pinning upstream's package and signing certificate:
+public/.well-known/assetlinks.json
