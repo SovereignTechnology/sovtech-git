@@ -1,0 +1,7 @@
+# sha256 of upstream's palette: the :root and .dark blocks of src/index.css,
+# each as "selector{body}", joined with newlines (overlay_guard.py
+# upstream_palette). src/sovtech/theme.css redefines every variable in them.
+# When an upstream sync changes the palette, gate.sh --phase history fails
+# and prints the new digest: port the change to theme.css, then record the
+# digest here. Sync branches may change this file.
+1fba8c1c8146a47840a147d4e01a67e663d2d61dbf139843591a2d74805cfde1

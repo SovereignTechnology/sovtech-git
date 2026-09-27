@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,15 +5,12 @@ import colors from "tailwindcss/colors.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRAND_STEPS, sovtechTheme } from "@/sovtech/tailwind-brand";
 
-/**
- * sha256 of upstream's `:root` and `.dark` blocks in src/index.css, as
- * paletteText() joins them. When an upstream sync changes the palette, this
- * test fails: port the change to src/sovtech/theme.css, then update the
- * digest.
+/*
+ * These tests hold the variable sets and the import order. The gate holds
+ * the rest, outside any dependency code: the digest of upstream's palette
+ * (ci/sovtech/upstream-palette.sha256, history phase) and theme.css's place
+ * in the built CSS (overlay_guard.py theme-css-order, dist phase).
  */
-const UPSTREAM_PALETTE_SHA256 =
-  "1fba8c1c8146a47840a147d4e01a67e663d2d61dbf139843591a2d74805cfde1";
-
 const PALETTE_BLOCK = /(^|\s)(:root|\.dark)\s*\{([^}]*)\}/g;
 const VARIABLE_NAME = /--([\w-]+)\s*:/g;
 const SIDE_EFFECT_IMPORT = /^import\s+"([^"]+)";$/gm;
@@ -41,10 +37,6 @@ function paletteBlocks(css: string): PaletteBlock[] {
   return blocks;
 }
 
-function paletteText(blocks: PaletteBlock[]): string {
-  return blocks.map((block) => `${block.selector}{${block.body}}`).join("\n");
-}
-
 function variableNames(body: string): string[] {
   return Array.from(body.matchAll(VARIABLE_NAME), (match) => match[1]).sort();
 }
@@ -54,16 +46,6 @@ describe("theme.css", () => {
   const theme = paletteBlocks(readRepoFile("src/sovtech/theme.css"));
   const brandSteps = BRAND_STEPS.map((step) => `brand-${step}`);
   const brandNames = [...brandSteps, "brand-foreground"].sort();
-
-  it("was written against upstream's current palette", () => {
-    const digest = createHash("sha256")
-      .update(paletteText(upstream))
-      .digest("hex");
-    expect(
-      digest,
-      "upstream changed the palette in src/index.css: port it to src/sovtech/theme.css, then update UPSTREAM_PALETTE_SHA256",
-    ).toBe(UPSTREAM_PALETTE_SHA256);
-  });
 
   it("redefines exactly upstream's variables in each block, plus the brand scale", () => {
     expect(upstream.map((block) => block.selector)).toEqual([":root", ".dark"]);

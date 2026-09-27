@@ -10,8 +10,9 @@
  * Both blocks redefine every variable upstream defines in them. A variable
  * missing from the dark block would fall back to this file's light value,
  * which comes after upstream's dark block and would win in dark mode.
- * src/sovtech/theme.test.ts holds the variable sets and a digest of
- * upstream's palette, so an upstream palette change fails the tests.
+ * src/sovtech/theme.test.ts holds the variable sets; the gate holds a digest
+ * of upstream's palette (ci/sovtech/upstream-palette.sha256) and checks that
+ * these blocks come after every upstream palette block in the built CSS.
  *
  * --brand-50 to --brand-950 back Tailwind's pink-* classes (upstream's accent;
  * see tailwind-brand.ts) as "H S% L%" triplets, so opacity modifiers such as

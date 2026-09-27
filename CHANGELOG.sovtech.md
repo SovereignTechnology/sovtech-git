@@ -43,4 +43,8 @@ fork never edits.
   system kept. The chevron-B mark (`src/sovtech/brand/`) replaces upstream's
   favicons and app icons and adds the NIP-11 `public/icon.png`, all generated
   by `ci/sovtech/gen-brand-assets.py`. `nostr.json` names only SovTech, and
-  `public/LICENSE.txt` carries the MIT notice.
+  `public/LICENSE.txt` carries the MIT notice. The gate records upstream's
+  palette digest (`ci/sovtech/upstream-palette.sha256`), checks that
+  theme.css is the last palette in the built CSS and that no lazy chunk,
+  inline style or script sets a palette variable, and checks the committed
+  brand assets without Chromium (`gen-brand-assets.py --check`).
