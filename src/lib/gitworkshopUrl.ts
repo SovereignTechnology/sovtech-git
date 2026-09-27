@@ -1,4 +1,7 @@
+import { WEB_HOSTS } from "@/sovtech/defaults";
+
 const GITWORKSHOP_HOSTS = new Set(["gitworkshop.dev", "www.gitworkshop.dev"]);
+for (const host of WEB_HOSTS) GITWORKSHOP_HOSTS.add(host);
 
 /**
  * Returns an in-app React Router target for an approved public GitWorkshop URL.

@@ -7,6 +7,11 @@ import {
 } from "rxjs";
 import { map, distinctUntilChanged } from "rxjs/operators";
 import { normalizeUrl } from "@/lib/url";
+import {
+  FALLBACK_RELAYS,
+  GRASP_SERVERS,
+  NOSTR_CONNECT_RELAYS,
+} from "@/sovtech/defaults";
 
 /** Normalize and deduplicate a list of relay URLs. */
 function normalizeRelayList(urls: readonly string[]): string[] {
@@ -93,12 +98,7 @@ export function persist<T>(
  * Fallback relay list used when no other relay source is available.
  * Users can customize this in settings.
  */
-export const DEFAULT_FALLBACK_RELAYS = normalizeRelayList([
-  "wss://relay.ditto.pub",
-  "wss://relay.damus.io",
-  "wss://nos.lol",
-  "wss://relay.primal.net",
-]);
+export const DEFAULT_FALLBACK_RELAYS = normalizeRelayList(FALLBACK_RELAYS);
 
 export const fallbackRelays = new BehaviorSubject<string[]>(
   DEFAULT_FALLBACK_RELAYS,
@@ -222,13 +222,7 @@ persist(relayCurationMode, "relayCurationMode", {
  * changing this setting only affects *new* remote-signer logins. Existing
  * accounts continue to use the relays embedded in their bunker URI.
  */
-export const DEFAULT_NOSTR_CONNECT_RELAYS: readonly string[] = [
-  "wss://bucket.coracle.social",
-  "wss://nos.lol",
-  "wss://relay.ditto.pub",
-  "wss://relay.primal.net",
-  "wss://nrs.primal.net",
-];
+export const DEFAULT_NOSTR_CONNECT_RELAYS = NOSTR_CONNECT_RELAYS;
 
 export const defaultNostrConnectRelays = new BehaviorSubject<string[]>(
   normalizeRelayList(DEFAULT_NOSTR_CONNECT_RELAYS),
@@ -258,11 +252,7 @@ export const nostrConnectRelaysCustomised$ = isCustomised$(
  * Secure service addresses omit their scheme and may include a mount path.
  * Plaintext services retain an `http://` prefix.
  */
-export const DEFAULT_GRASP_SERVERS: readonly string[] = [
-  "relay.ngit.dev",
-  "gitnostr.com",
-  "ngit.danconwaydev.com",
-];
+export const DEFAULT_GRASP_SERVERS = GRASP_SERVERS;
 
 // ---------------------------------------------------------------------------
 // Theme

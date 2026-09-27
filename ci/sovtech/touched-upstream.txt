@@ -7,4 +7,10 @@
 # CHANGELOG.sovtech.md, CLAUDE.md, .gitlab-ci.yml, renovate.json), the
 # public/ swaps in asset-swaps.tsv, and deletions listed in fork-deleted.txt.
 #
-# Seams arrive with the overlay MRs. None are edited yet.
+# Seams arrive with the overlay MRs.
+
+# Phase 2.4 defaults: relay, GRASP and host lists from src/sovtech/defaults.ts.
+src/actions/account.ts 7
+src/lib/gitworkshopUrl.ts 3
+src/lib/repoUpstreamInput.ts 6
+src/services/settings.ts 26

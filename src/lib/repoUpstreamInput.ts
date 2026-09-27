@@ -7,6 +7,7 @@ import {
   type RepoUpstream,
 } from "@/lib/nip34";
 import { parseRepoRoute, repoToNostrCloneUrl } from "@/lib/routeUtils";
+import { isSovtechWebHost } from "@/sovtech/defaults";
 
 export interface PendingNip05Upstream {
   nip05: string;
@@ -103,6 +104,7 @@ function parseNostrCloneUpstream(input: string): ParsedRepoLink | undefined {
 
 function isGitworkshopHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
+  if (isSovtechWebHost(lower)) return true;
   return lower === "gitworkshop.dev" || lower === "www.gitworkshop.dev";
 }
 
@@ -110,7 +112,9 @@ function normalizeGitworkshopRepoPath(path: string): string {
   const segments = path.split("/").filter(Boolean);
   const first = segments[0]?.toLowerCase();
   const withoutHost =
-    first === "gitworkshop.dev" || first === "www.gitworkshop.dev"
+    first === "gitworkshop.dev" ||
+    first === "www.gitworkshop.dev" ||
+    isSovtechWebHost(first)
       ? segments.slice(1)
       : segments;
   const prefix = withoutHost[0];

@@ -36,3 +36,9 @@ fork never edits.
   under `ci/sovtech` is refused. `parallel` is refused in the CI config, the
   drift schedule carries no variables, and `SOVTECH.md` records the
   protected-runner token rotation policy.
+- SovTech defaults (`src/sovtech/defaults.ts`): fallback relays and GRASP
+  servers now lead with git.sovit.xyz and git.buildinelsalvador.com, nos.lol
+  is gone from every default list (relay.nos.social for NIP-46,
+  relay.primal.net for new accounts), and links to git.sovtech.pro and
+  git.sovit.xyz are recognised next to upstream's host. The git index,
+  lookup relays, Blossom servers and CORS proxy keep upstream's values.

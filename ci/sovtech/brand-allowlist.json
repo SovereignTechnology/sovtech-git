@@ -25,13 +25,13 @@
     },
     {
       "term": "danconwaydev",
-      "count": 4,
+      "count": 3,
       "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.3 shell (About page)"
     },
     {
       "term": "nos-lol",
-      "count": 5,
-      "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.4 defaults (relay lists)"
+      "count": 2,
+      "removed_by": "Phase 2.2 assets (.well-known/nostr.json)"
     },
     {
       "term": "dan-hex",

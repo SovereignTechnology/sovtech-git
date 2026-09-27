@@ -27,13 +27,10 @@ import type { ProfileContent } from "applesauce-core/helpers";
 import { kinds } from "nostr-tools";
 import { outboxStore } from "@/services/outbox";
 import { eventStore } from "@/services/nostr";
+import { BOOTSTRAP_RELAYS } from "@/sovtech/defaults";
 
 /** Relays every new account is bootstrapped onto (inbox + outbox). */
-export const ACCOUNT_BOOTSTRAP_RELAYS = [
-  "wss://relay.ditto.pub",
-  "wss://relay.damus.io",
-  "wss://nos.lol",
-];
+export const ACCOUNT_BOOTSTRAP_RELAYS = [...BOOTSTRAP_RELAYS];
 
 /**
  * Group IDs used for publishing bootstrap events.
