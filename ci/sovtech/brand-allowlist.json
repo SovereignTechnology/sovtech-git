@@ -5,6 +5,11 @@
       "term": "gitworkshop-host",
       "count": 6,
       "reason": "Host-set literals that recognise upstream links pasted as input, which the fork keeps: src/lib/gitworkshopUrl.ts:1 (2) and src/lib/repoUpstreamInput.ts:106,113 (4)."
+    },
+    {
+      "term": "danconwaydev",
+      "count": 1,
+      "reason": "The MIT copyright notice the licence requires to be kept: public/LICENSE.txt (Copyright (c) 2025 DanConwayDev)."
     }
   ],
   "pending": [
@@ -25,18 +30,13 @@
     },
     {
       "term": "danconwaydev",
-      "count": 4,
-      "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.3 shell (About page)"
+      "count": 3,
+      "removed_by": "Phase 2.3 shell (About page)"
     },
     {
       "term": "nos-lol",
-      "count": 5,
-      "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.4 defaults (relay lists)"
-    },
-    {
-      "term": "dan-hex",
-      "count": 4,
-      "removed_by": "Phase 2.2 assets (.well-known/nostr.json)"
+      "count": 3,
+      "removed_by": "Phase 2.4 defaults (relay lists)"
     },
     {
       "term": "dan-bech32-tlv",

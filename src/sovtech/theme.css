@@ -1,0 +1,167 @@
+/*
+ * SovTech Git theme: www.sovtech.pro orange #F7931A on #0A0A0A.
+ *
+ * src/main.tsx imports this file after src/index.css and the Inter font, so
+ * its rules win over upstream's palette at equal specificity. It is plain CSS
+ * on purpose: no @tailwind and no @layer (Tailwind rejects @layer in a file
+ * without the matching @tailwind directive), and @apply only for utilities
+ * Tailwind generates itself.
+ *
+ * Both blocks redefine every variable upstream defines in them. A variable
+ * missing from the dark block would fall back to this file's light value,
+ * which comes after upstream's dark block and would win in dark mode.
+ * src/sovtech/theme.test.ts holds the variable sets and a digest of
+ * upstream's palette, so an upstream palette change fails the tests.
+ *
+ * --brand-50 to --brand-950 back Tailwind's pink-* classes (upstream's accent;
+ * see tailwind-brand.ts) as "H S% L%" triplets, so opacity modifiers such as
+ * bg-pink-500/10 keep working. The scale is theme-aware: in light mode the
+ * oranges are darker, so pink-500 and pink-600 read as text on white at 4.5:1
+ * or better; in dark mode it is centred on #F7931A (pink-500).
+ * --brand-foreground is the text colour on a solid pink-500 or pink-600
+ * background: white on the deep light-mode oranges, near-black on the bright
+ * dark-mode ones. The primary colour is the brand orange in both modes, so
+ * --primary-foreground follows the same rule.
+ */
+
+:root {
+  color-scheme: light;
+
+  --background: 0 0% 99%;
+  --foreground: 0 0% 9%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+
+  --primary: var(--brand-500);
+  --primary-foreground: var(--brand-foreground);
+
+  --secondary: 0 0% 95%;
+  --secondary-foreground: 0 0% 15%;
+
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+
+  --accent: 0 0% 94%;
+  --accent-foreground: 0 0% 12%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 0 0% 89%;
+  --input: 0 0% 87%;
+  --ring: var(--brand-500);
+
+  --radius: 0.5rem;
+
+  --sidebar-background: 0 0% 97%;
+  --sidebar-foreground: 0 0% 25%;
+  --sidebar-primary: var(--brand-500);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: 0 0% 93%;
+  --sidebar-accent-foreground: 0 0% 10%;
+  --sidebar-border: 0 0% 89%;
+  --sidebar-ring: var(--brand-500);
+
+  --brand-50: 33 100% 96%;
+  --brand-100: 34 96% 90%;
+  --brand-200: 33 94% 80%;
+  --brand-300: 32 92% 64%;
+  --brand-400: 31 90% 48%;
+  --brand-500: 29 92% 36%;
+  --brand-600: 27 90% 31%;
+  --brand-700: 25 88% 26%;
+  --brand-800: 23 82% 21%;
+  --brand-900: 22 78% 16%;
+  --brand-950: 20 75% 10%;
+  --brand-foreground: 0 0% 100%;
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* #0A0A0A */
+  --background: 0 0% 4%;
+  --foreground: 0 0% 93%;
+
+  --card: 0 0% 7%;
+  --card-foreground: 0 0% 93%;
+
+  --popover: 0 0% 7%;
+  --popover-foreground: 0 0% 93%;
+
+  --primary: var(--brand-500);
+  --primary-foreground: var(--brand-foreground);
+
+  --secondary: 0 0% 12%;
+  --secondary-foreground: 0 0% 88%;
+
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 62%;
+
+  --accent: 0 0% 13%;
+  --accent-foreground: 0 0% 90%;
+
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 0 0% 16%;
+  --input: 0 0% 18%;
+  --ring: var(--brand-500);
+
+  --sidebar-background: 0 0% 5%;
+  --sidebar-foreground: 0 0% 88%;
+  --sidebar-primary: var(--brand-500);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: 0 0% 11%;
+  --sidebar-accent-foreground: 0 0% 90%;
+  --sidebar-border: 0 0% 14%;
+  --sidebar-ring: var(--brand-500);
+
+  /* --brand-500 is #F7931A. */
+  --brand-50: 35 100% 96%;
+  --brand-100: 35 98% 90%;
+  --brand-200: 34 97% 81%;
+  --brand-300: 34 96% 71%;
+  --brand-400: 34 95% 62%;
+  --brand-500: 32.9 93.2% 53.5%;
+  --brand-600: 31 90% 47%;
+  --brand-700: 29 85% 41%;
+  --brand-800: 27 78% 33%;
+  --brand-900: 25 72% 24%;
+  --brand-950: 23 68% 14%;
+  --brand-foreground: 0 0% 4%;
+}
+
+/* Solid brand buttons and the notification badge are written as
+   bg-pink-500/600 with text-white; white on #F7931A is about 2.3:1. */
+.bg-pink-500.text-white,
+.bg-pink-600.text-white {
+  color: hsl(var(--brand-foreground));
+}
+
+/* index.html paints the dark body #16171e until the app loads, with a
+   selector that outranks Tailwind's body rule; follow the theme after that. */
+:root.dark body {
+  background-color: hsl(var(--background));
+}
+
+/* Headings use the system mono stack, the SovTech look. User content
+   (READMEs, issues, comments) keeps the body font. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  @apply font-heading;
+}
+
+.prose :is(h1, h2, h3, h4, h5, h6),
+.markdown-content :is(h1, h2, h3, h4, h5, h6),
+.group\/heading {
+  font-family: inherit;
+}

@@ -36,3 +36,11 @@ fork never edits.
   under `ci/sovtech` is refused. `parallel` is refused in the CI config, the
   drift schedule carries no variables, and `SOVTECH.md` records the
   protected-runner token rotation policy.
+- Theme and brand assets: the www.sovtech.pro palette (orange `#F7931A` on
+  `#0A0A0A`) in `src/sovtech/theme.css`, with upstream's pink accent on a
+  theme-aware brand scale, amber on yellow and the pink label bucket on
+  fuchsia; Inter for text and mono headings; dark by default, with light and
+  system kept. The chevron-B mark (`src/sovtech/brand/`) replaces upstream's
+  favicons and app icons and adds the NIP-11 `public/icon.png`, all generated
+  by `ci/sovtech/gen-brand-assets.py`. `nostr.json` names only SovTech, and
+  `public/LICENSE.txt` carries the MIT notice.

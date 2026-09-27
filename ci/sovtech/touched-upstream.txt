@@ -7,4 +7,9 @@
 # CHANGELOG.sovtech.md, CLAUDE.md, .gitlab-ci.yml, renovate.json), the
 # public/ swaps in asset-swaps.tsv, and deletions listed in fork-deleted.txt.
 #
-# Seams arrive with the overlay MRs. None are edited yet.
+# Phase 2.2, theme and brand assets:
+public/theme-init.js 4
+src/lib/labelColor.ts 2
+src/main.tsx 1
+src/services/settings.ts 12
+tailwind.config.ts 3

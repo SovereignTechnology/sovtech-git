@@ -1,6 +1,6 @@
 // Runs synchronously in <head> before paint to avoid a light/dark flash.
 // localStorage.theme is one of: "light" | "dark" | "system" (or missing,
-// which is treated as "system"). When the mode is "system" we follow the
+// which is treated as "dark"). When the mode is "system" we follow the
 // OS via prefers-color-scheme. The full mode-tracking logic lives in the
 // app (src/services/settings.ts) — this script only sets the initial class.
 (function () {
@@ -15,7 +15,7 @@
   }
 
   var saved = localStorage.getItem("theme");
-  var mode = saved === "light" || saved === "dark" ? saved : "system";
+  var mode = saved === "light" || saved === "system" ? saved : "dark";
   var dark =
     mode === "dark" ||
     (mode === "system" &&

@@ -13,7 +13,7 @@ export function labelColor(label: string): string {
     "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
     "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
     "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
-    "bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20",
+    "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 border-fuchsia-500/20",
     "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
     "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
   ];

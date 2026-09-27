@@ -45,6 +45,39 @@ cheap.
 
 These pieces arrive in the MRs that follow this one.
 
+## Theme and brand assets
+
+- `src/sovtech/theme.css` redefines every palette variable of upstream's
+  `src/index.css`, in light and dark, and adds the brand scale `--brand-50`
+  to `--brand-950` plus `--brand-foreground`. `src/main.tsx` imports it after
+  upstream's CSS, so it wins. The scale is darker in light mode, where
+  `pink-500` and `pink-600` are text on white, and centred on `#F7931A` in
+  dark mode. `src/sovtech/theme.test.ts` fails when upstream changes its
+  palette (a recorded sha256) or its variable set, or when the import order
+  changes.
+- `src/sovtech/tailwind-brand.ts` points Tailwind's `pink-*` at the brand
+  scale, maps `amber-*` to yellow and sets the fonts: Inter Variable for
+  text, the system mono stack for headings. `tailwind.config.ts` spreads it
+  into `theme.extend`. `rose` is left alone, and the pink label colour
+  bucket is fuchsia.
+- Dark is the default (`public/theme-init.js`, `src/services/settings.ts`):
+  a missing `theme` key means dark, and an explicit light or system choice
+  is stored and honoured.
+- The mark is `src/sovtech/brand/mark.svg`: the chevron-B from
+  www.sovtech.pro, `#F7931A` on transparent, with its viewBox centred on the
+  ink. `ci/sovtech/gen-brand-assets.py` builds `mark-on-dark.svg` (the mark
+  on a `#0A0A0A` tile) and every icon upstream ships in `public/`, under the
+  same names and sizes, plus `public/icon.png` (the NIP-11 icon). Maskable
+  icons keep the mark inside the central 80%, and the apple-touch and
+  maskable icons are opaque.
+- Regenerate them on the laptop only, with
+  `python3 -I ci/sovtech/gen-brand-assets.py`. It rasterises with headless
+  Chromium in a throwaway profile and needs nothing but the Python standard
+  library. Commit the outputs together with the blob ids it prints for
+  `ci/sovtech/asset-swaps.tsv`.
+- `public/.well-known/nostr.json` names only `sovtech` (the SovTech npub),
+  and `public/LICENSE.txt` carries upstream's MIT notice and SovTech's line.
+
 ## Upstream sync
 
 `ci/sovtech/sync-upstream.sh` (weekly, or ad hoc for security fixes; Cameron

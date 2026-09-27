@@ -5,6 +5,7 @@ import { deletionCacheReady } from "@/services/nostr";
 import App from "./App.tsx";
 import "./index.css";
 import "@fontsource-variable/inter";
+import "@/sovtech/theme.css";
 
 // Unregister any service worker left behind by the previous codebase and clear
 // its caches. The tombstone SW (sw.js) handles the actual cleanup then removes
