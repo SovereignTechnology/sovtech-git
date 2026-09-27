@@ -247,10 +247,7 @@ export interface ShadowTarget {
   upstreamIds: Set<string>;
 }
 
-export function shadowTargets(
-  rows: ShadowRow[],
-  root: string,
-): ShadowTarget[] {
+export function shadowTargets(rows: ShadowRow[], root: string): ShadowTarget[] {
   return rows.map((row) => {
     const upstream = resolve(root, row.upstreamPath);
     const overlay = resolve(root, row.overlayPath);
