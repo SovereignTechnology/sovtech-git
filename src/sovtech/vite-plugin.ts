@@ -239,7 +239,7 @@ function moduleName(specifier: string): string {
   return base.replace(SOURCE_FILE, "");
 }
 
-interface ShadowTarget {
+export interface ShadowTarget {
   key: string;
   name: string;
   upstream: string;
@@ -247,7 +247,10 @@ interface ShadowTarget {
   upstreamIds: Set<string>;
 }
 
-function shadowTargets(rows: ShadowRow[], root: string): ShadowTarget[] {
+export function shadowTargets(
+  rows: ShadowRow[],
+  root: string,
+): ShadowTarget[] {
   return rows.map((row) => {
     const upstream = resolve(root, row.upstreamPath);
     const overlay = resolve(root, row.overlayPath);
@@ -264,6 +267,39 @@ function shadowTargets(rows: ShadowRow[], root: string): ShadowTarget[] {
       upstreamIds: new Set([upstream, realpathSync(upstream)]),
     };
   });
+}
+
+/** What resolving an import found, as far as shadowing needs to know. */
+export interface UpstreamResolution {
+  id: string;
+  external?: unknown;
+}
+
+/** Resolves an import without this plugin (this.resolve with skipSelf). */
+export type ResolveUpstream = () => Promise<UpstreamResolution | null>;
+
+/**
+ * The shadow target an import resolves to, else null. The resolver runs only
+ * when the specifier names a shadowed module, and the swap happens only when
+ * it resolves to that exact upstream file. Importers under src/sovtech/ keep
+ * the upstream module, so an overlay can wrap its original; an overlay that
+ * needs another overlay imports it by its own path.
+ */
+export async function resolveShadow(
+  targets: ShadowTarget[],
+  roots: string[],
+  source: string,
+  importer: string | undefined,
+  resolveUpstream: ResolveUpstream,
+): Promise<ShadowTarget | null> {
+  if (!importer || targets.length === 0) return null;
+  const name = moduleName(source);
+  const matches = targets.filter((target) => target.name === name);
+  if (matches.length === 0 || isOverlayImporter(importer, roots)) return null;
+  const resolved = await resolveUpstream();
+  if (!resolved || resolved.external) return null;
+  const id = resolved.id;
+  return matches.find((item) => item.upstreamIds.has(id)) ?? null;
 }
 
 /**
@@ -487,9 +523,12 @@ function rootsOf(root: string): string[] {
   return real === root ? [root] : [root, real];
 }
 
+/**
+ * Whether buildEnd asserts the counts: `vite build` only. vitest and the dev
+ * server run as "serve", and a watch build re-transforms changed files only.
+ */
 function isStrictBuild(config: ResolvedConfig): boolean {
-  if (config.command !== "build" || config.build.watch) return false;
-  return !process.env.VITEST;
+  return config.command === "build" && !config.build.watch;
 }
 
 function isOverlayImporter(importer: string, roots: string[]): boolean {
@@ -539,20 +578,21 @@ export function sovtech(): Plugin {
     resolveId: {
       order: "pre",
       async handler(source, importer, options) {
-        if (!importer || targets.length === 0) return null;
-        const name = moduleName(source);
-        const matches = targets.filter((target) => target.name === name);
-        if (matches.length === 0) return null;
-        if (isOverlayImporter(importer, roots)) return null;
-        const resolved = await this.resolve(source, importer, {
-          attributes: options.attributes,
-          custom: options.custom,
-          isEntry: options.isEntry,
-          skipSelf: true,
-        });
-        if (!resolved || resolved.external) return null;
-        const id = resolved.id;
-        const target = matches.find((item) => item.upstreamIds.has(id));
+        const resolveUpstream = () => {
+          return this.resolve(source, importer, {
+            attributes: options.attributes,
+            custom: options.custom,
+            isEntry: options.isEntry,
+            skipSelf: true,
+          });
+        };
+        const target = await resolveShadow(
+          targets,
+          roots,
+          source,
+          importer,
+          resolveUpstream,
+        );
         if (!target) return null;
         count(target.key, 1);
         return target.overlay;

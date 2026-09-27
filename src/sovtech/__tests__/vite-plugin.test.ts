@@ -1,6 +1,15 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { APP_NAME as RUNTIME_APP_NAME } from "@/lib/constants";
 import {
   ENGINE_RULE,
@@ -15,9 +24,12 @@ import {
   auditCounts,
   parseShadowMap,
   rebrandIndexHtml,
+  resolveShadow,
   rewriteSource,
   scopedPath,
   shadowKey,
+  shadowTargets,
+  type ResolveUpstream,
 } from "@/sovtech/vite-plugin";
 
 const root = process.cwd();
@@ -42,6 +54,16 @@ describe("app name define", () => {
   it("resolves the __APP_NAME__ define from vite.config.ts", () => {
     expect(__APP_NAME__).toBe("SovTech Git");
     expect(RUNTIME_APP_NAME).toBe("SovTech Git");
+  });
+});
+
+describe("rule tables", () => {
+  it("makes every global rule global and every exact rule countable", () => {
+    for (const rule of GLOBAL_RULES) expect(rule.pattern.flags).toContain("g");
+    for (const rule of EXACT_RULES) {
+      expect(rule.find.length).toBeGreaterThan(0);
+      expect(rule.count).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -197,6 +219,68 @@ describe("shadow map", () => {
       `${header}\n${row.replace("src/components", "src/../../etc")}\n`,
     ];
     for (const text of bad) expect(() => parseShadowMap(text)).toThrow();
+  });
+});
+
+describe("resolveShadow", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "sovtech-shadow-")));
+  const file = (rel: string) => join(base, rel);
+  const header = "src/components/AppHeader.tsx";
+  const overlay = "src/sovtech/overlays/AppHeader.tsx";
+  for (const rel of [header, overlay, "src/pages/AppHeader.tsx"]) {
+    mkdirSync(dirname(file(rel)), { recursive: true });
+    writeFileSync(file(rel), "");
+  }
+  const row = { upstreamPath: header, overlayPath: overlay };
+  const targets = shadowTargets([row], base);
+  const importer = file("src/components/AppLayout.tsx");
+  const fromOverlay = file("src/sovtech/overlays/Shell.tsx");
+
+  afterAll(() => rmSync(base, { recursive: true, force: true }));
+
+  function run(source: string, from: string, upstream: ResolveUpstream) {
+    return resolveShadow(targets, [base], source, from, upstream);
+  }
+
+  function resolvesTo(id: string): ResolveUpstream {
+    return async () => ({ id, external: false });
+  }
+
+  it("swaps an import that resolves to the shadowed module", async () => {
+    const upstream = resolvesTo(file(header));
+    const found = await run("./AppHeader", importer, upstream);
+    expect(found?.overlay).toBe(file(overlay));
+    const aliased = await run("@/components/AppHeader", importer, upstream);
+    expect(aliased?.key).toBe(shadowKey(row));
+  });
+
+  it("leaves a module with the same name elsewhere alone", async () => {
+    const other = resolvesTo(file("src/pages/AppHeader.tsx"));
+    expect(await run("./AppHeader", importer, other)).toBeNull();
+  });
+
+  it("ignores external and failed resolutions", async () => {
+    const external = async () => ({ id: file(header), external: true });
+    expect(await run("./AppHeader", importer, external)).toBeNull();
+    expect(await run("./AppHeader", importer, async () => null)).toBeNull();
+  });
+
+  it("resolves only shadowed names, and never for an overlay", async () => {
+    let calls = 0;
+    const counted: ResolveUpstream = async () => {
+      calls += 1;
+      return { id: file(header) };
+    };
+    expect(await run("./AppFooter", importer, counted)).toBeNull();
+    expect(await run("./AppHeader", fromOverlay, counted)).toBeNull();
+    expect(calls).toBe(0);
+    expect(await run("./AppHeader", importer, counted)).not.toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it("refuses a row whose overlay file is missing", () => {
+    const gone = [{ upstreamPath: header, overlayPath: "src/sovtech/X.tsx" }];
+    expect(() => shadowTargets(gone, base)).toThrow(/missing/);
   });
 });
 
