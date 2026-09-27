@@ -1,0 +1,9 @@
+# Upstream agent and editor configuration the sync may accept, one entry per
+# line: <repository path> <acked 40-hex blob>. sync-upstream.sh refuses any
+# other added or modified path under .claude .agents .opencode .cursor .gemini
+# .vscode .github .gitlab, and any new CLAUDE.md, AGENTS.md, *mcp*.json or
+# opencode.json. An entry covers only the reviewed blob: the next upstream
+# change to that path is refused again until someone reviews and re-acks it.
+# Each entry needs a reviewer's reason in the MR that adds it.
+#
+# Empty on purpose.

@@ -1,0 +1,11 @@
+{
+  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending starts empty: the first CI run of gate.sh fails the ratchet and prints the pending section that seeds it (gate.sh --baseline prints it without failing), and the MR that lands the gate records it. The one functional entry is counted from upstream source at 420c0c3d; the first dist run confirms or corrects it.",
+  "functional": [
+    {
+      "term": "gitworkshop-host",
+      "count": 6,
+      "reason": "Host-set literals that recognise upstream links pasted as input, which the fork keeps: src/lib/gitworkshopUrl.ts:1 (2) and src/lib/repoUpstreamInput.ts:106,113 (4)."
+    }
+  ],
+  "pending": []
+}

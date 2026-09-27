@@ -1,0 +1,227 @@
+# SovTech Git CI. Every job runs in a fresh Kata VM on ubuntu-server.
+#
+# Runners (there are no CI/CD variables or secrets):
+#   ci-sovgit       not protected: merge requests, sync MRs, drift.
+#   ci-sovgit-prot  protected refs only, run_untagged=false: main and
+#                   sovtech-v* tags, which build deploy artifacts.
+#
+# Routing comes from ref protection alone. Every workflow rule that creates
+# a pipeline sets SOVGIT_RUNNER_TAG: the protected runner's tag exactly when
+# the rule requires $CI_COMMIT_REF_PROTECTED == "true" (push to main,
+# sovtech-v* tags), the unprotected runner's tag exactly when it requires
+# $CI_COMMIT_REF_PROTECTED != "true" (merge requests, the drift schedule).
+# Anything else creates no pipeline. Every job takes its runner from the
+# default below; no job or template names a runner, and nothing else sets
+# that variable or any CI_* variable. The gate's ci-config step
+# (ci/sovtech/ci_config.py) enforces this; the runbook is
+# kata/ci-sovgit/README.md in sovtech/platform.
+#
+# Stages: guard (git-only checks, before any dependency code runs) -> verify
+# (pnpm install, upstream's pnpm test, the dist gate) -> recheck (the dist
+# gate again, in a VM where no dependency code ran) -> e2e (sync MRs and
+# release pipelines) -> package (release pipelines, which recheck the dist
+# first). The drift job runs only on the weekly schedule.
+
+workflow:
+  rules:
+    # Protected refs only: main and release tags, which build deploy
+    # artifacts. An unprotected main or tag creates no pipeline.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"
+      variables:
+        SOVGIT_RUNNER_TAG: sovgit-prot
+    - if: $CI_COMMIT_TAG =~ /^sovtech-v/ && $CI_COMMIT_REF_PROTECTED == "true"
+      variables:
+        SOVGIT_RUNNER_TAG: sovgit-prot
+    # Unprotected refs only: merge requests run an untrusted head, and drift
+    # stays beside no protected state. Either one on a protected ref creates
+    # no pipeline at all.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_REF_PROTECTED != "true"
+      variables:
+        SOVGIT_RUNNER_TAG: sovgit
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_REF_NAME == "drift/weekly" && $CI_COMMIT_REF_PROTECTED != "true"
+      variables:
+        SOVGIT_RUNNER_TAG: sovgit
+    - when: never
+
+default:
+  tags: [$SOVGIT_RUNNER_TAG]
+
+variables:
+  # Full history: the gate's ranges reach back to UPSTREAM_BASE.
+  GIT_DEPTH: "0"
+  GIT_STRATEGY: clone
+
+stages:
+  - guard
+  - verify
+  - recheck
+  - e2e
+  - package
+
+# ------------------------------------------------------------ contexts ---
+
+.on-mr:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# The source-branch variable exists only in merge request pipelines.
+.on-sync-mr:
+  rules:
+    - if: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^sync\/upstream-/
+
+.on-main:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
+
+.on-release:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^sovtech-v/
+
+# ----------------------------------------------------------- templates ---
+
+.node:
+  variables:
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  before_script:
+    - export PATH="$HOME/.local/bin:$PATH"
+    - bash ci/sovtech/ci-toolchain.sh ci-out/toolchain.env
+
+.guard:
+  stage: guard
+  script:
+    - bash ci/sovtech/gate.sh --phase history
+
+.verify:
+  stage: verify
+  extends: .node
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm test
+    - bash ci/sovtech/gate.sh --phase dist
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - dist/
+      - dist-maps/
+      - ci-out/
+
+# The dist checks once more on verify's artifact, in a VM that never runs
+# pnpm: verify's own gate ran after dependency install scripts, vite and
+# vitest, any of which could have changed what it reported.
+.recheck:
+  stage: recheck
+  script:
+    - bash ci/sovtech/gate.sh --phase recheck
+
+.e2e:
+  stage: e2e
+  extends: .node
+  timeout: 2h
+  script:
+    - pnpm install --frozen-lockfile
+    - bash ci/sovtech/e2e.sh ci-out/e2e-junit.xml
+  artifacts:
+    when: always
+    expire_in: 4 weeks
+    paths:
+      - ci-out/e2e-junit.xml
+    reports:
+      junit: ci-out/e2e-junit.xml
+
+# ------------------------------------------------------ merge requests ---
+
+guard:mr:
+  extends: [.guard, .on-mr]
+
+verify:mr:
+  extends: [.verify, .on-mr]
+
+recheck:mr:
+  extends: [.recheck, .on-mr]
+  needs:
+    - job: verify:mr
+      artifacts: true
+
+e2e:sync:
+  extends: [.e2e, .on-sync-mr]
+
+# ---------------------------------------------------------------- main ---
+
+guard:main:
+  extends: [.guard, .on-main]
+
+verify:main:
+  extends: [.verify, .on-main]
+
+recheck:main:
+  extends: [.recheck, .on-main]
+  needs:
+    - job: verify:main
+      artifacts: true
+
+# ------------------------------------------------------------ releases ---
+
+guard:release:
+  extends: [.guard, .on-release]
+  script:
+    - bash ci/sovtech/gate.sh --phase history --release
+
+verify:release:
+  extends: [.verify, .on-release]
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm test
+    - bash ci/sovtech/gate.sh --phase dist --release
+
+e2e:release:
+  extends: [.e2e, .on-release]
+
+# The deploy artifact: the tested dist from verify:release, never a rebuild,
+# rechecked here first (this job never runs pnpm).
+package:release:
+  extends: .on-release
+  stage: package
+  needs:
+    - job: verify:release
+      artifacts: true
+    - job: e2e:release
+      artifacts: false
+  script:
+    - bash ci/sovtech/gate.sh --phase recheck --release
+    - bash ci/sovtech/package.sh site dist ci-out/toolchain.env release
+  artifacts:
+    expire_in: never
+    paths:
+      - release/
+
+# Source maps: a separate artifact, never deployed.
+package-maps:release:
+  extends: .on-release
+  stage: package
+  needs:
+    - job: verify:release
+      artifacts: true
+    - job: e2e:release
+      artifacts: false
+  script:
+    - bash ci/sovtech/gate.sh --phase recheck --release
+    - bash ci/sovtech/package.sh maps dist-maps release-maps
+  artifacts:
+    expire_in: never
+    paths:
+      - release-maps/
+
+# --------------------------------------------------------------- drift ---
+
+# Weekly upstream drift report, scheduled on the unprotected ref
+# drift/weekly. The schedule on drift/weekly carries no variables, and the
+# job holds no secrets; it fetches upstream over the two GRASP https URLs and
+# changes nothing.
+drift:
+  stage: guard
+  timeout: 30m
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_REF_NAME == "drift/weekly"
+  script:
+    - bash ci/sovtech/sync-upstream.sh --report-only

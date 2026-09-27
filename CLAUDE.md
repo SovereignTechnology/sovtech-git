@@ -11,7 +11,8 @@ The implementation plan lives in Cameron's
 - Put SovTech code in new paths only: `src/sovtech/**`, `ci/sovtech/**`,
   `SOVTECH.md`, `NOTICE.md`, `CHANGELOG.sovtech.md`, `.gitlab-ci.yml`.
 - Edit an upstream file **only** at a seam listed in
-  `ci/sovtech/touched-upstream.txt` (once it exists), within its line budget.
+  `ci/sovtech/touched-upstream.txt`, within its line budget. The gate fails
+  on any other upstream change.
 - **Never edit** `CHANGELOG.md`, `AGENTS.md`, `src/AppRouter.tsx`,
   `src/pages/repo/*`, `src/pages/PRPage.tsx`, `src/pages/Settings.tsx`,
   `src/pages/Dashboard.tsx`, `src/services/nostr.ts` or `src/lib/nip34.ts`.
@@ -40,6 +41,11 @@ wins.
   server instead.
 - Laptop tooling that is not upstream code is fine: `git`, `gitleaks`,
   `shellcheck`, `node --check`, Python scripts under `ci/sovtech/`.
+- `ci/sovtech/` stays bash and Python 3 standard library only, so it can be
+  checked here with `bash -n`, `shellcheck` and a bytecode-free parse
+  (`python3 -B -c 'import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' ci/sovtech/*.py`;
+  `py_compile` would write `__pycache__`, which the gate refuses). Run its
+  Python scripts as `python3 -I`; they refuse to run otherwise.
 
 ## Identity and history
 

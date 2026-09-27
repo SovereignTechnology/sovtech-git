@@ -1,0 +1,10 @@
+# Upstream files the fork may edit (the overlay seams), one per line:
+#   <path> <max changed lines>
+# "Changed lines" is added + deleted in `git diff --numstat UPSTREAM_BASE HEAD`.
+# ci/sovtech/gate.sh fails on any other changed upstream path, on a seam over
+# its budget, on a binary seam, and on a listed seam that is not changed.
+# Exempt: fork-owned paths (src/sovtech/, ci/sovtech/, SOVTECH.md, NOTICE.md,
+# CHANGELOG.sovtech.md, CLAUDE.md, .gitlab-ci.yml, renovate.json), the
+# public/ swaps in asset-swaps.tsv, and deletions listed in fork-deleted.txt.
+#
+# Seams arrive with the overlay MRs. None are edited yet.
