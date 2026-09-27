@@ -7,4 +7,8 @@
 # CHANGELOG.sovtech.md, CLAUDE.md, .gitlab-ci.yml, renovate.json), the
 # public/ swaps in asset-swaps.tsv, and deletions listed in fork-deleted.txt.
 #
-# Seams arrive with the overlay MRs. None are edited yet.
+# Seams arrive with the overlay MRs; each budget is the numstat its MR measured.
+# vite.config.ts: import the overlay engine and make it the first plugin.
+vite.config.ts 3
+# src/App.tsx: add the title plugin to createHead.
+src/App.tsx 3

@@ -36,3 +36,10 @@ fork never edits.
   under `ci/sovtech` is refused. `parallel` is refused in the CI config, the
   drift schedule carries no variables, and `SOVTECH.md` records the
   protected-runner token rotation policy.
+- Added the overlay engine (`src/sovtech/vite-plugin.ts`, first in
+  `vite.config.ts`'s plugins): the "SovTech Git" app name, hidden source maps,
+  module shadowing from `ci/sovtech/shadow-map.tsv`, build-time rewrites of
+  upstream brand copy (every rule must match in `vite build`), a re-branded
+  `index.html` with `og:url` on `https://git.sovtech.pro/` and the CSP meta
+  untouched, and the SovTech web manifest (also swapped in `public/`). Page
+  titles end in "SovTech Git" through an unhead plugin (`src/sovtech/head.ts`).
