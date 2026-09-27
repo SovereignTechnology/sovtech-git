@@ -66,6 +66,19 @@ KINDS = {
 }
 TILE_SIZES = (16, 32, 48, 57, 60, 76, 120, 152, 180, 192, 512)
 ICO_SIZES = (16, 32, 48)
+SAFE_ZONE = 0.40  # maskable: radius of the safe circle, as a fraction of the side
+
+# mark.svg ends up inlined in same-origin SVG files (favicon.svg), so it may
+# hold only these elements and attributes, with plain quoted values: no
+# script, event handler, link, style, entity, comment or doctype.
+ALLOWED_ELEMENTS = {"svg", "g", "path", "line", "polyline", "polygon", "rect", "circle", "ellipse"}
+ALLOWED_ATTRIBUTES = {
+    "xmlns", "viewBox", "fill", "fill-rule", "clip-rule", "stroke", "stroke-width",
+    "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "d", "points",
+    "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
+}
+TAG = re.compile(r'<(/?)([a-z]+)((?:\s+[A-Za-z-]+="[^"<>&]*")*)\s*(/?)>')
+ATTRIBUTE = re.compile(r'([A-Za-z-]+)="([^"<>&]*)"')
 
 
 class GenError(Exception):
@@ -78,6 +91,19 @@ def read_mark() -> tuple:
         text = handle.read()
     if not text.isascii():
         raise GenError("%s must be ASCII" % MARK)
+    position = 0
+    for tag in re.finditer(r"<[^>]*>", text):
+        if text[position : tag.start()].strip():
+            raise GenError("%s may hold only elements, no text" % MARK)
+        position = tag.end()
+        match = TAG.fullmatch(tag.group(0))
+        if match is None or match.group(2) not in ALLOWED_ELEMENTS:
+            raise GenError("%s: a tag is not an allowed SVG shape element" % MARK)
+        for name, _ in ATTRIBUTE.findall(match.group(3)):
+            if name not in ALLOWED_ATTRIBUTES:
+                raise GenError("%s: attribute %s is not allowed" % (MARK, name))
+    if text[position:].strip():
+        raise GenError("%s may hold only elements, no text" % MARK)
     match = re.fullmatch(r"\s*(<svg\b[^>]*?)\s*>(.*)</svg>\s*", text, re.DOTALL)
     if match is None or 'viewBox="' not in match.group(1):
         raise GenError("%s must be one <svg> root with a viewBox" % MARK)
@@ -198,6 +224,19 @@ def rasterise(chromium: str, jobs: list) -> dict:
     return out
 
 
+def check_safe_zone(rgba: bytes, px: int, key: str) -> None:
+    """Every pixel outside the maskable safe circle is the plain background."""
+    background = bytes.fromhex(BACKGROUND[1:]) + b"\xff"
+    limit = (SAFE_ZONE * px) ** 2
+    centre = px / 2
+    for y in range(px):
+        for x in range(px):
+            if (x + 0.5 - centre) ** 2 + (y + 0.5 - centre) ** 2 > limit:
+                offset = (y * px + x) * 4
+                if rgba[offset : offset + 4] != background:
+                    raise GenError("%s: the mark leaves the maskable safe zone" % key)
+
+
 def filter_rows(rows: list, bpp: int) -> bytes:
     """PNG scanlines, each with the None, Sub or Up filter whose output has
     the smallest sum of absolute (signed) values."""
@@ -272,10 +311,10 @@ def main() -> int:
         if not chromium:
             raise GenError("no Chromium on PATH; pass --chromium")
         mark = read_mark()
-
+        outputs = {}
         svg = compose("tile", mark, 64).encode("ascii")
         for relative in (TILE_SVG, "public/favicon.svg", "public/icons/icon.svg"):
-            write(relative, svg)
+            outputs[relative] = svg
 
         renders = [("tile", px) for px in TILE_SIZES] + [
             ("square", 180),
@@ -284,19 +323,25 @@ def main() -> int:
         ]
         jobs = [("%s-%d" % (kind, px), px, compose(kind, mark, px)) for kind, px in renders]
         pixels = rasterise(chromium, jobs)
+        for kind, px in renders:
+            if kind == "maskable":
+                check_safe_zone(pixels["%s-%d" % (kind, px)], px, "%s-%d" % (kind, px))
         png = {
             (kind, px): encode_png(pixels["%s-%d" % (kind, px)], px, KINDS[kind][2])
             for kind, px in renders
         }
 
         for px in TILE_SIZES:
-            write("public/icons/icon-%dx%d.png" % (px, px), png[("tile", px)])
-        write("public/favicon.png", png[("tile", 32)])
-        write("public/favicon.ico", encode_ico([(px, png[("tile", px)]) for px in ICO_SIZES]))
-        write("public/icons/apple-touch-icon.png", png[("square", 180)])
+            outputs["public/icons/icon-%dx%d.png" % (px, px)] = png[("tile", px)]
+        outputs["public/favicon.png"] = png[("tile", 32)]
+        outputs["public/favicon.ico"] = encode_ico([(px, png[("tile", px)]) for px in ICO_SIZES])
+        outputs["public/icons/apple-touch-icon.png"] = png[("square", 180)]
         for px in (192, 512):
-            write("public/icons/pwa-maskable-%dx%d.png" % (px, px), png[("maskable", px)])
-        write("public/icon.png", png[("maskable", 512)])
+            outputs["public/icons/pwa-maskable-%dx%d.png" % (px, px)] = png[("maskable", px)]
+        outputs["public/icon.png"] = png[("maskable", 512)]
+        # Nothing is written until every output exists and passed its checks.
+        for relative, data in outputs.items():
+            write(relative, data)
     except (GenError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
         print("ERROR gen-brand-assets: %s" % exc, file=sys.stderr)
         return 4

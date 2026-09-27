@@ -68,8 +68,11 @@ These pieces arrive in the MRs that follow this one.
   ink. `ci/sovtech/gen-brand-assets.py` builds `mark-on-dark.svg` (the mark
   on a `#0A0A0A` tile) and every icon upstream ships in `public/`, under the
   same names and sizes, plus `public/icon.png` (the NIP-11 icon). Maskable
-  icons keep the mark inside the central 80%, and the apple-touch and
-  maskable icons are opaque.
+  icons keep the mark inside the central 80% (the script checks every pixel
+  outside it), and the apple-touch and maskable icons are opaque. The mark
+  is inlined into same-origin SVG files, so the script accepts only plain
+  shape elements and presentation attributes in it: no script, handler,
+  link, style, entity or comment.
 - Regenerate them on the laptop only, with
   `python3 -I ci/sovtech/gen-brand-assets.py`. It rasterises with headless
   Chromium in a throwaway profile and needs nothing but the Python standard
