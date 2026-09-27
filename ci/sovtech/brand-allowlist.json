@@ -1,5 +1,5 @@
 {
-  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending starts empty: the first CI run of gate.sh fails the ratchet and prints the pending section that seeds it (gate.sh --baseline prints it without failing), and the MR that lands the gate records it. The one functional entry is counted from upstream source at 420c0c3d; the first dist run confirms or corrects it.",
+  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending was seeded from the first CI run of this gate (pipeline 3609, upstream 420c0c3d unbranded), and each later MR lowers or deletes the entries it clears. The functional entry was counted from upstream source at 420c0c3d and confirmed by that dist run (gitworkshop-host seen=28 = 6 functional + 22 pending).",
   "functional": [
     {
       "term": "gitworkshop-host",
@@ -7,5 +7,51 @@
       "reason": "Host-set literals that recognise upstream links pasted as input, which the fork keeps: src/lib/gitworkshopUrl.ts:1 (2) and src/lib/repoUpstreamInput.ts:106,113 (4)."
     }
   ],
-  "pending": []
+  "pending": [
+    {
+      "term": "gitworkshop-word",
+      "count": 12,
+      "removed_by": "Phase 2.3 shell and rewrites (RepoLayout, index bundle, index.html, 404.html) and 2.2 assets (manifest)"
+    },
+    {
+      "term": "gitworkshop-url",
+      "count": 12,
+      "removed_by": "Phase 2.1 overlay engine (index.html/404.html og and splash) and 2.3 rewrites (RepoLayout, index bundle)"
+    },
+    {
+      "term": "gitworkshop-host",
+      "count": 22,
+      "removed_by": "Phase 2.1 overlay engine (index.html/404.html), 2.2 assets (manifest) and 2.3 rewrites (RepoLayout, index bundle)"
+    },
+    {
+      "term": "danconwaydev",
+      "count": 4,
+      "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.3 shell (About page)"
+    },
+    {
+      "term": "nos-lol",
+      "count": 5,
+      "removed_by": "Phase 2.2 assets (.well-known/nostr.json) and 2.4 defaults (relay lists)"
+    },
+    {
+      "term": "dan-hex",
+      "count": 4,
+      "removed_by": "Phase 2.2 assets (.well-known/nostr.json)"
+    },
+    {
+      "term": "dan-bech32-tlv",
+      "count": 4,
+      "removed_by": "Phase 2.3 shell (About page feedback naddr/nprofile links)"
+    },
+    {
+      "term": "manifest-name",
+      "count": 2,
+      "removed_by": "Phase 2.2 assets (manifest override)"
+    },
+    {
+      "term": "og-url",
+      "count": 2,
+      "removed_by": "Phase 2.1 overlay engine (transformIndexHtml)"
+    }
+  ]
 }
