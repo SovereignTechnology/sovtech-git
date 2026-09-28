@@ -65,6 +65,7 @@ interface FeaturedRepoCardProps {
 // Copied from src/pages/LandingPage.tsx (FeaturedRepoCard); classes and byline.
 function FeaturedRepoCard({ repo, byline }: FeaturedRepoCardProps) {
   const repoPath = useDefaultRepoPath(repo);
+  const maintainers = byline ? [] : repo.confirmedMaintainers.slice(0, 2);
   const timeAgo = formatDistanceToNow(new Date(repo.updatedAt * 1000), {
     addSuffix: true,
   });
@@ -94,16 +95,16 @@ function FeaturedRepoCard({ repo, byline }: FeaturedRepoCardProps) {
 
           <div className="flex items-center gap-2 mt-auto pt-2 border-t border-border/40">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              {byline ??
-                repo.confirmedMaintainers.slice(0, 2).map((pk) => (
-                  <UserLink
-                    key={pk}
-                    pubkey={pk}
-                    avatarSize="xs"
-                    nameClassName="text-xs text-muted-foreground"
-                    noLink
-                  />
-                ))}
+              {byline}
+              {maintainers.map((pk) => (
+                <UserLink
+                  key={pk}
+                  pubkey={pk}
+                  avatarSize="xs"
+                  nameClassName="text-xs text-muted-foreground"
+                  noLink
+                />
+              ))}
             </div>
             <span className="text-xs text-muted-foreground shrink-0">
               {timeAgo}
