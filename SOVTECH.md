@@ -106,7 +106,7 @@ claims cut down to exact facts. Every other open decision took its default.
   - About: `please provide feedback`
   - NotFound: `Oops! Page not found`
   - OgImagePreview: `og-option-5`
-- Upstream parts that are not exported (`HeaderSearchBar`, `HeaderSearchIcon`, `FeaturedRepoCard`, `FeaturedReposSkeleton` and the `FeaturedRepos` logic) are copied with their logic unchanged; only classes and copy change, and the skeleton takes a card count. Each copy has a one-line comment naming its source file. The shadow row's drift report covers them.
+- Upstream parts that are not exported (`HeaderSearchBar`, `HeaderSearchIcon`, `FeaturedRepoCard`, `FeaturedReposSkeleton` and the `FeaturedRepos` logic) are copied with their logic unchanged; only classes and copy change, the skeleton takes a card count, and the card takes an optional fixed byline. Each copy has a one-line comment naming its source file. The shadow row's drift report covers them.
 - `src/sovtech/__tests__/shell.test.ts` checks the rows (acked blobs, sentinels, markers found in their upstream file only) and the header and footer parity: every link target and imported JSX component of the acked upstream file appears in the overlay, or in `src/sovtech/overlays/parity-waivers.tsv` with a reason. A waiver that waives nothing fails too.
 - Links to the app itself are relative (`/about`, `/search`). git.sovtech.pro and git.sovit.xyz share one web root, so no link names a host.
 - Overlays use semantic colour classes only: `bg-primary`, `text-primary-foreground`, `text-brand`, `border-brand/30`, `bg-brand/10`, `ring-ring`, `text-muted-foreground`.
@@ -227,6 +227,7 @@ The page sets no head tags. `Index.tsx` is not shadowed and owns them, and `head
      - `verifyEvent` runs on a fresh copy of the signed fields, as upstream's `private-git-relays.ts` does: nostr-tools caches its verdict on the event object, and `fakeVerifyEvent` writes that cache as true.
      - A forged announcement hides the repository; it never shows. `src/sovtech/signed.test.ts` covers each rule.
    - Up to 6 `FeaturedRepoCard`s, with 3 skeletons while the list is empty.
+   - Each card's byline is fixed, a 16px BrandMark and "Sovereign Technology", in place of the maintainer's `UserLink`. The only confirmed member is the SovTech key anyway, and its profile (kind 0) comes through the same unverified EventStore, so a relay could otherwise forge the name or avatar shown under this heading.
    - The strip hides itself (renders nothing) when the list is still empty 2 s after it last changed, the same settle upstream's strip uses, and comes back if repositories arrive later.
 3. Live on the network:
    - The h2 "Live on the network", with the subline "Recent repositories on GRASP servers, straight from the Nostr git index. Published by their authors, not reviewed by SovTech."

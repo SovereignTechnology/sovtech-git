@@ -59,6 +59,12 @@ describe("hasValidSignature", () => {
     expect(hasValidSignature({ ...event, content: "changed" })).toBe(false);
   });
 
+  it("rejects a malformed event without throwing", () => {
+    const event = announce();
+    const tags = [["name", 5]] as unknown as string[][];
+    expect(hasValidSignature({ ...event, tags })).toBe(false);
+  });
+
   it("ignores a verified mark on the stored object", () => {
     const forged = forgedFrom(announce());
     // The cached verdict fakeVerifyEvent leaves would pass a plain check.

@@ -13,7 +13,7 @@
  *   6. Closing CTA
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -56,8 +56,14 @@ const H2 = "font-mono text-2xl font-bold tracking-tight md:text-3xl";
 // Repository strips
 // ---------------------------------------------------------------------------
 
-// Copied from src/pages/LandingPage.tsx (FeaturedRepoCard); classes only.
-function FeaturedRepoCard({ repo }: { repo: ResolvedRepo }) {
+interface FeaturedRepoCardProps {
+  repo: ResolvedRepo;
+  /** Shown in place of the maintainers' profiles (the From SovTech strip). */
+  byline?: ReactNode;
+}
+
+// Copied from src/pages/LandingPage.tsx (FeaturedRepoCard); classes and byline.
+function FeaturedRepoCard({ repo, byline }: FeaturedRepoCardProps) {
   const repoPath = useDefaultRepoPath(repo);
   const timeAgo = formatDistanceToNow(new Date(repo.updatedAt * 1000), {
     addSuffix: true,
@@ -88,15 +94,16 @@ function FeaturedRepoCard({ repo }: { repo: ResolvedRepo }) {
 
           <div className="flex items-center gap-2 mt-auto pt-2 border-t border-border/40">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              {repo.confirmedMaintainers.slice(0, 2).map((pk) => (
-                <UserLink
-                  key={pk}
-                  pubkey={pk}
-                  avatarSize="xs"
-                  nameClassName="text-xs text-muted-foreground"
-                  noLink
-                />
-              ))}
+              {byline ??
+                repo.confirmedMaintainers.slice(0, 2).map((pk) => (
+                  <UserLink
+                    key={pk}
+                    pubkey={pk}
+                    avatarSize="xs"
+                    nameClassName="text-xs text-muted-foreground"
+                    noLink
+                  />
+                ))}
             </div>
             <span className="text-xs text-muted-foreground shrink-0">
               {timeAgo}
@@ -166,6 +173,19 @@ function StripHeader({ id, title, subline, browseAll }: StripHeaderProps) {
  */
 const SOVTECH_SETTLE_MS = 2_000;
 
+/**
+ * The From SovTech cards' byline. The only confirmed member of every card is
+ * the SovTech key (isSignedOnlyBy), and its profile (kind 0) comes through the
+ * same unverified EventStore, so the byline is fixed rather than a profile a
+ * relay could forge.
+ */
+const SOVTECH_BYLINE = (
+  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <BrandMark className="h-4 w-4 shrink-0 text-brand" />
+    Sovereign Technology
+  </span>
+);
+
 /** Whether a repository's card shows only what the SovTech key signed. */
 function isSignedBySovtech(repo: ResolvedRepo): boolean {
   return isSignedOnlyBy(repo, SOVTECH_PUBKEY);
@@ -215,7 +235,11 @@ function SovtechRepos() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {featured.length > 0 ? (
             featured.map((repo) => (
-              <FeaturedRepoCard key={repo.componentId} repo={repo} />
+              <FeaturedRepoCard
+                key={repo.componentId}
+                repo={repo}
+                byline={SOVTECH_BYLINE}
+              />
             ))
           ) : (
             <FeaturedReposSkeleton count={3} />
