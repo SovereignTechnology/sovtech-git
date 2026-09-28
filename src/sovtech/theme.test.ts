@@ -82,6 +82,14 @@ describe("tailwind-brand", () => {
     }
   });
 
+  it("names the same scale brand, with brand itself at step 500", () => {
+    const brand = sovtechTheme.colors.brand;
+    expect(brand.DEFAULT).toBe("hsl(var(--brand-500) / <alpha-value>)");
+    for (const step of BRAND_STEPS) {
+      expect(brand[step]).toBe(sovtechTheme.colors.pink[step]);
+    }
+  });
+
   it("maps amber to yellow, leaves rose alone and applies Inter", () => {
     expect(sovtechTheme.colors.amber).toEqual(colors.yellow);
     expect(sovtechTheme.colors).not.toHaveProperty("rose");

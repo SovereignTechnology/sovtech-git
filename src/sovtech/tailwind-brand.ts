@@ -6,6 +6,9 @@
  *   whole scale points at the theme-aware `--brand-*` variables in theme.css.
  *   The `<alpha-value>` slot keeps opacity modifiers such as `bg-pink-500/10`
  *   working.
+ * - `brand`: the same scale under the fork's own name, with a DEFAULT at step
+ *   500 (#F7931A in dark mode), so fork code writes semantic classes such as
+ *   `text-brand`, `border-brand/30` and `bg-brand/10` instead of pink-*.
  * - `amber`: Tailwind's yellow values, so warnings stay distinct from the
  *   orange brand.
  * - `rose` is not remapped: it is a label colour bucket.
@@ -33,12 +36,18 @@ const brandScale: Record<string, string> = Object.fromEntries(
   BRAND_STEPS.map((step) => [step, brandColor(step)]),
 );
 
+const brandAlias: Record<string, string> = {
+  DEFAULT: brandColor(500),
+  ...brandScale,
+};
+
 const defaultSans: string[] = defaultTheme.fontFamily.sans;
 const defaultMono: string[] = defaultTheme.fontFamily.mono;
 
 export const sovtechTheme = {
   colors: {
     pink: brandScale,
+    brand: brandAlias,
     amber: colors.yellow,
   },
   fontFamily: {

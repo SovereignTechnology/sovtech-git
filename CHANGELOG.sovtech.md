@@ -64,3 +64,12 @@ fork never edits.
   relay.primal.net for new accounts), and links to git.sovtech.pro and
   git.sovit.xyz are recognised next to upstream's host. The git index,
   lookup relays, Blossom servers and CORS proxy keep upstream's values.
+- The SovTech shell (`src/sovtech/overlays/`, spec in `SOVTECH.md`): a new
+  header, footer, landing page, About, 404 and OG image page, swapped in
+  through six `shadow-map.tsv` rows with tsc-checked export shapes
+  (`src/sovtech/contract.ts`) and a header and footer parity test. The
+  landing page leads with repositories from the SovTech key, then the live
+  network strip; About credits upstream and takes feedback on SovTech Git's
+  own repository. The upstream-fork input hint names git.sovtech.pro, fork
+  code gets a `brand` colour alias, theme.css honours reduced motion, and
+  the brand ratchet's `pending` list is empty.

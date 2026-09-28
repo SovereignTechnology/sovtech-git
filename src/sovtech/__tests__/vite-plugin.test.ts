@@ -45,9 +45,12 @@ const SHADOW_MAP = "ci/sovtech/shadow-map.tsv";
 const CSP_META =
   /<meta\b[^>]*?http-equiv\s*=\s*["']content-security-policy["'][^>]*>/gi;
 
-/** Upstream files that between them fire every global rule. */
+/**
+ * Upstream files that between them fire every global rule. None is shadowed:
+ * a shadowed module never reaches the transform in a build.
+ */
 const GLOBAL_RULE_FILES = [
-  "src/components/AppHeader.tsx",
+  "src/components/CreateRepoDialog.tsx",
   "src/components/EventCardActions.tsx",
   "src/components/IncompatibleProtocolError.tsx",
 ];
@@ -153,6 +156,13 @@ describe("rewriteSource", () => {
     expect(entry.code).toContain(`Symbol.for("${ENGINE_SENTINEL}")`);
     expect(entry.hits.get(ENGINE_RULE)).toBe(1);
     expect(rewriteSource("", EXAMPLE).code).toBe("");
+  });
+
+  it("fires the global rules from files the shadow map leaves alone", () => {
+    const shadowed = parseShadowMap(read(SHADOW_MAP)).map(
+      (row) => row.upstreamPath,
+    );
+    for (const file of GLOBAL_RULE_FILES) expect(shadowed).not.toContain(file);
   });
 
   it("finds every global rule somewhere in upstream source", () => {

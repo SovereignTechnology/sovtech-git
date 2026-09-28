@@ -1,1 +1,7 @@
 upstream_path	overlay_path	acked_blob	sentinel	upstream_marker
+src/components/AppHeader.tsx	src/sovtech/overlays/AppHeader.tsx	b31aa79af4d37cf309838ceef988a18f83960047	sovtech.overlay.AppHeader	group transition-opacity hover:opacity-80 shrink-0
+src/components/AppFooter.tsx	src/sovtech/overlays/AppFooter.tsx	cb145f5058707f31e86be6c6d03a254b2bd5b9b1	sovtech.overlay.AppFooter	Git collaboration, without the platform.
+src/pages/LandingPage.tsx	src/sovtech/overlays/LandingPage.tsx	c053973933c4de55694485ae5d30e09adb5507f4	sovtech.overlay.LandingPage	hero-fork-gradient
+src/pages/About.tsx	src/sovtech/overlays/About.tsx	5b99ce925104aaa1ba79773ca1756ec1300d2384	sovtech.overlay.About	please provide feedback
+src/pages/NotFound.tsx	src/sovtech/overlays/NotFound.tsx	18e3593371490789b8bf193a7161c98597d49cf8	sovtech.overlay.NotFound	Oops! Page not found
+src/pages/OgImagePreview.tsx	src/sovtech/overlays/OgImagePreview.tsx	cdf15de87ae40b3ada814e529aadfad40e2c5284	sovtech.overlay.OgImagePreview	og-option-5

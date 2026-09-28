@@ -43,7 +43,8 @@ cheap.
   that must match at least once, and the build fails if upstream branding
   survives in `dist`.
 
-These pieces arrive in the MRs that follow this one.
+The six shell overlays (header, footer, landing, About, 404 and the OG
+image page) live in `src/sovtech/overlays/`, built to the shell spec below.
 
 ## Theme and brand assets
 
@@ -56,12 +57,14 @@ These pieces arrive in the MRs that follow this one.
   in `ci/sovtech/upstream-palette.sha256`) and when theme.css stops being the
   last palette in the built CSS (the theme order check below);
   `src/sovtech/theme.test.ts` fails when the variable set or the import
-  order changes.
+  order changes. theme.css also carries the `prefers-reduced-motion` guard
+  (animations and transitions finish in 0.01ms, no smooth scrolling).
 - `src/sovtech/tailwind-brand.ts` points Tailwind's `pink-*` at the brand
   scale, maps `amber-*` to yellow and sets the fonts: Inter Variable for
   text, the system mono stack for headings. `tailwind.config.ts` spreads it
   into `theme.extend`. `rose` is left alone, and the pink label colour
-  bucket is fuchsia.
+  bucket is fuchsia. The same scale is `brand-*` for fork code, with
+  `brand` itself at step 500 (`text-brand`, `border-brand/30`).
 - Dark is the default (`public/theme-init.js`, `src/services/settings.ts`):
   a missing `theme` key means dark, and an explicit light or system choice
   is stored and honoured.
@@ -83,6 +86,336 @@ These pieces arrive in the MRs that follow this one.
   no Chromium (see the gate checks below).
 - `public/.well-known/nostr.json` names only `sovtech` (the SovTech npub),
   and `public/LICENSE.txt` carries upstream's MIT notice and SovTech's line.
+
+## Shell spec
+
+The six shadowed shell modules, their shared parts and the tokens they use.
+Cameron signed the draft off on 2026-09-27 with four decisions, applied
+below: the taglines, two repository strips, the footer's legal line and
+claims cut down to exact facts. Every other open decision took its default.
+
+### Ground rules
+
+- Files: `src/sovtech/overlays/{AppHeader,AppFooter,LandingPage,About,NotFound,OgImagePreview}.tsx`, plus `src/sovtech/brand/BrandMark.tsx` (a TSX port of sovtech.pro's `BrandMark.jsx`: same paths and viewBox, `stroke="currentColor"`, `aria-hidden`, `focusable="false"`) and `src/sovtech/links.ts` (every fork URL and route, in one place).
+- Export shapes match upstream, enforced by tsc in `src/sovtech/contract.ts`: `AppHeader`, `AppFooter` and `LandingPage` are named exports; `About`, `NotFound` and `OgImagePreview` are default exports. None takes props.
+- Each overlay sets its sentinel at module scope: `Reflect.set(globalThis, Symbol.for("sovtech.overlay.<Name>"), true)`.
+- Each shadow-map marker is a string unique to the upstream file, and the overlay must not contain it:
+  - AppHeader: `group transition-opacity hover:opacity-80 shrink-0`
+  - AppFooter: `Git collaboration, without the platform.`
+  - LandingPage: `hero-fork-gradient`
+  - About: `please provide feedback`
+  - NotFound: `Oops! Page not found`
+  - OgImagePreview: `og-option-5`
+- Upstream parts that are not exported (`HeaderSearchBar`, `HeaderSearchIcon`, `FeaturedRepoCard`, `FeaturedReposSkeleton` and the `FeaturedRepos` logic) are copied with their logic unchanged; only classes and copy change, and the skeleton takes a card count. Each copy has a one-line comment naming its source file. The shadow row's drift report covers them.
+- `src/sovtech/__tests__/shell.test.ts` checks the rows (acked blobs, sentinels, markers found in their upstream file only) and the header and footer parity: every link target and imported JSX component of the acked upstream file appears in the overlay, or in `src/sovtech/overlays/parity-waivers.tsv` with a reason. A waiver that waives nothing fails too.
+- Links to the app itself are relative (`/about`, `/search`). git.sovtech.pro and git.sovit.xyz share one web root, so no link names a host.
+- Overlays use semantic colour classes only: `bg-primary`, `text-primary-foreground`, `text-brand`, `border-brand/30`, `bg-brand/10`, `ring-ring`, `text-muted-foreground`.
+  - Never a literal `pink-*`, `rose-*`, `gray-*` or `blue-*` class, and never a hex value. The OG page is the one exception: it uses fixed hex and ignores the theme.
+  - `brand` is an alias for the remapped scale, with a DEFAULT at step 500, exported by `src/sovtech/tailwind-brand.ts`. That file is fork-owned, so it costs no seam lines.
+- Things the shell never uses:
+  - new dependencies, framer-motion or JS animation;
+  - `dangerouslySetInnerHTML`, `innerHTML`, `eval` or an inline `<script>`;
+  - external images or fonts.
+- The CSP meta stays byte-identical to upstream. It allows inline `style` attributes, and only the OG page uses them.
+- Event-derived text (repo names and descriptions, profile names, the 404 path) renders only as React text. It never reaches an `href`, `src` or `style`.
+- Every `href` is a constant, an upstream helper (`useDefaultRepoPath`), or built with `encodeURIComponent`.
+- External links open in the same tab, as upstream's do. Any future `target="_blank"` needs `rel="noopener noreferrer"`.
+- Brand residue in overlays is limited to the attribution on About (see "Ratchet and gate impact").
+  - Dan's key appears only as a literal npub, never assembled at runtime, so the ratchet counts it.
+  - Brand strings are never split or encoded to get past the ratchet.
+
+### Claims
+
+Copy states what is true today, and nothing more:
+
+- "Served from our own hardware in El Salvador", never "run from El Salvador on hardware we own".
+- "Tracks upstream gitworkshop, with a weekly drift check", never "merges upstream every week".
+
+These apply to the landing tiles, the closing CTA, the footer tagline, About and the OG image.
+
+### Header (`AppHeader`)
+
+Purpose: identity plus the app's global actions. It keeps upstream's controls and adds the SovTech mark, the wordmark and a link to sovtech.pro.
+
+Frame (the same as upstream): `sticky top-0 z-50 h-14 border-b border-border/40 bg-background/80 backdrop-blur-xl`, with a `container max-w-screen-xl px-4 md:px-8` inside.
+
+1. A "Skip to content" link, hidden until focused (`sr-only focus:not-sr-only`).
+   - Activating it sets `tabIndex = -1` on `document.querySelector("main")` and focuses that element. AppRouter owns `<main>`, and AppRouter is never edited.
+2. A home link to `/` with the accessible name "SovTech Git home".
+   - A 32px `rounded-md bg-primary text-primary-foreground` tile holding a 20px BrandMark.
+   - Then the wordmark "SovTech" with " Git" in `text-brand`, set in `font-mono font-bold`.
+   - The wordmark shows from `sm` up; phones show the mark only.
+3. The right cluster (`ml-auto flex items-center gap-2`), in order:
+   - A `sovtech.pro` text link with an ArrowUpRight icon, to `https://www.sovtech.pro`, from `lg` up, in `font-mono text-xs text-muted-foreground hover:text-foreground`.
+   - Search:
+     - From `sm` up, the HeaderSearchBar copy: a form that navigates to `/search?q=<encodeURIComponent(q)>`, or to `/search` when empty. Placeholder "Search repositories…". It mirrors `?q` while on `/search`.
+     - Below `sm`, the HeaderSearchIcon copy: an icon toggle that opens the same form, with a "Close search" button.
+   - New repository: a Plus icon button with the tooltip "New repository" and `aria-label="Create repository"`. Logged-in only. It opens upstream's `CreateRepoDialog`; the header holds its `isOpen`/`onClose` state.
+   - `NavBarNotificationBadge` (links to `/notifications`). Logged-in only.
+   - A Settings gear linking to `/settings`, with `aria-label="Settings"`. Logged-out only; logged-in users reach Settings from the AccountSwitcher menu.
+   - `<LoginArea className="max-w-60" />`.
+
+- Reuses: `LoginArea`, `NavBarNotificationBadge`, `CreateRepoDialog`, `useActiveAccount`, the ui `Button`, `Input` and `Tooltip`, and `cn`.
+- Drops:
+  - the `/icons/icon.svg` image, replaced by the inline BrandMark so the header never depends on the asset swap;
+  - the search input's 30%-alpha pink focus ring, leaving the Input's full `ring-ring`.
+- Link targets: `/`, `/search`, `/search?q=…`, `/settings`, `/notifications` (via the badge) and `https://www.sovtech.pro`. Every upstream target and component is kept, so the header has no parity waiver.
+
+### Footer (`AppFooter`)
+
+Purpose: site map, theme choice, provenance and build identity.
+
+Frame: `mt-24 border-t border-border/40 bg-muted/30`, with the same container as the header.
+
+1. Brand block:
+   - a home link to `/` (a 24px tile plus the wordmark);
+   - the tagline "Git over Nostr, served from our own hardware in El Salvador.";
+   - the legal line "© 2026 Sovereign Technology · MIT".
+2. `<nav aria-label="Footer">`, three columns. Each has a mono uppercase `text-xs` label and a real `<ul>`:
+   - Get started:
+     - Install ngit → `DOCUMENTATION_URLS.install`
+     - Quick start → `DOCUMENTATION_URLS.quickstart`
+     - About → `/about`
+   - Navigate:
+     - Dashboard → `/`
+     - Landing page → `/landing`
+     - Browse repositories → `/search`
+   - SovTech:
+     - sovtech.pro → `https://www.sovtech.pro`
+     - Source on Nostr → `/<SOVTECH_GIT_NADDR>`
+     - GitHub mirror → `https://github.com/SovereignTechnology/sovtech-git`
+     - Report an issue → `/<SOVTECH_GIT_NADDR>/issues`
+3. Theme control: a three-option `ToggleGroup type="single"` with `aria-label="Theme"`, visible at every width.
+   - Options: Light (Sun), Dark (Moon) and System (SunMoon), each with a text label; the pressed one is bold as well as filled.
+   - It reads `use$(themeMode)` and writes `setThemeMode`.
+   - It ignores the empty value that Radix emits when the pressed item is clicked again.
+4. Bottom bar (`border-t`, at least `h-10`, wrapping on narrow screens):
+   - Left: the build string, exactly as upstream builds it: `Android v<version> · ` or `Web · `, then `<commitDate>+<sha7>`, from `__APP_RELEASE_VERSION__`, `__COMMIT_DATE__` and `__GIT_COMMIT__`. Plain text, in `font-mono text-xs text-muted-foreground`.
+   - Right: "Fork of gitworkshop · MIT", linking to `/about#lineage`.
+
+- Reuses: `DOCUMENTATION_URLS`, `themeMode` and `setThemeMode` from `@/services/settings`, `use$`, and the ui `ToggleGroup`.
+- Drops:
+  - the `gitworkshop.dev` wordmark and upstream's tagline;
+  - the cycle button, and with it the ui `Button` (the footer's one parity waiver) and the copied `NEXT_MODE` table, which duplicates `cycleThemeMode`'s order and would drift;
+  - `text-muted-foreground/50` on the build string, which fails AA.
+
+### Landing (`LandingPage`)
+
+Purpose: the logged-out home page. It keeps upstream's section skeleton, with one added strip, so drift ports stay line for line.
+
+The page sets no head tags. `Index.tsx` is not shadowed and owns them, and `head.ts` rewrites its title to "SovTech Git — Decentralized Git over Nostr".
+
+1. Hero (the page's h1):
+   - A static eyebrow pill, "Sovereign Technology · El Salvador" (mono uppercase `text-xs`, `border-brand/30 bg-brand/10`, foreground text).
+   - A 64px BrandMark tile.
+   - The h1, in mono, `text-4xl md:text-5xl lg:text-6xl tracking-tight text-balance`: "Your keys. Your code.", then a second line in `text-brand`, "Git over Nostr."
+   - The lead paragraph: "SovTech Git is a web client for git collaboration over Nostr and GRASP, run by Sovereign Technology in El Salvador. Browse repositories, open issues and review pull requests, signed with your own keypair. No account to create, no platform to trust."
+     - "GRASP" links to `DOCUMENTATION_URLS.grasp`.
+   - CTAs:
+     - "Browse repositories" → `/search` (primary);
+     - "Install ngit" → `DOCUMENTATION_URLS.install` (outline).
+   - A static terminal card (mono `text-sm`, a `<figure>` with `aria-label="Example"`):
+     - `# publish a repository` and `$ ngit init`;
+     - `# propose a change` and `$ git push -u origin pr/my-change`;
+     - a caret, `aria-hidden`, blinking only under `motion-safe:`.
+   - A footnote in `text-xs text-muted-foreground`: "A fork of gitworkshop, with SovTech defaults. Read the lineage", linking to `/about#lineage`.
+2. From SovTech (first of the two strips):
+   - The h2 "From SovTech", with the subline "Repositories announced by Sovereign Technology's own key."
+   - Only repositories announced by the SovTech npub (`83d8bce2…3434`), from upstream's `useUserRepositories`: the hook and relay query a profile page uses. No new network path.
+   - Up to 6 `FeaturedRepoCard`s, with 3 skeletons while the list is empty.
+   - The strip hides itself (renders nothing) when the list is still empty 2 s after it last changed, the same settle upstream's strip uses, and comes back if repositories arrive later.
+3. Live on the network:
+   - The h2 "Live on the network", with the subline "Recent repositories on GRASP servers, straight from the Nostr git index. Published by their authors, not reviewed by SovTech."
+   - "Browse all" → `/search` (outline, from `sm` up). On phones, a full-width "Browse all repositories" sits below the grid instead.
+   - A grid of 6 `FeaturedRepoCard`s in 1, 2 or 3 columns. Each card shows:
+     - the name (h3);
+     - the description, clamped to 2 lines;
+     - up to 2 maintainers (`UserLink noLink`, `avatarSize="xs"`);
+     - the relative time.
+   - Each card links to `useDefaultRepoPath(repo)`.
+   - Data, unchanged from upstream: `useRepositorySearch("")`, filtered to `graspCloneUrls.length > 0`, first 6, with skeletons until results settle and a 2 s settle before the empty state.
+   - The empty state reads "No repositories found yet. Check your relay connections in Settings.", linking to `/settings`.
+4. How it works: the h2 "How it works", with the subline "Three steps, no account."
+   - Step 01, Install ngit: "One command installs ngit and git-remote-nostr on Linux, macOS or Windows."
+     - CTA "Install ngit" → `DOCUMENTATION_URLS.install`.
+     - Text link "Quick start" → `DOCUMENTATION_URLS.quickstart`.
+   - Step 02, Publish your repo: "Run ngit init in any git repository. It announces the repo on Nostr relays and pushes it to GRASP servers such as git.sovit.xyz. No signup, just your keypair."
+   - Step 03, Collaborate in the open: "Issues, patches and pull requests travel as signed Nostr events. Anyone can contribute from any NIP-34 client, this one included."
+5. Why SovTech Git: the h2, with the subline "Git that answers to its owners, not to a platform." Six tiles, each an icon, an h3 and one sentence:
+   - Key, "Your keys, your identity": "A Nostr keypair is your account. Sign in with a browser extension or a remote signer; there is nothing for anyone to suspend."
+   - Shield, "No platform in the middle": "This site is a static client. Your code lives on the GRASP servers and relays you choose, ours in El Salvador among them."
+   - GitBranch, "Plain git": "Clone, branch, commit and push as you do today. ngit adds a Nostr transport; it does not replace git."
+   - MapPin, "Served from El Salvador": "Served from our own hardware in El Salvador, with defaults that include our own relay and GRASP server."
+   - LockOpen, "Open and forkable": "MIT licensed. Tracks upstream gitworkshop, with a weekly drift check; the source is public on Nostr and GitHub."
+   - Users, "Interoperable": "Built on NIP-34 and GRASP, so everything you publish here is readable by every Nostr git client."
+6. Closing CTA: a panel with `border-brand/30` and a radial tint of at most 10% (`from-brand/10`).
+   - The badge "Open source · MIT".
+   - The h2 "Your repo. Your keypair. Your rules."
+   - "Push code, track issues and review changes over Nostr, from a client served from our own hardware in El Salvador."
+   - CTAs: "Install ngit" (primary) and "Browse repositories" (outline).
+   - Small print: "Need sovereign infrastructure for your team? Sovereign Technology builds and runs it", linking to `https://www.sovtech.pro`.
+
+- Reuses: `useRepositorySearch`, `useUserRepositories`, `useDefaultRepoPath`, `UserLink`, `formatDistanceToNow`, the `ResolvedRepo` type (a type-only import from `@/lib/nip34`), `DOCUMENTATION_URLS`, and the ui `Button`, `Card`, `Skeleton` and `Badge`.
+- Drops:
+  - the fork-glyph hero SVG and the pink/rose gradients;
+  - the gitgrasp.com link, replaced by `DOCUMENTATION_URLS.grasp`;
+  - the "Why ngit?" copy that names gitworkshop.dev;
+  - the gradient connector line;
+  - `text-[10px]` text: 12px is the floor.
+
+### About (`About`)
+
+Purpose: honest lineage, the licence, the protocol in brief, and where feedback goes.
+
+- Head tags: the title "About — SovTech Git" (built from `APP_NAME`), the description "SovTech Git is Sovereign Technology's fork of gitworkshop, a git-over-Nostr web client: lineage, licence and feedback.", `ogImage` `/og-image.png` at 1200×630, and `twitterCard` `summary_large_image`.
+- Layout: `container max-w-screen-md`. Headings are mono and sit outside the prose, since theme.css keeps prose headings in the body font; each paragraph block is `prose prose-neutral dark:prose-invert`. Links are `text-brand underline-offset-2`.
+- The page scrolls to `#lineage`, `#licence`, `#protocol` or `#feedback` when the URL names one: ScrollToTop leaves anchors to the page.
+
+1. The h1 "About SovTech Git". Lead: "SovTech Git is Sovereign Technology's build of gitworkshop, the git-over-Nostr web client by DanConwayDev."
+2. The h2 "Lineage" (`id="lineage"`): "It is a fork of gitworkshop that tracks upstream, with a weekly drift check. Every feature (repositories, issues, patches, pull requests, notifications) is upstream's, and its documentation describes them. We change the look, this shell (header, footer, landing, about, 404 and the preview image) and the default relays and GRASP servers, which you can change in Settings."
+   - "gitworkshop" links to the upstream repository in the app: `/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/gitworkshop`, held as one constant, `UPSTREAM_REPO_PATH`.
+   - "its documentation" → `DOCUMENTATION_URLS.gitworkshop`.
+   - "Settings" → `/settings`.
+3. The h2 "Licence" (`id="licence"`): "Upstream's code is MIT licensed and its copyright notice is kept in full. SovTech's changes are MIT licensed too."
+   - "Read the licence" is a plain `<a href="/LICENSE.txt">`: a static file, not a router link.
+4. The h2 "The protocol" (`id="protocol"`): one short paragraph.
+   - It links NIP-34 (`https://nips.nostr.com/34`) and GRASP (`DOCUMENTATION_URLS.grasp`).
+   - It links the tools ngit (`DOCUMENTATION_URLS.home`) and ngit-grasp (`DOCUMENTATION_URLS.selfHostGrasp`).
+   - It keeps upstream's line on other clients (n34, budabit, gitplaza, shakespeare) with upstream's targets, held in `links.ts` as `OTHER_CLIENTS`.
+5. The h2 "Feedback" (`id="feedback"`), in a bordered callout (not `role="alert"`): "Found a bug, or something we changed that you don't like? Open an issue on the SovTech Git repository over Nostr."
+   - Buttons: "Open an issue" → `/<SOVTECH_GIT_NADDR>/issues`; "Browse the source" → `/<SOVTECH_GIT_NADDR>`.
+   - "For bugs in upstream features, the upstream repository is the better place", linking to `UPSTREAM_REPO_PATH`.
+
+- `SOVTECH_GIT_NADDR` (in `links.ts`) is `nip19.naddrEncode({ kind: 30617, pubkey: "83d8bce2f7d6966f306e6f1a712497cf0a2c77d073923136a0e2bb54963b3434", identifier: "sovtech-git", relays: ["wss://git.sovit.xyz", "wss://relay.ngit.dev"] })`.
+  - A vitest decodes it back to `30617:83d8bce2…3434:sovtech-git`.
+  - The relay hints follow whatever relays the phase 4 announcement uses.
+  - Until that announcement exists, these links show upstream's not-found state.
+- Reuses: `DOCUMENTATION_URLS`, `APP_NAME`, `useSeoMeta`, `Link` and `Button`.
+- Drops:
+  - Dan's essay (The Need, The Opportunity, The Philosophy, The Solution, Future Improvements, the CI/CD vision, arjen's runner, the Vercel note). It stays in upstream's source.
+  - Both FeedbackAlerts, with Dan's issue naddrs and nprofile.
+  - The `role="alert"` misuse.
+
+### 404 (`NotFound`)
+
+Purpose: a dead end that offers a way back. NIP19Page, CICoordinatorPage, CIProviderPage, RelayPage and RepoCoordinatorsPage also render it for bad identifiers, so the copy stays generic.
+
+- Head tags: the title "Page not found — SovTech Git", `robots: "noindex"`, and upstream's description.
+
+A centred block with `py-24`:
+
+1. "404", in mono `text-6xl text-brand`, `aria-hidden`.
+2. The h1 "Nothing lives at this path", in mono `text-2xl`.
+3. A terminal box (mono `text-sm`, `bg-muted`, `rounded-md`, truncating):
+   - `$ git checkout <path>`
+   - `error: pathspec '<path>' did not match any file(s) known to git`
+   - `<path>` is `location.pathname` as a text node, cut to 80 characters.
+4. "The link may be mistyped, or what it points to has not reached the relays we asked yet."
+5. Buttons:
+   - "Go home" → `/` (a router Link, primary);
+   - "Search repositories" → `/search?q=<encodeURIComponent(last path segment, decoded once)>` (outline), or `/search` for `/`.
+
+- Keeps upstream's `console.error` of the path.
+- Drops the hard-coded gray and blue colours, and the full page reload of `<a href="/">`.
+
+### OG image (`OgImagePreview`, route `/og-preview`)
+
+Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `asset-swaps.tsv`.
+
+- The page has a stable element, `id="sovtech-og"`, exactly 1200×630.
+  - The element gets `data-og-ready="true"` once the Inter font has loaded and `document.fonts.ready` resolves.
+  - The page is a fixed, full-window layer above the app shell, so at a 1200×630 window the element is the whole viewport.
+- The capture runs on the laptop, from a CI-built `dist` only: the green MR pipeline's verify `dist` artifact, extracted with a path-safety check into a work directory outside the repository, served on `127.0.0.1` by a standard-library Python server with an SPA fallback, and shot with headless Chromium in a throwaway `--user-data-dir` under that directory, never a real profile: `chromium --headless=new --hide-scrollbars --window-size=1200,630 --virtual-time-budget=8000 --screenshot=<out>.png http://127.0.0.1:<port>/og-preview`. The PNG must be 1200×630 and under 200 KB.
+- The design is theme-independent: fixed hex in inline styles, no network, no animation, inline SVG only.
+- Composition, with everything inside a safe area of x 80–1120 and y 60–570:
+  - Background `#0A0A0A`, with a 40px orange grid at 6% alpha, a soft orange radial glow at the top right (at most 10%), and a 6px `#F7931A` bar down the left edge.
+  - Top left: `git.sovtech.pro`, mono 24px, `#F7931A`.
+  - The hero at y≈170: "Your keys." in `#FAFAFA` and "Your code." in `#F7931A`, mono 88px bold, line-height 1.1, letter-spacing -2px.
+  - Below it: "Git over Nostr, served from our own hardware in El Salvador.", Inter 30px, `#A3A3A3`.
+  - Bottom left: a 56px `#F7931A` rounded tile with a `#0A0A0A` BrandMark, then "SovTech" in `#FAFAFA` and " Git" in `#F7931A`, mono 40px bold.
+  - Bottom right: "NIP-34 · GRASP · ngit", mono 22px, `#8A8A8A`.
+  - Every text colour is at least 5.7:1 on `#0A0A0A` (`#8A8A8A` is 5.73:1).
+- Drops the purple/pink palette, the GitWorkshop wordmark, "powered by Git & Nostr" and the preview outline.
+
+### Tokens
+
+- Colour roles. theme.css (MR 2.2) sets the values; the shell uses only the role classes.
+  - Page background: dark `#0A0A0A`, light `#FCFCFC`. Page text: dark `#EDEDED`, light `#171717`.
+  - Brand fill, `bg-primary`: `--brand-500`, which is `#F7931A` in dark mode with a `#0A0A0A` label (8.61:1) and `#B05907` in light mode with a white label (4.9:1).
+  - Brand text, `text-brand`: `--brand-500` as well, `#F7931A` in dark mode (8.61:1 on the page) and `#B05907` in light mode (4.8:1 on the page, 4.9:1 on cards).
+  - Muted text: dark `#9E9E9E`, light `#666666`.
+  - Focus ring: `--ring`, the same `--brand-500`.
+- Radius: `--radius` 0.5rem, matching www's `rounded-lg`.
+  - Tiles and buttons use `rounded-md`; cards use `rounded-lg`.
+  - `rounded-full` is for badges and pills only.
+- Spacing: Tailwind's 4px scale, limited to steps 1, 2, 3, 4, 6, 8, 12, 16 and 24.
+  - The container is `max-w-screen-xl px-4 md:px-8`.
+  - Sections use `py-16 md:py-24`; the header is `h-14`.
+- Type:
+  - Body text: Inter Variable (self-hosted, `font-sans` via tailwind-brand).
+  - Headings and the wordmark: `font-mono`, bold, `tracking-tight`, on Tailwind's default system stack: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace.
+  - Scale:
+    - display `text-4xl`/`5xl`/`6xl` (36/48/60px);
+    - h2 `text-2xl md:text-3xl`;
+    - h3 `text-base`;
+    - lead `text-lg md:text-xl`;
+    - body `text-base`;
+    - small `text-sm`;
+    - meta and eyebrow `text-xs`, the 12px floor. Eyebrows are mono, uppercase, `tracking-wider`.
+- Focus: every interactive element gets `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`, with `ring-offset-2 ring-offset-background` on buttons, tiles and nav links. Never an alpha ring.
+- Motion (CSS only):
+  - `transition-colors` and `transition-opacity` at 150ms ease-out.
+  - Transforms (the card lift, `-translate-y-0.5`) at 200ms, and only under `motion-safe:`.
+  - No infinite animation in the overlays, except the caret, which is under `motion-safe:`.
+  - theme.css carries a global `prefers-reduced-motion: reduce` guard (added with the shell): animation and transition durations of 0.01ms, one iteration, and `scroll-behavior: auto`.
+    - The guard also calms upstream's skeletons, spinners and dialogs.
+    - It uses 0.01ms rather than `none` so that Radix still receives `animationend`.
+
+### Accessibility (WCAG 2.2 AA)
+
+- Measured contrast (theme.css as shipped):
+  - `#F7931A` on `#0A0A0A` is 8.61:1 (AAA). This is the brand text and the ring in dark mode.
+  - `#F7931A` on white is 2.30:1, so the bright orange is never text, an icon or a ring on a light surface; light mode uses `#B05907`.
+  - Light-mode brand text `#B05907` is 4.8:1 on the page, 4.9:1 on cards and 4.7:1 on the footer, but only 4.49:1 on a full `bg-muted` and 4.2:1 on a 10% brand tint. So brand text never sits on either: the eyebrow pill's text is the foreground colour, and the icons on tints are non-text (3:1).
+  - Button labels: `#0A0A0A` on `#F7931A` is 8.61:1; white on `#B05907` is 4.9:1. Overlays never put white on the bright orange.
+  - Muted text: `#9E9E9E` is 7.39:1 on `#0A0A0A`; `#666666` is 5.62:1 on `#FCFCFC`. No text has reduced opacity.
+- Structure:
+  - One h1 per page, sections h2, cards h3.
+  - `<header>`, and `<footer>` with a labelled `<nav>` and real lists; the steps and tiles are lists too.
+  - Decorative icons and the mark are `aria-hidden`.
+  - Icon-only buttons have an `aria-label` and a tooltip.
+- Targets are 32×32px (`h-8 w-8`), above the 24px minimum.
+- The layout holds at 320px wide and at 200% zoom. The wordmark hides below `sm` instead of wrapping.
+- The theme control is a labelled single-select group that announces its state. No state is shown by colour alone.
+- Checked in the plan's UI verification: light and dark screenshots of the CI `dist`, plus `getComputedStyle` contrast checks.
+
+### Ratchet and gate impact
+
+- `shadow-map.tsv` has the six rows above, which release mode requires.
+- The shell empties `pending`:
+  - `dan-bech32-tlv`, 4 to 0 (About's feedback naddrs and nprofiles);
+  - `danconwaydev`, About's two;
+  - `gitworkshop-host`, the footer, landing and About copy (5), and the SubordinateForkField input hint (1), which moves to `functional`.
+- `functional` after the shell, each with its reason in `brand-allowlist.json`:
+  - `gitworkshop-host` 7: the host sets that recognise upstream links (6), and the input hint that names them (1). The engine rule `subordinate-fork-hint` makes the hint read "gitworkshop.dev or git.sovtech.pro repo URLs", which the host sets accept since the defaults MR.
+  - `danconwaydev` 2: `public/LICENSE.txt` and About's credit line.
+  - `dan-npub` 1: `UPSTREAM_REPO_PATH`.
+
+### What stays upstream
+
+- `Index.tsx`: logged-in visitors get the Dashboard, logged-out visitors the landing overlay. Its head tags are rewritten by `head.ts`.
+- `AppRouter.tsx` and every route, including:
+  - `/landing`, `/about` and `/og-preview`;
+  - the ngit.dev doc redirects (`/ngit`, `/install`, `/quick-start`, `/docs/*`);
+  - the NotFound fallbacks in NIP19Page, CICoordinatorPage, CIProviderPage, RelayPage and RepoCoordinatorsPage, which receive the overlay through `resolveId`.
+- Sign-in: `LoginArea`, `AccountSwitcher` (its menu holds Settings and Outbox) and `LoginDialog`.
+- `NavBarNotificationBadge`, `CreateRepoDialog`, `RepositoriesPage`, `useRepositorySearch` and `useUserRepositories`.
+- The Settings page and the theme API. `settings.ts` gets only MR 2.2's default seam.
+- `DOCUMENTATION_URLS`: the docs stay on ngit.dev, and SovTech hosts none.
+- Handled elsewhere:
+  - index.html's title, meta and splash: the MR 2.1 engine;
+  - the manifest and icons: MR 2.2.
+- Repo, PR, issue and dashboard pages change only through the theme, as do the ui primitives.
 
 ## Upstream sync
 

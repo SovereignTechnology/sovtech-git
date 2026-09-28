@@ -1,32 +1,21 @@
 {
-  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending was seeded from the first CI run of this gate (pipeline 3609, upstream 420c0c3d unbranded), and each later MR lowers or deletes the entries it clears. The functional entry was counted from upstream source at 420c0c3d and confirmed by that dist run (gitworkshop-host seen=28 = 6 functional + 22 pending). Phase 2.1 (overlay engine) cleared gitworkshop-word, gitworkshop-url, manifest-name and og-url, and cut gitworkshop-host from 22 to 6.",
+  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending was seeded from the first CI run of this gate (pipeline 3609, upstream 420c0c3d unbranded), and each later MR lowered or deleted the entries it cleared. Phase 2.1 (overlay engine) cleared gitworkshop-word, gitworkshop-url, manifest-name and og-url, and cut gitworkshop-host from 22 to 6. Phase 2.3 (the shell) cleared the rest: the shadowed footer, landing and About copy, and About's feedback naddr/nprofile links. What remains is attribution and upstream input the host sets accept, all functional, so pending is empty.",
   "functional": [
     {
       "term": "gitworkshop-host",
-      "count": 6,
-      "reason": "Host-set literals that recognise upstream links pasted as input, which the fork keeps: src/lib/gitworkshopUrl.ts:1 (2) and src/lib/repoUpstreamInput.ts:106,113 (4)."
-    },
-    {
-      "term": "danconwaydev",
-      "count": 1,
-      "reason": "The MIT copyright notice the licence requires to be kept: public/LICENSE.txt (Copyright (c) 2025 DanConwayDev)."
-    }
-  ],
-  "pending": [
-    {
-      "term": "gitworkshop-host",
-      "count": 6,
-      "removed_by": "Phase 2.3 shell (the AppFooter, About and LandingPage copy, all shadowed) and 2.4 defaults (the SubordinateForkField input hint, once the host sets accept git.sovtech.pro)"
+      "count": 7,
+      "reason": "Host-set literals that recognise upstream links pasted as input, which the fork keeps: src/lib/gitworkshopUrl.ts:3 (2) and src/lib/repoUpstreamInput.ts:108,115,116 (4); and the input hint that names them, src/components/repo/SubordinateForkField.tsx:232 (1), which the engine's subordinate-fork-hint rule extends with git.sovtech.pro."
     },
     {
       "term": "danconwaydev",
       "count": 2,
-      "removed_by": "Phase 2.3 shell (About page)"
+      "reason": "Attribution: the MIT copyright notice the licence requires to be kept, public/LICENSE.txt (Copyright (c) 2025 DanConwayDev) (1), and the About page's credit line, src/sovtech/overlays/About.tsx ('the git-over-Nostr web client by DanConwayDev') (1)."
     },
     {
-      "term": "dan-bech32-tlv",
-      "count": 4,
-      "removed_by": "Phase 2.3 shell (About page feedback naddr/nprofile links)"
+      "term": "dan-npub",
+      "count": 1,
+      "reason": "Attribution: upstream's repository in this app, src/sovtech/links.ts UPSTREAM_REPO_PATH (/<Dan's npub>/gitworkshop), linked from the About page's lineage and feedback sections; a literal npub, never assembled at run time."
     }
-  ]
+  ],
+  "pending": []
 }

@@ -166,3 +166,18 @@ h6 {
 .group\/heading {
   font-family: inherit;
 }
+
+/* Reduced motion: animations and transitions finish at once and smooth
+   scrolling is off. 0.01ms rather than none, so Radix still receives
+   animationend. This also calms upstream's skeletons, spinners and dialogs;
+   the shell's own transforms and caret sit under motion-safe: as well. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

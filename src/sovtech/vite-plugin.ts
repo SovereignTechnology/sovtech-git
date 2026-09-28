@@ -67,10 +67,11 @@ export interface GlobalRule {
  * build. The URL rule runs first so a capitalised host inside a URL becomes
  * a URL, not the name.
  *
- * The bare lowercase host is left alone on purpose. The copy that still names
- * it describes upstream (About, the landing page), the footer that the shell
- * overlay replaces, or input the upstream host sets still accept
- * (SubordinateForkField); the storage names and d-tags are functional.
+ * The bare lowercase host is left alone on purpose: the shell overlays
+ * replace the copy that described upstream (About, the landing page, the
+ * footer), and what remains names input the upstream host sets still accept
+ * (SubordinateForkField, which the subordinate-fork-hint rule below extends);
+ * the storage names and d-tags are functional.
  */
 export const GLOBAL_RULES: GlobalRule[] = [
   {
@@ -126,6 +127,17 @@ export const EXACT_RULES: ExactRule[] = [
     file: "src/components/zap/ZapModal.tsx",
     find: 'appName="gitworkshop zap"',
     replacement: 'appName="SovTech Git zap"',
+    count: 1,
+  },
+  {
+    // The upstream-fork input hint: the host sets accept git.sovtech.pro as
+    // well (src/sovtech/defaults.ts WEB_HOSTS), so the hint names both. The
+    // gitworkshop.dev it keeps is brand-allowlist.json functional.
+    id: "subordinate-fork-hint",
+    file: "src/components/repo/SubordinateForkField.tsx",
+    find: '<code className="font-mono">gitworkshop.dev</code> repo URLs,',
+    replacement:
+      '<code className="font-mono">gitworkshop.dev</code> or{" "}<code className="font-mono">git.sovtech.pro</code> repo URLs,',
     count: 1,
   },
 ];

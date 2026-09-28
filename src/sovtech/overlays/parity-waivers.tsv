@@ -1,0 +1,7 @@
+# Upstream header and footer parts an overlay deliberately does not keep.
+# src/sovtech/__tests__/shell.test.ts fails on any link target or imported
+# JSX component of the acked upstream AppHeader or AppFooter that the overlay
+# lacks and this file does not list, and on any row here that no longer
+# waives anything.
+overlay	kind	value	reason
+AppFooter	component	Button	The theme cycle button became a three-option ToggleGroup (shell spec, Footer, Drops).
