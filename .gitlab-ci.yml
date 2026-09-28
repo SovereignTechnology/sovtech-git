@@ -45,6 +45,13 @@ workflow:
 
 default:
   tags: [$SOVGIT_RUNNER_TAG]
+  # Both runner VMs run at idle CPU priority, and ubuntu-server's governor
+  # SIGTERMs the largest CI VM when the host swaps hard; that job ends as a
+  # runner system failure. Retrying requeues it instead of failing the
+  # pipeline. Script failures are never retried.
+  retry:
+    max: 2
+    when: [runner_system_failure, stuck_or_timeout_failure]
 
 variables:
   # Full history: the gate's ranges reach back to UPSTREAM_BASE.

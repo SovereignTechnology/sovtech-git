@@ -64,6 +64,9 @@ fork never edits.
   relay.primal.net for new accounts), and links to git.sovtech.pro and
   git.sovit.xyz are recognised next to upstream's host. The git index,
   lookup relays, Blossom servers and CORS proxy keep upstream's values.
+- CI jobs are retried up to twice after a runner system failure or a stuck or
+  timed-out job, so a job the ubuntu-server CI governor stops under memory
+  pressure is requeued instead of failing the pipeline.
 - The SovTech shell (`src/sovtech/overlays/`, spec in `SOVTECH.md`): a new
   header, footer, landing page, About, 404 and OG image page, swapped in
   through six `shadow-map.tsv` rows with tsc-checked export shapes
