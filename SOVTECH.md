@@ -126,12 +126,12 @@ claims cut down to exact facts. Every other open decision took its default.
 
 ### Claims
 
-Copy states what is true today, and nothing more:
+Copy states what is true today, and nothing more. Cameron chose "soften to exact facts" on 2026-09-27:
 
-- "Served from our own hardware in El Salvador", never "run from El Salvador on hardware we own".
-- "Tracks upstream gitworkshop, with a weekly drift check", never "merges upstream every week".
-
-These apply to the landing tiles, the closing CTA, the footer tagline, About and the OG image.
+- Hardware: "Served from our own hardware in El Salvador", never "run from El Salvador on hardware we own".
+  - The claim appears only on the landing tile "Served from El Salvador", the one place the draft made a hardware claim. Softening never adds the claim anywhere else.
+  - The footer tagline, the closing CTA and the OG image keep the draft's "run from El Salvador" or "run in El Salvador": where Sovereign Technology operates, and nothing about hardware.
+- Upstream: "Tracks upstream gitworkshop, with a weekly drift check", never "merges upstream every week". The weekly job only reports drift; merges are done by hand. This applies to the landing tile and About.
 
 ### Header (`AppHeader`)
 
@@ -169,7 +169,7 @@ Frame: `mt-24 border-t border-border/40 bg-muted/30`, with the same container as
 
 1. Brand block:
    - a home link to `/` (a 24px tile plus the wordmark);
-   - the tagline "Git over Nostr, served from our own hardware in El Salvador.";
+   - the tagline "Git over Nostr, run from El Salvador.";
    - the legal line "© 2026 Sovereign Technology · MIT".
 2. `<nav aria-label="Footer">`, three columns. Each has a mono uppercase `text-xs` label and a real `<ul>`:
    - Get started:
@@ -251,7 +251,7 @@ The page sets no head tags. `Index.tsx` is not shadowed and owns them, and `head
 6. Closing CTA: a panel with `border-brand/30` and a radial tint of at most 10% (`from-brand/10`).
    - The badge "Open source · MIT".
    - The h2 "Your repo. Your keypair. Your rules."
-   - "Push code, track issues and review changes over Nostr, from a client served from our own hardware in El Salvador."
+   - "Push code, track issues and review changes over Nostr, from a client run in El Salvador."
    - CTAs: "Install ngit" (primary) and "Browse repositories" (outline).
    - Small print: "Need sovereign infrastructure for your team? Sovereign Technology builds and runs it", linking to `https://www.sovtech.pro`.
 
@@ -331,7 +331,7 @@ Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `
   - Background `#0A0A0A`, with a 40px orange grid at 6% alpha, a soft orange radial glow at the top right (at most 10%), and a 6px `#F7931A` bar down the left edge.
   - Top left: `git.sovtech.pro`, mono 24px, `#F7931A`.
   - The hero at y≈170: "Your keys." in `#FAFAFA` and "Your code." in `#F7931A`, mono 88px bold, line-height 1.1, letter-spacing -2px.
-  - Below it: "Git over Nostr, served from our own hardware in El Salvador.", Inter 30px, `#A3A3A3`.
+  - Below it: "Git collaboration over Nostr, run from El Salvador.", Inter 30px, `#A3A3A3`.
   - Bottom left: a 56px `#F7931A` rounded tile with a `#0A0A0A` BrandMark, then "SovTech" in `#FAFAFA` and " Git" in `#F7931A`, mono 40px bold.
   - Bottom right: "NIP-34 · GRASP · ngit", mono 22px, `#8A8A8A`.
   - Every text colour is at least 5.7:1 on `#0A0A0A` (`#8A8A8A` is 5.73:1).

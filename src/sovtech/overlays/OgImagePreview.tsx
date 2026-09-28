@@ -177,7 +177,7 @@ export default function OgImagePreview() {
           <div style={{ color: ORANGE }}>Your code.</div>
         </div>
         <div style={subline}>
-          Git over Nostr, served from our own hardware in El Salvador.
+          Git collaboration over Nostr, run from El Salvador.
         </div>
         <div style={footer}>
           <div style={{ display: "flex", alignItems: "center" }}>

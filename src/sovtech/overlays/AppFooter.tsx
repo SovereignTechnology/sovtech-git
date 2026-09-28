@@ -25,7 +25,7 @@ const gitCommit = __GIT_COMMIT__;
 const commitDate = __COMMIT_DATE__;
 const releaseVersion = __APP_RELEASE_VERSION__;
 
-const TAGLINE = "Git over Nostr, served from our own hardware in El Salvador.";
+const TAGLINE = "Git over Nostr, run from El Salvador.";
 const LEGAL = "© 2026 Sovereign Technology · MIT";
 
 const FOCUS_RING =

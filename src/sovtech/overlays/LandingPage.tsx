@@ -478,7 +478,7 @@ function FooterCTA() {
           </h2>
           <p className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
             {
-              "Push code, track issues and review changes over Nostr, from a client served from our own hardware in El Salvador."
+              "Push code, track issues and review changes over Nostr, from a client run in El Salvador."
             }
           </p>
 
