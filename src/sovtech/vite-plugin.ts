@@ -8,10 +8,14 @@
  * - transform: rewrites upstream brand copy in raw source under src/.
  * - transformIndexHtml: re-brands index.html; the CSP meta is never touched.
  * - configureServer and generateBundle: serve and emit the SovTech manifest.
+ * - renderChunk: marks the entry chunk of a build whose audit passed.
  *
  * `vite build` fails when a rule stops matching (buildEnd), so upstream copy
- * that moves breaks the build instead of shipping upstream branding. The dev
- * server and vitest share this plugin but never run those assertions.
+ * that moves breaks the build instead of shipping upstream branding. A build
+ * whose audit passed prints one line, even under `-l error`, and carries the
+ * AUDITED_SENTINEL mark in its entry chunk, so a build that skipped the audit
+ * shows in dist. The dev server and vitest share this plugin but never run
+ * those assertions.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -24,6 +28,9 @@ export const SITE_URL = "https://git.sovtech.pro";
 export const ENGINE_SENTINEL = "sovtech-overlay:engine";
 export const ENGINE_RULE = "engine-sentinel";
 const ENGINE_ENTRY = "src/main.tsx";
+
+/** Set by the entry chunk of a `vite build` whose audit passed. */
+export const AUDITED_SENTINEL = "sovtech-overlay:audited";
 
 export const INDEX_HTML_KEY = "index-html";
 const MANIFEST_FILE = "manifest.webmanifest";
@@ -334,6 +341,26 @@ export function auditCounts(
   return problems;
 }
 
+/** The line a build prints once its audit has passed. */
+export function auditSummary(rows: ShadowRow[]): string {
+  const parts = [
+    `${GLOBAL_RULES.length} global rules`,
+    `${EXACT_RULES.length} exact rules`,
+    `${rows.length} shadow rows`,
+  ];
+  return `SovTech overlay: audit passed (${parts.join(", ")})`;
+}
+
+/**
+ * An entry chunk with the audited mark appended. renderChunk runs this after
+ * minification, so the statement reaches dist as written; the leading newline
+ * keeps it out of any trailing line comment.
+ */
+export function withAuditedMark(code: string): string {
+  const key = JSON.stringify(AUDITED_SENTINEL);
+  return `${code}\n;Reflect.set(globalThis, Symbol.for(${key}), true);\n`;
+}
+
 // ------------------------------------------------------------ index.html ---
 
 const INDEX_TITLE = "SovTech Git — Decentralized Git over Nostr";
@@ -520,12 +547,17 @@ function rootsOf(root: string): string[] {
   return real === root ? [root] : [root, real];
 }
 
+/** The parts of the resolved config that decide whether a build is strict. */
+export type BuildMode = Pick<ResolvedConfig, "command"> & {
+  build?: Pick<ResolvedConfig["build"], "watch">;
+};
+
 /**
  * Whether buildEnd asserts the counts: `vite build` only. vitest and the dev
  * server run as "serve", and a watch build re-transforms changed files only.
  */
-function isStrictBuild(config: ResolvedConfig): boolean {
-  return config.command === "build" && !config.build.watch;
+export function isStrictBuild(config: BuildMode): boolean {
+  return config.command === "build" && !config.build?.watch;
 }
 
 function isOverlayImporter(importer: string, roots: string[]): boolean {
@@ -536,6 +568,7 @@ function isOverlayImporter(importer: string, roots: string[]): boolean {
 export function sovtech(): Plugin {
   let roots: string[] = [];
   let strict = false;
+  let audited = false;
   let rows: ShadowRow[] = [];
   let targets: ShadowTarget[] = [];
   const counts = new Map<string, number>();
@@ -564,6 +597,7 @@ export function sovtech(): Plugin {
     },
     buildStart() {
       counts.clear();
+      audited = false;
       for (const target of targets) {
         for (const file of [target.upstream, target.overlay]) {
           if (!existsSync(file)) {
@@ -649,6 +683,18 @@ export function sovtech(): Plugin {
       if (problems.length > 0) {
         this.error(`SovTech overlay: ${problems.join("; ")}`);
       }
+      audited = true;
+      // Straight to stdout: `vite build -l error` drops this.info.
+      process.stdout.write(`${auditSummary(rows)}\n`);
+    },
+    // Rollup renders chunks after buildEnd, and "post" runs after the
+    // minifier. map: null keeps the source map, which an append leaves exact.
+    renderChunk: {
+      order: "post",
+      handler(code, chunk) {
+        if (!audited || !chunk.isEntry) return null;
+        return { code: withAuditedMark(code), map: null };
+      },
     },
   };
 }

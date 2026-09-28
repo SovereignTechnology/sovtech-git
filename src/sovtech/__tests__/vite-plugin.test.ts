@@ -8,10 +8,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { basename, dirname, join, resolve } from "node:path";
+import type { Plugin } from "vite";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { APP_NAME as RUNTIME_APP_NAME } from "@/lib/constants";
 import {
+  AUDITED_SENTINEL,
   ENGINE_RULE,
   ENGINE_SENTINEL,
   EXACT_RULES,
@@ -22,6 +24,8 @@ import {
   SHADOW_HEADER,
   SOVTECH_MANIFEST,
   auditCounts,
+  auditSummary,
+  isStrictBuild,
   parseShadowMap,
   rebrandIndexHtml,
   resolveShadow,
@@ -29,13 +33,24 @@ import {
   scopedPath,
   shadowKey,
   shadowTargets,
+  sovtech,
+  withAuditedMark,
+  type BuildMode,
   type ResolveUpstream,
 } from "@/sovtech/vite-plugin";
 
 const root = process.cwd();
 const EXAMPLE = "src/components/Example.tsx";
+const SHADOW_MAP = "ci/sovtech/shadow-map.tsv";
 const CSP_META =
   /<meta\b[^>]*?http-equiv\s*=\s*["']content-security-policy["'][^>]*>/gi;
+
+/** Upstream files that between them fire every global rule. */
+const GLOBAL_RULE_FILES = [
+  "src/components/AppHeader.tsx",
+  "src/components/EventCardActions.tsx",
+  "src/components/IncompatibleProtocolError.tsx",
+];
 
 function read(file: string): string {
   return readFileSync(resolve(root, file), "utf8");
@@ -141,13 +156,8 @@ describe("rewriteSource", () => {
   });
 
   it("finds every global rule somewhere in upstream source", () => {
-    const files = [
-      "src/components/AppHeader.tsx",
-      "src/components/EventCardActions.tsx",
-      "src/components/IncompatibleProtocolError.tsx",
-    ];
     const seen = new Set<string>();
-    for (const file of files) {
+    for (const file of GLOBAL_RULE_FILES) {
       for (const key of rewriteSource(read(file), file).hits.keys()) {
         seen.add(key);
       }
@@ -191,7 +201,7 @@ describe("shadow map", () => {
   ].join("\t");
 
   it("parses the committed map, whose files all exist", () => {
-    const rows = parseShadowMap(read("ci/sovtech/shadow-map.tsv"));
+    const rows = parseShadowMap(read(SHADOW_MAP));
     for (const entry of rows) {
       expect(existsSync(resolve(root, entry.upstreamPath))).toBe(true);
       expect(existsSync(resolve(root, entry.overlayPath))).toBe(true);
@@ -316,6 +326,120 @@ describe("auditCounts", () => {
     const counts = cleanCounts();
     counts.set(EXACT_RULES[0].id, EXACT_RULES[0].count + 1);
     expect(auditCounts(counts, rows)).toHaveLength(1);
+  });
+});
+
+describe("isStrictBuild", () => {
+  it("asserts the counts in a one-off vite build only", () => {
+    const once: BuildMode = { command: "build", build: { watch: null } };
+    const watching: BuildMode = { command: "build", build: { watch: {} } };
+    expect(isStrictBuild(once)).toBe(true);
+    expect(isStrictBuild({ command: "serve" })).toBe(false);
+    expect(isStrictBuild(watching)).toBe(false);
+  });
+});
+
+type Hook = (this: unknown, ...args: unknown[]) => unknown;
+
+/** A hook's handler, whether the plugin defines it as a function or not. */
+function hookOf(plugin: Plugin, name: keyof Plugin): Hook {
+  const hook: unknown = plugin[name];
+  if (typeof hook === "function") return hook as Hook;
+  return (hook as { handler: Hook }).handler;
+}
+
+describe("the build audit", () => {
+  const CHUNK = "render(app);\n";
+  const rows = parseShadowMap(read(SHADOW_MAP));
+  const context = {
+    error(message: string): never {
+      throw new Error(message);
+    },
+  };
+
+  /** Upstream modules that between them fire every rule. */
+  const modules = new Set([
+    "src/main.tsx",
+    ...GLOBAL_RULE_FILES,
+    ...EXACT_RULES.map((rule) => rule.file),
+  ]);
+
+  /**
+   * A plugin that has seen one build up to buildEnd: the modules above, an
+   * import of every shadowed module and, when `html` is set, index.html.
+   */
+  async function build(command: BuildMode["command"], html: boolean) {
+    const plugin = sovtech();
+    const config = { root, command, build: { watch: null } };
+    hookOf(plugin, "configResolved").call(undefined, config);
+    hookOf(plugin, "buildStart").call(context, {});
+    const transform = hookOf(plugin, "transform");
+    for (const file of modules) {
+      transform.call(context, read(file), resolve(root, file));
+    }
+    const resolveId = hookOf(plugin, "resolveId");
+    const importer = resolve(root, "src/App.tsx");
+    for (const row of rows) {
+      const id = resolve(root, row.upstreamPath);
+      const upstream = { resolve: async () => ({ id }) };
+      const options = { attributes: {}, isEntry: false };
+      const source = `./${basename(row.upstreamPath)}`;
+      await resolveId.call(upstream, source, importer, options);
+    }
+    const indexHtml = hookOf(plugin, "transformIndexHtml");
+    if (html) indexHtml.call(undefined, read("index.html"));
+    return plugin;
+  }
+
+  /** Runs buildEnd and returns what it wrote to stdout. */
+  function finish(plugin: Plugin): string[] {
+    const write = vi.spyOn(process.stdout, "write");
+    write.mockImplementation(() => true);
+    try {
+      hookOf(plugin, "buildEnd").call(context);
+      return write.mock.calls.map((call) => String(call[0]));
+    } finally {
+      write.mockRestore();
+    }
+  }
+
+  function render(plugin: Plugin, isEntry: boolean): unknown {
+    return hookOf(plugin, "renderChunk").call(context, CHUNK, { isEntry });
+  }
+
+  it("prints one line and marks the entry chunk once it passes", async () => {
+    const plugin = await build("build", true);
+    expect(render(plugin, true)).toBeNull();
+    expect(finish(plugin)).toEqual([`${auditSummary(rows)}\n`]);
+    const marked = { code: withAuditedMark(CHUNK), map: null };
+    expect(render(plugin, true)).toEqual(marked);
+    expect(render(plugin, false)).toBeNull();
+  });
+
+  it("appends a statement that sets the audited sentinel", () => {
+    const code = withAuditedMark(CHUNK);
+    expect(code.startsWith(CHUNK)).toBe(true);
+    expect(code).toContain(`Symbol.for("${AUDITED_SENTINEL}"), true);`);
+    expect(auditSummary(rows)).toMatch(/^SovTech overlay: audit passed /);
+  });
+
+  it("fails a build whose audit fails, and never marks it", async () => {
+    const plugin = await build("build", false);
+    expect(() => finish(plugin)).toThrow(/index.html was never transformed/);
+    expect(render(plugin, true)).toBeNull();
+  });
+
+  it("forgets a passed audit when the next build starts", async () => {
+    const plugin = await build("build", true);
+    finish(plugin);
+    hookOf(plugin, "buildStart").call(context, {});
+    expect(render(plugin, true)).toBeNull();
+  });
+
+  it("neither audits nor marks outside vite build", async () => {
+    const plugin = await build("serve", false);
+    expect(finish(plugin)).toEqual([]);
+    expect(render(plugin, true)).toBeNull();
   });
 });
 
