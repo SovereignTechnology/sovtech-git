@@ -3,7 +3,7 @@
 Changes made by the fork. Upstream's changes are in `CHANGELOG.md`, which the
 fork never edits.
 
-## Unreleased
+## sovtech-v1.0.0 (2026-09-28)
 
 - Fork created from upstream `420c0c3d` (v4.1.0 plus 31 commits).
 - Removed upstream's agent and MCP configuration, its Netlify, nsite and
