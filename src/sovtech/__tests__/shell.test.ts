@@ -218,13 +218,20 @@ describe("shadow map", () => {
     }
   });
 
+  // Reads each of the ~560 files once, not once per row: on the CI runners'
+  // idle-priority CPU the per-row reads outran vitest's 5 s default.
   it("uses markers that only their upstream file holds", () => {
-    const files = [...sourceFiles("src"), "index.html"];
+    const files = [...sourceFiles("src"), "index.html"].map((file) => ({
+      file,
+      text: read(file),
+    }));
     for (const entry of entries) {
-      const found = files.filter((file) => read(file).includes(entry.marker));
+      const found = files
+        .filter(({ text }) => text.includes(entry.marker))
+        .map(({ file }) => file);
       expect(found).toEqual([entry.upstreamPath]);
     }
-  });
+  }, 30_000);
 });
 
 describe("header and footer parity", () => {
