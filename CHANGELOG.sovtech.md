@@ -71,9 +71,12 @@ fork never edits.
   header, footer, landing page, About, 404 and OG image page, swapped in
   through six `shadow-map.tsv` rows with tsc-checked export shapes
   (`src/sovtech/contract.ts`) and a header and footer parity test. The
-  landing page leads with repositories from the SovTech key, then the live
-  network strip; About credits upstream and takes feedback on SovTech Git's
-  own repository. The upstream-fork input hint names git.sovtech.pro, fork
-  code gets a `brand` colour alias, theme.css honours reduced motion, and
-  the brand ratchet's `pending` list is empty. `public/og-image.png` is now
-  a 1200×630 capture of `/og-preview` from the CI-built `dist`.
+  landing page leads with repositories the SovTech key signed (the page
+  verifies them, since the EventStore does not), then the live network
+  strip; About credits upstream and takes feedback on SovTech Git's own
+  repository. The upstream-fork input hint names git.sovtech.pro and
+  git.sovit.xyz, fork code gets a `brand` colour alias, light-mode brand
+  orange darkens to `#A25207` so white button labels keep AA on hover,
+  theme.css honours reduced motion, and the brand ratchet's `pending` list
+  is empty. `public/og-image.png` is now a 1200×630 capture of `/og-preview`
+  from the CI-built `dist`.

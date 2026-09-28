@@ -69,9 +69,9 @@ export interface GlobalRule {
  *
  * The bare lowercase host is left alone on purpose: the shell overlays
  * replace the copy that described upstream (About, the landing page, the
- * footer), and what remains names input the upstream host sets still accept
- * (SubordinateForkField, which the subordinate-fork-hint rule below extends);
- * the storage names and d-tags are functional.
+ * footer), the subordinate-fork-hint rule below rewrites the one input hint
+ * that named it, and what remains is the host sets' literals, which still
+ * accept pasted upstream links; the storage names and d-tags are functional.
  */
 export const GLOBAL_RULES: GlobalRule[] = [
   {
@@ -130,14 +130,15 @@ export const EXACT_RULES: ExactRule[] = [
     count: 1,
   },
   {
-    // The upstream-fork input hint: the host sets accept git.sovtech.pro as
-    // well (src/sovtech/defaults.ts WEB_HOSTS), so the hint names both. The
-    // gitworkshop.dev it keeps is brand-allowlist.json functional.
+    // The upstream-fork input hint names SovTech's hosts, which the host sets
+    // accept (src/sovtech/defaults.ts WEB_HOSTS). Pasted gitworkshop.dev links
+    // still work: src/lib/gitworkshopUrl.ts and repoUpstreamInput.ts keep
+    // upstream's literals. The hint just no longer advertises them.
     id: "subordinate-fork-hint",
     file: "src/components/repo/SubordinateForkField.tsx",
     find: '<code className="font-mono">gitworkshop.dev</code> repo URLs,',
     replacement:
-      '<code className="font-mono">gitworkshop.dev</code> or{" "}<code className="font-mono">git.sovtech.pro</code> repo URLs,',
+      '<code className="font-mono">git.sovtech.pro</code> or{" "}<code className="font-mono">git.sovit.xyz</code> repo URLs,',
     count: 1,
   },
 ];

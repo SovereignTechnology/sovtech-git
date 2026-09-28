@@ -399,9 +399,9 @@ Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `
 - The shell empties `pending`:
   - `dan-bech32-tlv`, 4 to 0 (About's feedback naddrs and nprofiles);
   - `danconwaydev`, About's two;
-  - `gitworkshop-host`, the footer, landing and About copy (5), and the SubordinateForkField input hint (1), which moves to `functional`.
+  - `gitworkshop-host`, the footer, landing and About copy (5), and the SubordinateForkField input hint (1). The engine rule `subordinate-fork-hint` makes the hint read "git.sovtech.pro or git.sovit.xyz repo URLs": both hosts are in the host sets since the defaults MR, and pasted gitworkshop.dev links still work without the hint naming them.
 - `functional` after the shell, each with its reason in `brand-allowlist.json`:
-  - `gitworkshop-host` 7: the host sets that recognise upstream links (6), and the input hint that names them (1). The engine rule `subordinate-fork-hint` makes the hint read "gitworkshop.dev or git.sovtech.pro repo URLs", which the host sets accept since the defaults MR.
+  - `gitworkshop-host` 6: the host sets' literals that recognise upstream links pasted as input, unchanged since the engine MR.
   - `danconwaydev` 2: `public/LICENSE.txt` and About's credit line.
   - `dan-npub` 1: `UPSTREAM_REPO_PATH`.
 
