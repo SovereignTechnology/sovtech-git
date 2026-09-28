@@ -227,7 +227,7 @@ The gate checks, all failing closed:
   accepted findings go only in `ci/sovtech/.gitleaksignore`.
 - **Overlay guard:** shadow-map acked blobs, sentinels and markers; the
   `touched-upstream.txt` numstat bound; `asset-swaps.tsv` blobs; deleted paths
-  stay deleted; upstream's palette (the `:root` and `.dark` blocks of
+  stay deleted; upstream's palette (one `:root` and one `.dark` block in
   `src/index.css`) still has the sha256 in
   `ci/sovtech/upstream-palette.sha256`, and a failure prints the new digest
   to record once theme.css is ported; the CSP meta in `dist` is
@@ -241,13 +241,19 @@ The gate checks, all failing closed:
   only (theme.css's specificity), uses no `!important`, and sets nothing
   theme.css's block of the same selector does not. No other file, lazy chunk
   stylesheets, inline `<style>` and scripts included, sets a palette
-  variable: a lazy chunk's stylesheet loads after theme.css and would bring
-  upstream's colours back. Comments, strings, escapes and `url()` are masked
-  before the braces are read, and twelve planted faults (reversed order, a
-  layered theme, a lazy chunk setting an upstream and a `--brand-*`
-  variable, an inline style, `html.dark`, a nested block, `!important`, a
-  missing variable, no upstream palette, an unlinked stylesheet, no theme)
-  must each fail first.
+  variable or names one in a string (a React style object or a
+  `setProperty()` call): a lazy chunk's stylesheet loads after theme.css and
+  would bring upstream's colours back. Every stylesheet a page links is a
+  file in `dist`, and no built CSS or inline `<style>` holds an `@import`.
+  Comments, strings, escapes and `url()` are masked before the braces are
+  read; declarations after a nested rule count. The check is static: a
+  variable name built at run time is out of its reach. Eighteen planted
+  faults (reversed order, a layered theme, a declaration after a nested
+  rule, lazy chunks setting an upstream and a `--brand-*` variable, an
+  inline style, a script, an external link, one hidden behind a `<!--` in a
+  script string, an `@import`, `html.dark`, a nested block, `!important`, a
+  missing variable, no upstream palette, an unlinked or commented-out
+  stylesheet, no theme) must each fail first.
 - **Brand assets** (`gen-brand-assets.py --check`, history phase, standard
   library only): the committed files at `HEAD` are what the generator
   writes, as far as that can be known without Chromium. `mark.svg` passes
@@ -258,10 +264,12 @@ The gate checks, all failing closed:
   its name and colour type 2 (apple-touch, maskable, `icon.png`) or 6 (the
   tiles); `favicon.ico` is the committed 16, 32 and 48 px tiles; and the
   maskable icons, decoded, keep every pixel outside the safe zone plain
-  background. A decoder round trip and eight planted faults (an `onload`,
-  a `<script>`, a `style` and a comment in the mark; an extra chunk, a wrong
-  colour type and a wrong size in a PNG; ink outside the safe zone) come
-  first.
+  background. Attribute values in the mark are plain (numbers, path data,
+  `#hex` colours, keywords; no `url()`, `:` or `/`), so the SVGs reference
+  no other resource. A decoder round trip and nine planted faults (an
+  `onload`, a `<script>`, a `style`, a comment and a `url()` value in the
+  mark; an extra chunk, a wrong colour type and a wrong size in a PNG; ink
+  outside the safe zone) come first.
 - **Brand-leak ratchet** over `dist` without source maps: upstream brand terms
   (the `GitWorkshop` name, and `gitworkshop.dev` both as a URL and as a bare
   host in any case), Dan's npub and hex key (also inside decoded bech32 TLVs),

@@ -19,9 +19,10 @@ the committed 16, 32 and 48 px tiles; favicon.png and icon.png equal the
 files they copy; and the maskable icons, decoded, keep every pixel outside
 the safe zone plain background. First a synthetic image must round-trip
 through encode_png and the decoder, and planted faults must be refused: an
-onload, a script, a style attribute and a comment in the mark; an extra
-chunk, a wrong colour type and a wrong size in a PNG; ink outside the safe
-zone. Exit 0 when clean, 3 on findings, 4 when the check cannot run.
+onload, a script, a style attribute, a comment and a url() value in the
+mark; an extra chunk, a wrong colour type and a wrong size in a PNG; ink
+outside the safe zone. Exit 0 when clean, 3 on findings, 4 when the check
+cannot run.
 
 Writes, under upstream's file names and pixel sizes:
 
@@ -118,6 +119,10 @@ ALLOWED_ATTRIBUTES = {
 }
 TAG = re.compile(r'<(/?)([a-z]+)((?:\s+[A-Za-z-]+="[^"<>&]*")*)\s*(/?)>')
 ATTRIBUTE = re.compile(r'([A-Za-z-]+)="([^"<>&]*)"')
+# Values are numbers, path data, #hex colours and keywords: no url(), no
+# ":" or "/", so no value can reference another resource. xmlns is exact.
+PLAIN_VALUE = re.compile(r"[A-Za-z0-9 .,#%+-]*")
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 
 
 class GenError(Exception):
@@ -142,9 +147,15 @@ def parse_mark(text: str) -> tuple:
         match = TAG.fullmatch(tag.group(0))
         if match is None or match.group(2) not in ALLOWED_ELEMENTS:
             raise GenError("%s: a tag is not an allowed SVG shape element" % MARK)
-        for name, _ in ATTRIBUTE.findall(match.group(3)):
+        for name, value in ATTRIBUTE.findall(match.group(3)):
             if name not in ALLOWED_ATTRIBUTES:
                 raise GenError("%s: attribute %s is not allowed" % (MARK, name))
+            if name == "xmlns":
+                plain = value == SVG_NAMESPACE
+            else:
+                plain = PLAIN_VALUE.fullmatch(value) is not None
+            if not plain:
+                raise GenError("%s: attribute %s has a value that is not plain" % (MARK, name))
     if text[position:].strip():
         raise GenError("%s may hold only elements, no text" % MARK)
     match = re.fullmatch(r"\s*(<svg\b[^>]*?)\s*>(.*)</svg>\s*", text, re.DOTALL)
@@ -448,6 +459,7 @@ def check_self_test(mark_text: str) -> int:
         ("script", mark_text.replace("</svg>", "<script>alert(1)</script></svg>", 1)),
         ("style", mark_text.replace("<path ", '<path style="fill:red" ', 1)),
         ("comment", mark_text.replace("</svg>", "<!-- x --></svg>", 1)),
+        ("url value", mark_text.replace("<path ", '<path fill="url(https://x.test/p.svg#a)" ', 1)),
     )
     for case, text in planted_marks:
         if text == mark_text:
@@ -512,8 +524,8 @@ def check() -> int:
     if findings:
         return 3
     print(
-        "ok   brand-assets: %d SVG(s) are the composed mark, %d PNG(s) well-formed, "
-        "maskables inside the safe zone, %s rebuilt from its tiles"
+        "ok   brand-assets: at HEAD, %d SVG(s) are the composed mark, %d PNG(s) "
+        "well-formed, maskables inside the safe zone, %s rebuilt from its tiles"
         % (len(SVG_OUTPUTS), len(pngs), ICO_OUTPUT)
     )
     return 0

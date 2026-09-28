@@ -83,6 +83,12 @@ CSS_STRUCTURE = re.compile(r"[{};]")
 CSS_VALUE_END = re.compile(r"[;}]")
 IMPORTANT = re.compile(r"!\s*important", re.IGNORECASE | re.ASCII)
 LINK_TAG = re.compile(rb"<link\b([^>]*)>", re.IGNORECASE)
+HTML_COMMENT = re.compile(rb"<!--.*?-->", re.DOTALL)
+STYLE_ELEMENT = re.compile(rb"<style\b[^>]*>(.*?)</style", re.IGNORECASE | re.DOTALL)
+# A palette variable named in a string: a React style object or a
+# setProperty() call in a script sets it at run time, after every sheet.
+DIST_QUOTED_NAME = re.compile(rb"[\"'`]--([\w-]+)[\"'`]")
+CSS_IMPORT = re.compile(r"@import\b", re.IGNORECASE | re.ASCII)
 TAG_ATTRIBUTE = re.compile(
     rb"([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))"
 )
@@ -308,7 +314,15 @@ def cmd_history(args: argparse.Namespace) -> int:
 
     # 5. Upstream's palette: src/sovtech/theme.css was written against it.
     recorded = parse_palette_sha(load_at_head(PALETTE_SHA, repo))
-    digest, names = upstream_palette(load_at_head(UPSTREAM_CSS, repo))
+    css = load_at_head(UPSTREAM_CSS, repo)
+    digest, names = upstream_palette(css)
+    selectors = [match.group(2) for match in PALETTE_BLOCK.finditer(css)]
+    if selectors != [":root", ".dark"]:
+        rep.fail(
+            "upstream-palette-shape",
+            "%s has palette blocks %s, theme.css expects one :root then one .dark"
+            % (UPSTREAM_CSS, ", ".join(selectors) or "none"),
+        )
     if digest != recorded:
         rep.fail(
             "upstream-palette-changed",
@@ -412,14 +426,15 @@ def css_blocks(masked: str) -> list:
 
 
 def starts_declaration(masked: str, offset: int) -> bool:
-    """True when offset begins a declaration: the character before it,
-    whitespace skipped, is { or ;. A selector such as Tailwind's
+    """True when offset can begin a declaration: the character before it,
+    whitespace skipped, is {, ; or } (with CSS nesting a declaration may
+    follow a nested rule). A selector such as Tailwind's
     .shadow-\\[hsl\\(var\\(--ring\\)\\)\\]:hover reads as "--ring   :"
-    once its escapes are masked, but never follows { or ;."""
+    once its escapes are masked, but never follows one of them."""
     index = offset - 1
     while index >= 0 and masked[index] in " \t\n\r\f":
         index -= 1
-    return index >= 0 and masked[index] in "{;"
+    return index >= 0 and masked[index] in "{;}"
 
 
 def enclosing(blocks: list, opens: list, offset: int) -> int | None:
@@ -455,7 +470,12 @@ def theme_order_findings(files, names: frozenset) -> tuple:
                           stylesheet whose theme.css :root and .dark blocks
                           open with color-scheme light and dark;
       theme-css-stray     no other file (lazy chunk stylesheets, inline
-                          <style>, scripts) declares a palette variable;
+                          <style>, scripts) declares a palette variable or
+                          names one in a string (a React style object or
+                          setProperty() sets it at run time);
+      theme-css-external  every stylesheet a page links is a file in dist,
+                          and no dist CSS or inline <style> holds @import
+                          (a sheet the check cannot read, loaded late);
       theme-css-order     every other palette block comes before theme.css's
                           :root block, which is not nested in anything;
       theme-css-selector  every other palette block is exactly :root or
@@ -473,16 +493,41 @@ def theme_order_findings(files, names: frozenset) -> tuple:
         return name in names or name.startswith("brand-")
 
     findings = []
-    declaring, pages, scanned = {}, {}, 0
+    declaring, quoted, imports, pages, seen = {}, {}, [], {}, set()
     for rel, blob in files:
-        scanned += 1
+        seen.add(rel)
         if rel.endswith(".map"):
             raise CIError("source maps must be moved out before the theme order check")
         if rel in ("index.html", "404.html"):
             pages[rel] = blob
+            styles = STYLE_ELEMENT.findall(blob)
+            if any(CSS_IMPORT.search(mask_css(style.decode("utf-8", "surrogateescape"))) for style in styles):
+                imports.append(rel)
+        elif rel.endswith(".css") and b"@import" in blob.lower():
+            if CSS_IMPORT.search(mask_css(blob.decode("utf-8", "surrogateescape"))):
+                imports.append(rel)
         declared = [m.group(1).decode("ascii") for m in DIST_DECLARATION.finditer(blob)]
         if any(is_palette(name) for name in declared):
             declaring[rel] = (declared, blob)
+        named = sum(1 for m in DIST_QUOTED_NAME.finditer(blob) if is_palette(m.group(1).decode("ascii")))
+        if named:
+            quoted[rel] = named
+    scanned = len(seen)
+    for rel in imports:
+        findings.append(
+            ("theme-css-external", "%s holds an @import, which loads a sheet the check cannot read" % rel)
+        )
+    for page in sorted(pages):
+        for href in sorted(stylesheet_hrefs(pages[page])):
+            path = href.split("#", 1)[0].split("?", 1)[0]
+            if not path.startswith("/") or path.startswith("//") or path[1:] not in seen:
+                findings.append(
+                    (
+                        "theme-css-external",
+                        "%s loads a stylesheet that is not a file in dist: %s"
+                        % (page, sovci.safe(href[:80])),
+                    )
+                )
     themed = sorted(rel for rel, (declared, _) in declaring.items() if THEME_MARKER in declared)
     if len(themed) != 1 or not themed[0].endswith(".css"):
         findings.append(
@@ -494,13 +539,14 @@ def theme_order_findings(files, names: frozenset) -> tuple:
         )
         return findings, "%d file(s) scanned" % scanned
     theme_rel = themed[0]
-    for rel in sorted(declaring):
+    for rel in sorted(set(declaring) | set(quoted)):
         if rel != theme_rel:
-            count = sum(1 for name in declaring[rel][0] if is_palette(name))
+            count = sum(1 for name in declaring.get(rel, ((), b""))[0] if is_palette(name))
             findings.append(
                 (
                     "theme-css-stray",
-                    "%s declares %d palette variable(s); only %s may" % (rel, count, theme_rel),
+                    "%s declares %d and names %d palette variable(s); only %s may set them"
+                    % (rel, count, quoted.get(rel, 0), theme_rel),
                 )
             )
 
@@ -608,7 +654,10 @@ def theme_order_findings(files, names: frozenset) -> tuple:
     if "index.html" not in pages:
         findings.append(("theme-css-unlinked", "dist has no index.html"))
     for page in sorted(pages):
-        if href not in stylesheet_hrefs(pages[page]):
+        # Comments are removed only here, where that can only fail more: a
+        # commented-out link loads nothing. The external and @import checks
+        # read the raw page, so no "<!--" in a script string can hide a link.
+        if href not in stylesheet_hrefs(HTML_COMMENT.sub(b"", pages[page])):
             findings.append(
                 ("theme-css-unlinked", "%s does not load %s as a stylesheet" % (page, theme_rel))
             )
@@ -639,12 +688,17 @@ def theme_order_self_test() -> int:
     page = b'<link rel="stylesheet" crossorigin href="/assets/index-a.css">'
     good = noise + upstream + theme
 
-    def sample(css: str = good, lazy: bytes = b".z{color:blue}", html: bytes = page) -> list:
+    def sample(
+        css: str = good,
+        lazy: bytes = b".z{color:blue}",
+        html: bytes = page,
+        js: bytes = b'x.style.setProperty("--cmdk-list-height","1px");',
+    ) -> list:
         return [
             ("index.html", html),
             ("assets/index-a.css", css.encode("ascii")),
             ("assets/lazy-b.css", lazy),
-            ("assets/app.js", b"let a=1;"),
+            ("assets/app.js", js),
         ]
 
     found, _ = theme_order_findings(sample(), names)
@@ -653,15 +707,29 @@ def theme_order_self_test() -> int:
     faults = (
         ("reversed", sample(noise + theme + upstream), "theme-css-order"),
         ("layered-theme", sample(noise + upstream + "@layer x{" + theme + "}"), "theme-css-order"),
+        ("after-nested-rule", sample(good + ":root{.q{}--primary: 0}"), "theme-css-order"),
         ("lazy-chunk", sample(lazy=b":root{--primary: 0}"), "theme-css-stray"),
         ("lazy-brand", sample(lazy=b".x{--brand-500: 0}"), "theme-css-stray"),
         ("inline-style", sample(html=page + b"<style>:root{--background: 0}</style>"), "theme-css-stray"),
+        ("script", sample(js=b'x.style.setProperty("--primary","0 0% 0%");'), "theme-css-stray"),
+        ("external-link", sample(html=page + b'<link rel="stylesheet" href="https://x.test/p.css">'), "theme-css-external"),
+        ("import", sample(lazy=b"@import url(https://x.test/p.css);"), "theme-css-external"),
+        (
+            "comment-hidden-link",
+            sample(
+                html=page
+                + b'<script>a="<!--"</script><link rel="stylesheet" href="https://x.test/p.css">'
+                + b'<script>b="-->"</script>'
+            ),
+            "theme-css-external",
+        ),
         ("specificity", sample(noise + upstream.replace(".dark{", "html.dark{") + theme), "theme-css-selector"),
         ("nested", sample(noise + "html{" + upstream + "}" + theme), "theme-css-selector"),
         ("important", sample(noise + upstream.replace("1;", "1 !important;", 1) + theme), "theme-css-important"),
         ("uncovered", sample(noise + upstream + theme.replace("--background: 1;", "")), "theme-css-coverage"),
         ("no-upstream", sample(noise + theme), "theme-css-upstream-missing"),
         ("unlinked", sample(html=page.replace(b"index-a", b"lazy-b")), "theme-css-unlinked"),
+        ("commented-link", sample(html=b"<!-- " + page + b" -->"), "theme-css-unlinked"),
         ("no-theme", sample(noise + upstream), "theme-css-sentinel"),
     )
     for case, files, rule in faults:
