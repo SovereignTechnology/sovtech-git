@@ -55,8 +55,14 @@ export const GITHUB_MIRROR_URL =
   "https://github.com/SovereignTechnology/sovtech-git";
 export const NIP34_URL = "https://nips.nostr.com/34";
 
+export interface OtherClient {
+  name: string;
+  /** An in-app path (a leading "/") or a full URL. */
+  href: string;
+}
+
 /** Other NIP-34 clients, with upstream About's targets. */
-export const OTHER_CLIENTS: readonly { name: string; href: string }[] = [
+export const OTHER_CLIENTS: readonly OtherClient[] = Object.freeze([
   {
     name: "n34",
     href: "/npub1qqqqqq2stely3ynsgm5mh2nj3v0nk5gjyl3zqrzh34hxhvx806usxmln03/nostr.4rs.nl/n34",
@@ -67,4 +73,4 @@ export const OTHER_CLIENTS: readonly { name: string; href: string }[] = [
     href: "/npub1useke4f9maul5nf67dj0m9sq6jcsmnjzzk4ycvldwl4qss35fvgqjdk5ks/gitplaza",
   },
   { name: "shakespeare", href: "https://shakespeare.diy" },
-];
+]);

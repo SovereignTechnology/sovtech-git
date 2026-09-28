@@ -37,9 +37,12 @@ function separator(index: number, count: number): string {
   return index === count - 1 ? " and " : ", ";
 }
 
-/** Other clients: in-app paths as router links, full URLs as plain links. */
+/**
+ * Other clients: in-app paths as router links, full URLs as plain links. A
+ * "//" prefix is a host, not a path.
+ */
 function ClientLink({ name, href }: { name: string; href: string }) {
-  if (href.startsWith("/")) {
+  if (href.startsWith("/") && !href.startsWith("//")) {
     return (
       <Link to={href} className={LINK}>
         {name}

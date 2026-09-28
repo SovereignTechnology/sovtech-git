@@ -103,8 +103,9 @@ function importedNames(source: string): Set<string> {
   const names = new Set<string>();
   for (const match of source.matchAll(IMPORT)) {
     for (const part of match[1].split(",")) {
-      const name = part.replace(/^\s*type\s+/, "").split(/\s+as\s+/).pop();
-      if (name && name.trim() !== "") names.add(name.trim());
+      // "Name", "type Name" or "Name as Alias": the local name is last.
+      const name = part.trim().split(/\s+/).at(-1);
+      if (name && name !== "type") names.add(name);
     }
   }
   return names;
@@ -227,6 +228,14 @@ describe("shadow map", () => {
 });
 
 describe("header and footer parity", () => {
+  it("parses every to= and href= attribute upstream writes", () => {
+    for (const name of PARITY) {
+      const source = read(shadowEntry(name).upstreamPath);
+      const written = source.match(/\b(?:to|href)=/g) ?? [];
+      expect([...source.matchAll(JSX_TARGET)]).toHaveLength(written.length);
+    }
+  });
+
   it("reads upstream's link targets and components", () => {
     const header = read(shadowEntry("AppHeader").upstreamPath);
     expect([...linkTargets(header)].sort()).toEqual(
