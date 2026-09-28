@@ -18,7 +18,9 @@
  * see tailwind-brand.ts) as "H S% L%" triplets, so opacity modifiers such as
  * bg-pink-500/10 keep working. The scale is theme-aware: in light mode the
  * oranges are darker, so pink-500 and pink-600 read as text on white at 4.5:1
- * or better; in dark mode it is centred on #F7931A (pink-500).
+ * or better; in dark mode it is centred on #F7931A (pink-500). Light pink-500
+ * (#A25207) is dark enough that white keeps 4.5:1 on the buttons' 90% hover
+ * fill (hover:bg-primary/90) as well as on the solid one.
  * --brand-foreground is the text colour on a solid pink-500 or pink-600
  * background: white on the deep light-mode oranges, near-black on the bright
  * dark-mode ones. The primary colour is the brand orange in both modes, so
@@ -72,7 +74,7 @@
   --brand-200: 33 94% 80%;
   --brand-300: 32 92% 64%;
   --brand-400: 31 90% 48%;
-  --brand-500: 29 92% 36%;
+  --brand-500: 29 92% 33%;
   --brand-600: 27 90% 31%;
   --brand-700: 25 88% 26%;
   --brand-800: 23 82% 21%;

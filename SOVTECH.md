@@ -345,8 +345,8 @@ Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `
 
 - Colour roles. theme.css (MR 2.2) sets the values; the shell uses only the role classes.
   - Page background: dark `#0A0A0A`, light `#FCFCFC`. Page text: dark `#EDEDED`, light `#171717`.
-  - Brand fill, `bg-primary`: `--brand-500`, which is `#F7931A` in dark mode with a `#0A0A0A` label (8.61:1) and `#B05907` in light mode with a white label (4.9:1).
-  - Brand text, `text-brand`: `--brand-500` as well, `#F7931A` in dark mode (8.61:1 on the page) and `#B05907` in light mode (4.8:1 on the page, 4.9:1 on cards).
+  - Brand fill, `bg-primary`: `--brand-500`, which is `#F7931A` in dark mode with a `#0A0A0A` label (8.61:1) and `#A25207` in light mode with a white label (5.64:1, and 4.65:1 on the `hover:bg-primary/90` fill).
+  - Brand text, `text-brand`: `--brand-500` as well, `#F7931A` in dark mode (8.61:1 on the page) and `#A25207` in light mode (5.52:1 on the page, 5.64:1 on cards).
   - Muted text: dark `#9E9E9E`, light `#666666`.
   - Focus ring: `--ring`, the same `--brand-500`.
 - Radius: `--radius` 0.5rem, matching www's `rounded-lg`.
@@ -379,9 +379,9 @@ Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `
 
 - Measured contrast (theme.css as shipped):
   - `#F7931A` on `#0A0A0A` is 8.61:1 (AAA). This is the brand text and the ring in dark mode.
-  - `#F7931A` on white is 2.30:1, so the bright orange is never text, an icon or a ring on a light surface; light mode uses `#B05907`.
-  - Light-mode brand text `#B05907` is 4.8:1 on the page, 4.9:1 on cards and 4.7:1 on the footer, but only 4.49:1 on a full `bg-muted` and 4.2:1 on a 10% brand tint. So brand text never sits on either: the eyebrow pill's text is the foreground colour, and the icons on tints are non-text (3:1).
-  - Button labels: `#0A0A0A` on `#F7931A` is 8.61:1; white on `#B05907` is 4.9:1. Overlays never put white on the bright orange.
+  - `#F7931A` on white is 2.30:1, so the bright orange is never text, an icon or a ring on a light surface; light mode uses `#A25207` (light `--brand-500`, `29 92% 33%`).
+  - Light-mode brand text `#A25207` is 5.52:1 on the page, 5.64:1 on cards, 5.41:1 on the footer, 5.16:1 on a full `bg-muted` and 4.80:1 on a 10% brand tint. The eyebrow pill's text is still the foreground colour, and the icons on tints are non-text (3:1).
+  - Button labels: `#0A0A0A` on `#F7931A` is 8.61:1, and at least 7.10:1 on its hover fill; white on `#A25207` is 5.64:1, and 4.65:1 on its `hover:bg-primary/90` fill over the page (4.63:1 over a card). Light `--brand-500` was `29 92% 36%` (`#B05907`) until the shell, whose hover fill left white at 4.13:1. Overlays never put white on the bright orange.
   - Muted text: `#9E9E9E` is 7.39:1 on `#0A0A0A`; `#666666` is 5.62:1 on `#FCFCFC`. No text has reduced opacity.
 - Structure:
   - One h1 per page, sections h2, cards h3.
