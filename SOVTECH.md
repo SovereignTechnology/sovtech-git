@@ -96,7 +96,7 @@ claims cut down to exact facts. Every other open decision took its default.
 
 ### Ground rules
 
-- Files: `src/sovtech/overlays/{AppHeader,AppFooter,LandingPage,About,NotFound,OgImagePreview}.tsx`, plus `src/sovtech/brand/BrandMark.tsx` (a TSX port of sovtech.pro's `BrandMark.jsx`: same paths and viewBox, `stroke="currentColor"`, `aria-hidden`, `focusable="false"`) and `src/sovtech/links.ts` (every fork URL and route, in one place).
+- Files: `src/sovtech/overlays/{AppHeader,AppFooter,LandingPage,About,NotFound,OgImagePreview}.tsx`, plus `src/sovtech/brand/BrandMark.tsx` (a TSX port of sovtech.pro's `BrandMark.jsx`: same paths and viewBox, `stroke="currentColor"`, `aria-hidden`, `focusable="false"`), `src/sovtech/links.ts` (every fork URL and route, in one place) and `src/sovtech/signed.ts` (the signature check behind the "From SovTech" strip).
 - Export shapes match upstream, enforced by tsc in `src/sovtech/contract.ts`: `AppHeader`, `AppFooter` and `LandingPage` are named exports; `About`, `NotFound` and `OgImagePreview` are default exports. None takes props.
 - Each overlay sets its sentinel at module scope: `Reflect.set(globalThis, Symbol.for("sovtech.overlay.<Name>"), true)`.
 - Each shadow-map marker is a string unique to the upstream file, and the overlay must not contain it:
@@ -222,6 +222,10 @@ The page sets no head tags. `Index.tsx` is not shadowed and owns them, and `head
 2. From SovTech (first of the two strips):
    - The h2 "From SovTech", with the subline "Repositories announced by Sovereign Technology's own key."
    - Only repositories announced by the SovTech npub (`83d8bce2…3434`), from upstream's `useUserRepositories`: the hook and relay query a profile page uses. No new network path.
+   - Each is kept only when `isSignedOnlyBy` (`src/sovtech/signed.ts`) holds: the SovTech key is the only confirmed member, the coordinate is active, the name and description come from that key, and every confirmed announcement verifies.
+     - The EventStore does not verify signatures (upstream sets `fakeVerifyEvent`), and the store is fed by every relay the session reads, the git index and the IndexedDB cache. Without the check, any of them could put a forged "SovTech" repository, or a forged name, description or clone URL on a real one, under this first-party heading.
+     - `verifyEvent` runs on a fresh copy of the signed fields, as upstream's `private-git-relays.ts` does: nostr-tools caches its verdict on the event object, and `fakeVerifyEvent` writes that cache as true.
+     - A forged announcement hides the repository; it never shows. `src/sovtech/signed.test.ts` covers each rule.
    - Up to 6 `FeaturedRepoCard`s, with 3 skeletons while the list is empty.
    - The strip hides itself (renders nothing) when the list is still empty 2 s after it last changed, the same settle upstream's strip uses, and comes back if repositories arrive later.
 3. Live on the network:

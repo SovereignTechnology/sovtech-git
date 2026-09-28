@@ -5,8 +5,8 @@
  *
  * Sections:
  *   1. Hero: headline, lead, two CTAs and a terminal example
- *   2. From SovTech: repositories announced by the SovTech key (hidden when
- *      there are none)
+ *   2. From SovTech: repositories the SovTech key announced and signed
+ *      (hidden when there are none)
  *   3. Live on the network: upstream's featured strip
  *   4. How it works: three steps
  *   5. Why SovTech Git: six tiles
@@ -40,6 +40,7 @@ import type { ResolvedRepo } from "@/lib/nip34";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
 import { BrandMark } from "@/sovtech/brand/BrandMark";
 import { LINEAGE_PATH, SOVTECH_PUBKEY, SOVTECH_WWW_URL } from "@/sovtech/links";
+import { isSignedOnlyBy } from "@/sovtech/signed";
 
 Reflect.set(globalThis, Symbol.for("sovtech.overlay.LandingPage"), true);
 
@@ -165,13 +166,25 @@ function StripHeader({ id, title, subline, browseAll }: StripHeaderProps) {
  */
 const SOVTECH_SETTLE_MS = 2_000;
 
+/** Whether a repository's card shows only what the SovTech key signed. */
+function isSignedBySovtech(repo: ResolvedRepo): boolean {
+  return isSignedOnlyBy(repo, SOVTECH_PUBKEY);
+}
+
 /**
  * Repositories announced by the SovTech key, through the same hook and relay
- * query as a user's profile page (useUserRepositories). The strip hides
- * itself when that list is still empty after the settle delay.
+ * query as a user's profile page (useUserRepositories). The EventStore does
+ * not verify signatures, so only repositories whose announcements SovTech
+ * signed are kept (src/sovtech/signed.ts): a forged one never shows under
+ * this heading. The strip hides itself when that list is still empty after
+ * the settle delay.
  */
 function SovtechRepos() {
-  const repos = useUserRepositories(SOVTECH_PUBKEY);
+  const announced = useUserRepositories(SOVTECH_PUBKEY);
+  const repos = useMemo(
+    () => announced?.filter(isSignedBySovtech),
+    [announced],
+  );
   const [emptySettled, setEmptySettled] = useState(false);
 
   useEffect(() => {
