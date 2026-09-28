@@ -72,4 +72,5 @@ fork never edits.
   network strip; About credits upstream and takes feedback on SovTech Git's
   own repository. The upstream-fork input hint names git.sovtech.pro, fork
   code gets a `brand` colour alias, theme.css honours reduced motion, and
-  the brand ratchet's `pending` list is empty.
+  the brand ratchet's `pending` list is empty. `public/og-image.png` is now
+  a 1200×630 capture of `/og-preview` from the CI-built `dist`.
