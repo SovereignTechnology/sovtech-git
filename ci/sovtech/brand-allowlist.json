@@ -1,5 +1,5 @@
 {
-  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending was seeded from the first CI run of this gate (pipeline 3609, upstream 420c0c3d unbranded), and each later MR lowers or deletes the entries it clears. The functional entry was counted from upstream source at 420c0c3d and confirmed by that dist run (gitworkshop-host seen=28 = 6 functional + 22 pending).",
+  "note": "Exact brand-term counts allowed in dist (maps excluded). functional: permanent, each with a reason. pending: residue a named MR removes, with its exact count; delete the entry when it clears. pending was seeded from the first CI run of this gate (pipeline 3609, upstream 420c0c3d unbranded), and each later MR lowers or deletes the entries it clears. The functional entry was counted from upstream source at 420c0c3d and confirmed by that dist run (gitworkshop-host seen=28 = 6 functional + 22 pending). Phase 2.1 (overlay engine) cleared gitworkshop-word, gitworkshop-url, manifest-name and og-url, and cut gitworkshop-host from 22 to 6.",
   "functional": [
     {
       "term": "gitworkshop-host",
@@ -14,19 +14,9 @@
   ],
   "pending": [
     {
-      "term": "gitworkshop-word",
-      "count": 12,
-      "removed_by": "Phase 2.3 shell and rewrites (RepoLayout, index bundle, index.html, 404.html) and 2.2 assets (manifest)"
-    },
-    {
-      "term": "gitworkshop-url",
-      "count": 12,
-      "removed_by": "Phase 2.1 overlay engine (index.html/404.html og and splash) and 2.3 rewrites (RepoLayout, index bundle)"
-    },
-    {
       "term": "gitworkshop-host",
-      "count": 22,
-      "removed_by": "Phase 2.1 overlay engine (index.html/404.html), 2.2 assets (manifest) and 2.3 rewrites (RepoLayout, index bundle)"
+      "count": 6,
+      "removed_by": "Phase 2.3 shell (the AppFooter, About and LandingPage copy, all shadowed) and 2.4 defaults (the SubordinateForkField input hint, once the host sets accept git.sovtech.pro)"
     },
     {
       "term": "danconwaydev",
@@ -42,16 +32,6 @@
       "term": "dan-bech32-tlv",
       "count": 4,
       "removed_by": "Phase 2.3 shell (About page feedback naddr/nprofile links)"
-    },
-    {
-      "term": "manifest-name",
-      "count": 2,
-      "removed_by": "Phase 2.2 assets (manifest override)"
-    },
-    {
-      "term": "og-url",
-      "count": 2,
-      "removed_by": "Phase 2.1 overlay engine (transformIndexHtml)"
     }
   ]
 }

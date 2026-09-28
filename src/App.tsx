@@ -3,6 +3,7 @@
 
 import { createHead, UnheadProvider } from "@unhead/react/client";
 import { InferSeoMetaPlugin } from "@unhead/addons";
+import { sovtechTitlePlugin } from "@/sovtech/head";
 import { Suspense } from "react";
 import {
   EventStoreProvider,
@@ -19,7 +20,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import AppRouter from "./AppRouter";
 
 const head = createHead({
-  plugins: [InferSeoMetaPlugin()],
+  plugins: [InferSeoMetaPlugin(), sovtechTitlePlugin()],
 });
 
 function App() {

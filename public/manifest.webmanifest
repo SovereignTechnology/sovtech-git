@@ -1,11 +1,11 @@
 {
-  "name": "GitWorkshop.dev",
-  "short_name": "GitWorkshop",
-  "description": "Decentralized GitHub alternative over Nostr",
+  "name": "SovTech Git",
+  "short_name": "SovTech Git",
+  "description": "Decentralized Git over Nostr, from Sovereign Technology",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#16171e",
-  "theme_color": "#16171e",
+  "background_color": "#0A0A0A",
+  "theme_color": "#0A0A0A",
   "categories": ["development", "productivity", "utilities"],
   "icons": [
     {
