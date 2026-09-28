@@ -7,10 +7,19 @@
 # CHANGELOG.sovtech.md, CLAUDE.md, .gitlab-ci.yml, renovate.json), the
 # public/ swaps in asset-swaps.tsv, and deletions listed in fork-deleted.txt.
 #
-# Seams arrive with the overlay MRs.
-
+# Seams arrive with the overlay MRs; each budget is the numstat its MR measured.
+# vite.config.ts: import the overlay engine and make it the first plugin.
+vite.config.ts 3
+# src/App.tsx: add the title plugin to createHead.
+src/App.tsx 3
+# Phase 2.2, theme and brand assets:
+public/theme-init.js 4
+src/lib/labelColor.ts 2
+src/main.tsx 1
+tailwind.config.ts 3
 # Phase 2.4 defaults: relay, GRASP and host lists from src/sovtech/defaults.ts.
 src/actions/account.ts 7
 src/lib/gitworkshopUrl.ts 3
 src/lib/repoUpstreamInput.ts 6
-src/services/settings.ts 26
+# settings.ts carries both 2.2's theme hunk (12) and 2.4's relay/GRASP hunks (26).
+src/services/settings.ts 38

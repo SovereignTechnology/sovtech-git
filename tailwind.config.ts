@@ -1,6 +1,7 @@
 import type { Config } from "tailwindcss";
 import tailwindcssAnimate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import { sovtechTheme } from "./src/sovtech/tailwind-brand.ts";
 
 export default {
   darkMode: ["class"],
@@ -20,7 +21,9 @@ export default {
       },
     },
     extend: {
+      fontFamily: sovtechTheme.fontFamily,
       colors: {
+        ...sovtechTheme.colors,
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

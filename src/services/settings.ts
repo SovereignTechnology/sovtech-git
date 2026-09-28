@@ -270,7 +270,7 @@ export type ResolvedTheme = "light" | "dark";
 function readStoredMode(): ThemeMode {
   const saved = localStorage.getItem("theme");
   if (saved === "light" || saved === "dark" || saved === "system") return saved;
-  return "system";
+  return "dark";
 }
 
 function applyTheme(t: ResolvedTheme) {
@@ -306,14 +306,14 @@ export const resolvedTheme: Observable<ResolvedTheme> = combineLatest([
 
 resolvedTheme.subscribe(applyTheme);
 
-// Persist the user's mode. `defaultValue: "system"` makes persist() DELETE
-// the localStorage key whenever the user picks "system" again — so they go
-// back to following the OS instead of being locked into a snapshot of it.
+// Persist the user's mode. `defaultValue: "dark"` (SovTech Git is dark by
+// default) makes persist() DELETE the localStorage key whenever the user picks
+// "dark" again, so a missing key always means dark; "system" is stored.
 persist(themeMode, "theme", {
   serialize: (v) => v,
   deserialize: (v) =>
-    v === "light" || v === "dark" || v === "system" ? v : "system",
-  defaultValue: "system",
+    v === "light" || v === "dark" || v === "system" ? v : "dark",
+  defaultValue: "dark",
 });
 
 export function setThemeMode(mode: ThemeMode) {

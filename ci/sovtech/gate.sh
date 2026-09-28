@@ -67,6 +67,7 @@ readonly SYNC_MAY_CHANGE=(
   ci/sovtech/touched-upstream.txt
   ci/sovtech/asset-swaps.tsv
   ci/sovtech/agent-config-allow.txt
+  ci/sovtech/upstream-palette.sha256
 )
 # The git log options of every gitleaks history scan. --diff-merges=remerge
 # reads a merge as its remerge diff: what the resolution changed against
@@ -593,6 +594,14 @@ step_overlay_history() {
     --base "$GATE_BASE" "${release[@]}"
 }
 
+# The committed brand assets are what gen-brand-assets.py writes, as far as
+# that can be known without its laptop-only rasteriser: mark.svg passes the
+# allow-list, the SVGs are the composed mark byte for byte, and the PNGs and
+# the ICO have the generator's exact layout, maskables inside the safe zone.
+step_brand_assets() {
+  py_rc brand-assets python3 -I "$HERE/gen-brand-assets.py" --check
+}
+
 step_move_maps() {
   py_rc move-maps python3 -I "$HERE/ci_tools.py" move-maps --dist "$GATE_DIST" --out "$GATE_MAPS"
 }
@@ -630,6 +639,7 @@ if [[ ${1:-} == __step ]]; then
     ci-config) step_ci_config ;;
     gitleaks) step_gitleaks ;;
     overlay-history) step_overlay_history ;;
+    brand-assets) step_brand_assets ;;
     move-maps) step_move_maps ;;
     overlay-dist) step_overlay_dist ;;
     brand-leak) step_brand_leak ;;
@@ -754,6 +764,7 @@ else
     run_step ci-config
     run_step gitleaks
     run_step overlay-history
+    run_step brand-assets
   fi
   if [[ $phase != history ]]; then
     run_step move-maps

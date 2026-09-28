@@ -45,6 +45,45 @@ cheap.
 
 These pieces arrive in the MRs that follow this one.
 
+## Theme and brand assets
+
+- `src/sovtech/theme.css` redefines every palette variable of upstream's
+  `src/index.css`, in light and dark, and adds the brand scale `--brand-50`
+  to `--brand-950` plus `--brand-foreground`. `src/main.tsx` imports it after
+  upstream's CSS, so it wins. The scale is darker in light mode, where
+  `pink-500` and `pink-600` are text on white, and centred on `#F7931A` in
+  dark mode. The gate fails when upstream changes its palette (the sha256
+  in `ci/sovtech/upstream-palette.sha256`) and when theme.css stops being the
+  last palette in the built CSS (the theme order check below);
+  `src/sovtech/theme.test.ts` fails when the variable set or the import
+  order changes.
+- `src/sovtech/tailwind-brand.ts` points Tailwind's `pink-*` at the brand
+  scale, maps `amber-*` to yellow and sets the fonts: Inter Variable for
+  text, the system mono stack for headings. `tailwind.config.ts` spreads it
+  into `theme.extend`. `rose` is left alone, and the pink label colour
+  bucket is fuchsia.
+- Dark is the default (`public/theme-init.js`, `src/services/settings.ts`):
+  a missing `theme` key means dark, and an explicit light or system choice
+  is stored and honoured.
+- The mark is `src/sovtech/brand/mark.svg`: the chevron-B from
+  www.sovtech.pro, `#F7931A` on transparent, with its viewBox centred on the
+  ink. `ci/sovtech/gen-brand-assets.py` builds `mark-on-dark.svg` (the mark
+  on a `#0A0A0A` tile) and every icon upstream ships in `public/`, under the
+  same names and sizes, plus `public/icon.png` (the NIP-11 icon). Maskable
+  icons keep the mark inside the central 80% (the script checks every pixel
+  outside it), and the apple-touch and maskable icons are opaque. The mark
+  is inlined into same-origin SVG files, so the script accepts only plain
+  shape elements and presentation attributes in it: no script, handler,
+  link, style, entity or comment.
+- Regenerate them on the laptop only, with
+  `python3 -I ci/sovtech/gen-brand-assets.py`. It rasterises with headless
+  Chromium in a throwaway profile and needs nothing but the Python standard
+  library. Commit the outputs together with the blob ids it prints for
+  `ci/sovtech/asset-swaps.tsv`. The gate runs its `--check` mode, which needs
+  no Chromium (see the gate checks below).
+- `public/.well-known/nostr.json` names only `sovtech` (the SovTech npub),
+  and `public/LICENSE.txt` carries upstream's MIT notice and SovTech's line.
+
 ## Upstream sync
 
 `ci/sovtech/sync-upstream.sh` (weekly, or ad hoc for security fixes; Cameron
@@ -152,8 +191,8 @@ The gate checks, all failing closed:
   `.gitlab-ci.yml` against TARGET is printed as `REVIEW gate-change`. On a
   `sync/upstream-*` branch only the data files a sync updates may change
   (`UPSTREAM_BASE`, `shadow-map.tsv`, `brand-allowlist.json`,
-  `touched-upstream.txt`, `asset-swaps.tsv`, `agent-config-allow.txt`, each
-  staying a regular file); any change to the gate's code (`*.sh`, `*.py`,
+  `touched-upstream.txt`, `asset-swaps.tsv`, `agent-config-allow.txt`,
+  `upstream-palette.sha256`, each staying a regular file); any change to the gate's code (`*.sh`, `*.py`,
   `tools.sha256`, `gitleaks.toml`, `.gitleaksignore`, `fork-deleted.txt`, any
   new file) or to `.gitlab-ci.yml` fails.
 - **No bytecode:** `HEAD`'s `ci/sovtech` may hold no `__pycache__` entry and
@@ -188,7 +227,49 @@ The gate checks, all failing closed:
   accepted findings go only in `ci/sovtech/.gitleaksignore`.
 - **Overlay guard:** shadow-map acked blobs, sentinels and markers; the
   `touched-upstream.txt` numstat bound; `asset-swaps.tsv` blobs; deleted paths
-  stay deleted; the CSP meta in `dist` is byte-identical to upstream's.
+  stay deleted; upstream's palette (one `:root` and one `.dark` block in
+  `src/index.css`) still has the sha256 in
+  `ci/sovtech/upstream-palette.sha256`, and a failure prints the new digest
+  to record once theme.css is ported; the CSP meta in `dist` is
+  byte-identical to upstream's.
+- **Theme order** in `dist` (`theme-css-order`): exactly one file declares
+  `--brand-foreground`, a stylesheet that `index.html` and `404.html` load,
+  whose theme.css `:root` and `.dark` blocks open with `color-scheme` light
+  and dark and are nested in nothing. Every other block in it that sets a
+  palette variable (upstream's variable names, or any `--brand-*`) comes
+  before theme.css's `:root`, is exactly `:root` or `.dark` inside at-rules
+  only (theme.css's specificity), uses no `!important`, and sets nothing
+  theme.css's block of the same selector does not. No other file, lazy chunk
+  stylesheets, inline `<style>` and scripts included, sets a palette
+  variable or names one in a string (a React style object or a
+  `setProperty()` call): a lazy chunk's stylesheet loads after theme.css and
+  would bring upstream's colours back. Every stylesheet a page links is a
+  file in `dist`, and no built CSS or inline `<style>` holds an `@import`.
+  Comments, strings, escapes and `url()` are masked before the braces are
+  read; declarations after a nested rule count. The check is static: a
+  variable name built at run time is out of its reach. Eighteen planted
+  faults (reversed order, a layered theme, a declaration after a nested
+  rule, lazy chunks setting an upstream and a `--brand-*` variable, an
+  inline style, a script, an external link, one hidden behind a `<!--` in a
+  script string, an `@import`, `html.dark`, a nested block, `!important`, a
+  missing variable, no upstream palette, an unlinked or commented-out
+  stylesheet, no theme) must each fail first.
+- **Brand assets** (`gen-brand-assets.py --check`, history phase, standard
+  library only): the committed files at `HEAD` are what the generator
+  writes, as far as that can be known without Chromium. `mark.svg` passes
+  the element and attribute allow-list; `mark-on-dark.svg`, `favicon.svg`
+  and `icons/icon.svg` are byte for byte the mark composed on its tile, so
+  no script or handler can reach the same-origin SVGs; every PNG is exactly
+  `IHDR`, `IDAT` and `IEND`, 8-bit and not interlaced, with the pixel size of
+  its name and colour type 2 (apple-touch, maskable, `icon.png`) or 6 (the
+  tiles); `favicon.ico` is the committed 16, 32 and 48 px tiles; and the
+  maskable icons, decoded, keep every pixel outside the safe zone plain
+  background. Attribute values in the mark are plain (numbers, path data,
+  `#hex` colours, keywords; no `url()`, `:` or `/`), so the SVGs reference
+  no other resource. A decoder round trip and nine planted faults (an
+  `onload`, a `<script>`, a `style`, a comment and a `url()` value in the
+  mark; an extra chunk, a wrong colour type and a wrong size in a PNG; ink
+  outside the safe zone) come first.
 - **Brand-leak ratchet** over `dist` without source maps: upstream brand terms
   (the `GitWorkshop` name, and `gitworkshop.dev` both as a URL and as a bare
   host in any case), Dan's npub and hex key (also inside decoded bech32 TLVs),

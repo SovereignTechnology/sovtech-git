@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig, type Plugin } from "vitest/config";
 import { name } from "./package.json";
+import { sovtech } from "./src/sovtech/vite-plugin";
 
 function getGitCommit(): string {
   try {
@@ -128,7 +129,7 @@ export default defineConfig(() => ({
     host: "::",
     port: 8080,
   },
-  plugins: [react(), htmlAppNamePlugin(), manifestPlugin()],
+  plugins: [sovtech(), react(), htmlAppNamePlugin(), manifestPlugin()],
   test: {
     globals: true,
     environment: "jsdom",
