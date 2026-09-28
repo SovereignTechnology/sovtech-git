@@ -218,8 +218,9 @@ describe("shadow map", () => {
     }
   });
 
-  // Reads each of the ~560 files once, not once per row: on the CI runners'
-  // idle-priority CPU the per-row reads outran vitest's 5 s default.
+  // Reads each of the ~560 files once, not once per row: on the 12-vCPU CI
+  // VMs about 11 vitest workers share one virtiofs root, and the per-row
+  // reads outran vitest's 5 s default.
   it("uses markers that only their upstream file holds", () => {
     const files = [...sourceFiles("src"), "index.html"].map((file) => ({
       file,
