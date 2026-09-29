@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
-import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
+import {
+  eventIdMatchesSearch,
+  eventIdToNevent,
+  searchQueryToPubkey,
+} from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
 import { useSeoMeta } from "@unhead/react";
 import { useProfile } from "@/hooks/useProfile";
@@ -167,6 +171,12 @@ export default function RepoPRsPage() {
     label: l,
   }));
 
+  // Pubkey queries select an author; ordinary queries use fuzzy text search.
+  const searchPubkey = useMemo(
+    () => searchQueryToPubkey(searchQuery),
+    [searchQuery],
+  );
+
   const facetFilteredPRs = useMemo(
     () =>
       prs?.filter(
@@ -194,7 +204,7 @@ export default function RepoPRsPage() {
   );
   const fuzzyPRs = useFuzzySearch(
     facetFilteredPRs,
-    searchQuery,
+    searchPubkey ? "" : searchQuery,
     PR_SEARCH_OPTIONS,
   );
 
@@ -213,12 +223,16 @@ export default function RepoPRsPage() {
     return {
       filteredPRs: [
         ...idMatches,
-        ...fuzzyPRs.filter((pr) => !idMatchIds.has(pr.id)),
+        ...fuzzyPRs.filter(
+          (pr) =>
+            !idMatchIds.has(pr.id) &&
+            (!searchPubkey || pr.pubkey === searchPubkey),
+        ),
       ],
       idMatchesOutsideFilters: idMatches.filter((pr) => !facetIds.has(pr.id))
         .length,
     };
-  }, [prs, facetFilteredPRs, fuzzyPRs, searchQuery]);
+  }, [prs, facetFilteredPRs, fuzzyPRs, searchQuery, searchPubkey]);
 
   const { visibleAcceptedItems, visibleUnconfirmedItems } = useMemo(() => {
     if (!filteredPRs || !repo) {
@@ -274,7 +288,7 @@ export default function RepoPRsPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search PRs or event ID..."
+            placeholder="Search PRs, event ID or npub..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-background/60"

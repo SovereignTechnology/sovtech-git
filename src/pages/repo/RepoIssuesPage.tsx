@@ -2,7 +2,11 @@ import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
 import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
-import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
+import {
+  eventIdMatchesSearch,
+  eventIdToNevent,
+  searchQueryToPubkey,
+} from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
 import { useSeoMeta } from "@unhead/react";
 import { useProfile } from "@/hooks/useProfile";
@@ -153,6 +157,12 @@ export default function RepoIssuesPage() {
     label: l,
   }));
 
+  // Pubkey queries select an author; ordinary queries use fuzzy text search.
+  const searchPubkey = useMemo(
+    () => searchQueryToPubkey(searchQuery),
+    [searchQuery],
+  );
+
   const facetFilteredIssues = useMemo(
     () =>
       issues?.filter(
@@ -168,7 +178,7 @@ export default function RepoIssuesPage() {
   );
   const fuzzyIssues = useFuzzySearch(
     facetFilteredIssues,
-    searchQuery,
+    searchPubkey ? "" : searchQuery,
     ISSUE_SEARCH_OPTIONS,
   );
 
@@ -187,13 +197,17 @@ export default function RepoIssuesPage() {
     return {
       filteredIssues: [
         ...idMatches,
-        ...fuzzyIssues.filter((issue) => !idMatchIds.has(issue.id)),
+        ...fuzzyIssues.filter(
+          (issue) =>
+            !idMatchIds.has(issue.id) &&
+            (!searchPubkey || issue.pubkey === searchPubkey),
+        ),
       ],
       idMatchesOutsideFilters: idMatches.filter(
         (issue) => !facetIds.has(issue.id),
       ).length,
     };
-  }, [issues, facetFilteredIssues, fuzzyIssues, searchQuery]);
+  }, [issues, facetFilteredIssues, fuzzyIssues, searchQuery, searchPubkey]);
 
   const { visibleAcceptedIssues, visibleUnconfirmedIssues } = useMemo(() => {
     if (!filteredIssues || !repo) {
@@ -275,7 +289,7 @@ export default function RepoIssuesPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search issues or event ID..."
+            placeholder="Search issues, event ID or npub..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-background/60"
