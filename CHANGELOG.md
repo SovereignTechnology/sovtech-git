@@ -12,6 +12,7 @@
 
 - Require an observed relay list and coverage of every outbox relay (all but one when there are at least three) before creating the shared notification key. Routine notification sync keeps its existing relay quorum.
 - Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
+- Add typo-tolerant, relevance-ranked local search for repository, issue, and pull request lists while preserving exact event ID and facet filtering behavior.
 
 ### Fixed
 

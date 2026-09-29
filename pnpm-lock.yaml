@@ -192,6 +192,9 @@ importers:
       fflate:
         specifier: 0.8.2
         version: 0.8.2
+      fuse.js:
+        specifier: ^7.5.0
+        version: 7.5.0
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
@@ -4133,6 +4136,13 @@ packages:
       {
         integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==,
       }
+
+  fuse.js@7.5.0:
+    resolution:
+      {
+        integrity: sha512-sQtrEfA+ez/3G0cCZecF70oqpCRttCexYUG4mUrtWL49ULUzUyxokt5kyqwtKzj1270RaKih+hcP3qLcumccow==,
+      }
+    engines: { node: ">=10" }
 
   file-entry-cache@8.0.0:
     resolution:
@@ -9782,6 +9792,8 @@ snapshots:
       picomatch: 4.0.3
 
   fflate@0.8.2: {}
+
+  fuse.js@7.5.0: {}
 
   file-entry-cache@8.0.0:
     dependencies:
