@@ -185,7 +185,7 @@ function resolveRelativePath(filePath: string, src: string): string {
   // Build a fake absolute URL so URL() handles ".." and normalises the path.
   // decodeURIComponent turns %20-encoded segments back to literal characters
   // so they match directory/file names in the git tree (e.g. "3rd Logo - Ziton").
-  const base = `https://x/${filePath}`;
+  const base = `https://x/${filePath.split("/").map(encodeURIComponent).join("/")}`;
   try {
     return decodeURIComponent(new URL(src, base).pathname.slice(1));
   } catch {
@@ -200,6 +200,31 @@ function isRelativeSrc(src: string): boolean {
     !src.startsWith("data:") &&
     !src.startsWith("//")
   );
+}
+
+const markdownLinkClassName =
+  "text-primary underline underline-offset-4 decoration-primary/50 hover:decoration-primary transition-colors";
+
+/**
+ * True for a markdown link that points at another file in the same repository:
+ * a relative path, and not an in-page anchor, a query-only link, a site-root
+ * link, or anything carrying a URL scheme (http:, mailto:, nostr:, …).
+ */
+function isRelativeFileHref(href: string): boolean {
+  return (
+    href.length > 0 &&
+    !href.startsWith("#") &&
+    !href.startsWith("?") &&
+    !href.startsWith("/") &&
+    !/^[a-z][a-z0-9+.-]*:/i.test(href)
+  );
+}
+
+/** Split a link target into its path and its "?query" / "#fragment" suffix. */
+function splitLinkTarget(href: string): { path: string; suffix: string } {
+  const index = href.search(/[?#]/);
+  if (index === -1) return { path: href, suffix: "" };
+  return { path: href.slice(0, index), suffix: href.slice(index) };
 }
 
 interface GitImageProps {
@@ -388,6 +413,66 @@ function GitImage({
 }
 
 // ---------------------------------------------------------------------------
+// Git-aware file link
+// ---------------------------------------------------------------------------
+
+type GitFileLinkProps = Omit<React.ComponentPropsWithoutRef<"a">, "href"> & {
+  href: string;
+  commitHash: string;
+  filePath: string;
+};
+
+/**
+ * Link to another file in the same repository, at the same commit the
+ * surrounding markdown was read from — mirroring how GitImage resolves
+ * relative image sources. Outside a repo page context there is no base path
+ * to resolve against, so the original href is preserved.
+ */
+function GitFileLink({
+  href,
+  commitHash,
+  filePath,
+  className,
+  children,
+  ...props
+}: GitFileLinkProps) {
+  const gitContext = useGitCommitLinkContext();
+
+  if (!gitContext) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(markdownLinkClassName, className)}
+        {...props}
+      >
+        <LinkedMarkdownImageContext.Provider value>
+          {children}
+        </LinkedMarkdownImageContext.Provider>
+      </a>
+    );
+  }
+
+  const { path, suffix } = splitLinkTarget(href);
+  const resolvedPath = resolveRelativePath(filePath, path);
+  // The resolver returns a git path; URL delimiters in filenames must stay data.
+  const encodedPath = resolvedPath.split("/").map(encodeURIComponent).join("/");
+
+  return (
+    <Link
+      to={`${gitContext.basePath}/tree/${commitHash}/${encodedPath}${suffix}`}
+      className={cn(markdownLinkClassName, className)}
+      {...props}
+    >
+      <LinkedMarkdownImageContext.Provider value>
+        {children}
+      </LinkedMarkdownImageContext.Provider>
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inline Nostr profile mention for markdown — avatar + @name
 // ---------------------------------------------------------------------------
 
@@ -560,15 +645,28 @@ function buildComponents(
           </span>
         );
       }
+      // Relative links point at files in this repository. Left untouched they
+      // would resolve against the browser URL and land on an unrelated route.
+      if (hasGitContext && href && isRelativeFileHref(href)) {
+        return (
+          <GitFileLink
+            href={href}
+            commitHash={commitHash!}
+            filePath={filePath}
+            className={propsClassName}
+            {...props}
+          >
+            {children}
+          </GitFileLink>
+        );
+      }
+
       return (
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn(
-            "text-primary underline underline-offset-4 decoration-primary/50 hover:decoration-primary transition-colors",
-            propsClassName,
-          )}
+          className={cn(markdownLinkClassName, propsClassName)}
           {...props}
         >
           <LinkedMarkdownImageContext.Provider value>
