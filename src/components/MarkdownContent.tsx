@@ -185,7 +185,7 @@ function resolveRelativePath(filePath: string, src: string): string {
   // Build a fake absolute URL so URL() handles ".." and normalises the path.
   // decodeURIComponent turns %20-encoded segments back to literal characters
   // so they match directory/file names in the git tree (e.g. "3rd Logo - Ziton").
-  const base = `https://x/${filePath}`;
+  const base = `https://x/${filePath.split("/").map(encodeURIComponent).join("/")}`;
   try {
     return decodeURIComponent(new URL(src, base).pathname.slice(1));
   } catch {
@@ -456,10 +456,12 @@ function GitFileLink({
 
   const { path, suffix } = splitLinkTarget(href);
   const resolvedPath = resolveRelativePath(filePath, path);
+  // The resolver returns a git path; URL delimiters in filenames must stay data.
+  const encodedPath = resolvedPath.split("/").map(encodeURIComponent).join("/");
 
   return (
     <Link
-      to={`${gitContext.basePath}/tree/${commitHash}/${resolvedPath}${suffix}`}
+      to={`${gitContext.basePath}/tree/${commitHash}/${encodedPath}${suffix}`}
       className={cn(markdownLinkClassName, className)}
       {...props}
     >
