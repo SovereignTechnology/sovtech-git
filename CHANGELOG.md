@@ -4,6 +4,8 @@
 
 ### Added
 
+- Add repository announcement deletion with confirmation to the settings Danger zone. Maintainers can delete their own announcement and its prior versions.
+
 - Add issue and PR sorting by creation date, activity, and reply count in either direction, keeping recent activity as the default. Sort choices persist per repository until refresh, like filters; an explicit Set default menu action syncs the choice across repositories and devices through NIP-78.
 
 - Search and select reaction emojis by name, with category browsing and skin tones alongside the existing quick reactions.
