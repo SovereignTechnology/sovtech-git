@@ -14,7 +14,7 @@
  */
 
 import { blankEventTemplate, EventFactory } from "applesauce-core/factories";
-import { includeContentHashtags } from "applesauce-core/operations/content";
+import { extractIssueHashtags } from "@/lib/issueHashtags";
 import {
   addAddressPointerTag,
   addNameValueTag,
@@ -87,7 +87,11 @@ export class IssueFactory extends EventFactory<
         ),
       )
       .modifyPublicTags((tags) => [...tags, ["subject", subject]])
-      .chain(includeContentHashtags())
+      .modifyPublicTags(
+        ...extractIssueHashtags(content).map((label) =>
+          addNameValueTag(["t", label]),
+        ),
+      )
       .alt(`Git issue: ${subject}`);
 
     const labels = options?.labels ?? [];

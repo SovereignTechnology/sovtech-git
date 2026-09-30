@@ -22,13 +22,7 @@ import { composerHasNsec } from "@/lib/composerUtils";
 import { extractContentTags } from "@/lib/nostrContentTags";
 import type { Nip94Tags } from "@/hooks/useBlossomUpload";
 import { Loader2, Paperclip, Plus, X, CircleDot } from "lucide-react";
-import { Expressions } from "applesauce-core/helpers/regexp";
-import { stripInvisibleChar } from "applesauce-core/helpers/string";
-
-/** Normalise a hashtag/label the same way applesauce does: lowercase + strip invisible chars. */
-function normaliseHashtag(tag: string): string {
-  return stripInvisibleChar(tag.toLocaleLowerCase());
-}
+import { extractIssueHashtags, normaliseHashtag } from "@/lib/issueHashtags";
 
 /**
  * Returns true if the string is a valid hashtag per applesauce's regex
@@ -36,20 +30,6 @@ function normaliseHashtag(tag: string): string {
  */
 function isValidHashtag(tag: string): boolean {
   return /^[\p{L}\p{N}\p{M}]+$/u.test(tag);
-}
-
-/**
- * Extract #hashtags from content using applesauce's Expressions.hashtag regex,
- * normalised with the same logic applesauce uses.
- */
-function extractHashtags(text: string): string[] {
-  const re = new RegExp(Expressions.hashtag.source, Expressions.hashtag.flags);
-  const results: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    results.push(normaliseHashtag(match[1]));
-  }
-  return [...new Set(results)];
 }
 
 /**
@@ -124,7 +104,7 @@ export function CreateIssueForm({
   );
 
   // Labels derived from #hashtags in the content — read-only, auto-synced
-  const contentLabels = useMemo(() => extractHashtags(content), [content]);
+  const contentLabels = useMemo(() => extractIssueHashtags(content), [content]);
 
   const handleLockClick = useCallback(() => {
     setShowHashtagHint(true);
