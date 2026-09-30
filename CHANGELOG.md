@@ -16,6 +16,8 @@
 
 ### Fixed
 
+- Convert typed or pasted short issue/PR references such as `#6aa901d6` into Nostr links when a unique loaded item matches, while retaining description-derived labels for other hashtags.
+
 - Keep mention suggestions clickable inside dialogs, dismiss suggestions first with Escape, and fit them within the visible viewport.
 
 - Keep restored issue dialogs open when their last text is cleared for replacement.
