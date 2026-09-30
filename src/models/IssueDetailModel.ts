@@ -202,6 +202,7 @@ export function IssueDetailModel(
             zapTotal: core.zapTotal,
             authorisedUsers: core.authorisedUsers,
             deletedEssentialEventIds: core.deletedEssentialEventIds,
+            validStatusEventIds: core.validStatusEventIds,
 
             // Detail fields
             body: extractBody(rootEvent),

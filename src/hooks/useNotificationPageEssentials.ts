@@ -9,7 +9,7 @@
  *
  *   Part A — reactive Map<coord, relayUrls[]> via RepositoryRelayGroup models
  *   Part B — fetch missing repo announcements from git index relays
- *   Part C — trigger nip34ListLoader for each item × relay list
+ *   Part C — trigger nip34ItemEssentialsLoader for each item × relay list
  *   Part D — build Map<rootId, ResolvedIssueLite> from EventStore
  */
 
@@ -23,28 +23,24 @@ import {
   Observable,
   distinctUntilChanged,
 } from "rxjs";
-import { map, switchMap, auditTime } from "rxjs/operators";
+import { map, switchMap } from "rxjs/operators";
 import { onlyEvents } from "applesauce-relay";
 import { mapEventsToStore } from "applesauce-core";
 import type { RelayGroup } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
 import type { Filter } from "applesauce-core/helpers";
 
-import { pool, nip34ListLoader } from "@/services/nostr";
+import {
+  pool,
+  nip34ItemEssentialsLoader,
+  deletionEvents$,
+} from "@/services/nostr";
 import { resilientRequest } from "@/lib/resilientSubscription";
 import { gitIndexRelays } from "@/services/settings";
+import { ItemEssentialsModel } from "@/models/ItemEssentialsModel";
 import { RepositoryRelayGroup } from "@/models/RepositoryRelayGroup";
 import { resolveRepoCoord } from "@/lib/notificationUtils";
-import {
-  REPO_KIND,
-  LABEL_KIND,
-  DELETION_KIND,
-  STATUS_KINDS,
-  resolveChain,
-  resolveItemEssentials,
-  type ResolvedRepo,
-  type ResolvedIssueLite,
-} from "@/lib/nip34";
+import { REPO_KIND, type ResolvedIssueLite } from "@/lib/nip34";
 import type {
   ThreadNotificationItem,
   NotificationItem,
@@ -228,8 +224,8 @@ export function useNotificationPageEssentials(
   // ── Stable key for Part C: relay map contents ────────────────────────────
   // Changes only when the actual relay URLs change, not on every Map reference
   // change. When new relays are discovered, relayMapKey changes and Part C
-  // re-runs with the full updated relay list. nip34ListLoader's cacheRequest
-  // ensures each relay is only queried once per filter.
+  // re-runs with the updated relay list. The essentials loader shares active
+  // item/relay requests across mounted consumers.
   const relayMapKey = useMemo(() => {
     if (!relayMap) return "";
     return [...relayMap.entries()]
@@ -240,7 +236,7 @@ export function useNotificationPageEssentials(
 
   // ── Part C: trigger essentials loading ────────────────────────────────────
   //
-  // Fires nip34ListLoader(itemId, relays) for each thread item that has a
+  // Fires nip34ItemEssentialsLoader(itemId, relays) for each thread item that has a
   // coord with known relays. Re-runs when the relay map grows.
   use$(() => {
     if (threadItems.length === 0 || !relayMap || relayMap.size === 0)
@@ -263,7 +259,7 @@ export function useNotificationPageEssentials(
       const relays = relayMap.get(coord);
       if (!relays || relays.length === 0) continue;
 
-      loaders.push(nip34ListLoader(item.rootId, relays));
+      loaders.push(nip34ItemEssentialsLoader(item.rootId, relays));
     }
 
     if (loaders.length === 0) return undefined;
@@ -272,78 +268,28 @@ export function useNotificationPageEssentials(
 
   // ── Part D: build Map<rootId, ResolvedIssueLite> from EventStore ──────────
   //
-  // Mirrors IssueListModel's combineLatest + auditTime(100) pattern.
-  // Reacts to root events and essentials (status, labels, deletions) arriving
-  // in the store.
+  // Shared item models react to essentials, withdrawals, and repository
+  // membership history. Late announcements must update status authority.
   const resolvedMap = use$(() => {
     if (rootIds.length === 0) return of(new Map<string, ResolvedIssueLite>());
 
-    return combineLatest([
-      store.timeline([{ ids: rootIds } as Filter]),
-      store.timeline([
-        {
-          kinds: [...STATUS_KINDS, LABEL_KIND, DELETION_KIND],
-          "#e": rootIds,
-        } as Filter,
-      ]),
-    ]).pipe(
-      auditTime(100),
-      map(([rootEventsRaw, essentialsRaw]) => {
-        const rootEvents = rootEventsRaw as NostrEvent[];
-        const essentials = essentialsRaw as NostrEvent[];
-        const result = new Map<string, ResolvedIssueLite>();
-
-        for (const rootEvent of rootEvents) {
-          // Resolve the reciprocal component from every announcement currently
-          // in the store. Directional listings remain invitations and cannot
-          // authorize notification status or label events.
-          const coord = rootEvent.tags.find(([t]) => t === "a")?.[1];
-          let memberSet = new Set<string>();
-          let roleHistory: ResolvedRepo["roleHistory"] | undefined;
-
-          if (coord?.startsWith("30617:")) {
-            const parsed = splitCoord(coord);
-            if (parsed) {
-              const announcements = store.getByFilters([
-                {
-                  kinds: [REPO_KIND],
-                  "#d": [parsed.dTag],
-                } as Filter,
-              ]) as NostrEvent[];
-              const repository = resolveChain(
-                announcements,
-                parsed.pubkey,
-                parsed.dTag,
-              );
-              if (repository) {
-                memberSet = new Set(repository.confirmedMembers);
-                roleHistory = repository.roleHistory;
-              }
-            }
-          }
-
-          // Filter essentials to those referencing this root via #e tag.
-          // resolveItemEssentials will re-filter internally using NIP-10;
-          // this pre-filter just avoids passing the full essentials array.
-          const itemEssentials = essentials.filter((ev) =>
-            ev.tags.some(([t, id]) => t === "e" && id === rootEvent.id),
-          );
-
-          const resolved = resolveItemEssentials(
-            rootEvent,
-            itemEssentials,
-            [], // comments — not needed for notification display
-            [], // zaps — not needed for notification display
-            memberSet,
-            { roleHistory },
-          );
-
-          result.set(rootEvent.id, resolved);
-        }
-
-        return result;
+    return store.timeline([{ ids: rootIds } as Filter]).pipe(
+      switchMap((roots) => {
+        if (roots.length === 0) return of(new Map<string, ResolvedIssueLite>());
+        return combineLatest(
+          roots.map((root) =>
+            store.model(ItemEssentialsModel, root, deletionEvents$),
+          ),
+        ).pipe(
+          map(
+            (items) =>
+              new Map<string, ResolvedIssueLite>(
+                items.map((item) => [item.id, item]),
+              ),
+          ),
+        );
       }),
-    ) as unknown as Observable<Map<string, ResolvedIssueLite>>;
+    );
   }, [rootIdsKey, store]);
 
   return resolvedMap;

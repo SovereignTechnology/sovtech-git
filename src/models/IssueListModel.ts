@@ -3,9 +3,6 @@ import { auditTime, switchMap, map } from "rxjs/operators";
 import type { Model } from "applesauce-core/event-store";
 import {
   ISSUE_KIND,
-  LABEL_KIND,
-  DELETION_KIND,
-  STATUS_KINDS,
   COMMENT_KIND,
   LEGACY_REPLY_KINDS,
   pubkeyFromCoordinate,
@@ -17,8 +14,7 @@ import {
 import type { Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
-/** All essential kinds fetched alongside issues. */
-const ESSENTIALS_KINDS = [...STATUS_KINDS, LABEL_KIND, DELETION_KIND] as const;
+import { ItemEssentialEventsModel } from "./ItemEssentialEventsModel";
 
 /**
  * IssueListModel — subscribes to issues and their essentials, comment, and
@@ -92,9 +88,10 @@ export function IssueListModel(
         const ids = events.map((e) => e.id);
 
         // All inner streams are scoped to the current issue IDs.
-        const essentials$ = store.timeline([
-          { kinds: [...ESSENTIALS_KINDS], "#e": ids } as Filter,
-        ]);
+        const essentials$ = store.model(
+          ItemEssentialEventsModel,
+          ids.sort().join(","),
+        );
         const comments$ = store.timeline([
           { kinds: [COMMENT_KIND], "#E": ids } as Filter,
         ]);
@@ -113,14 +110,20 @@ export function IssueListModel(
             ([essentialEvents, commentEvents, legacyReplyEvents, zapEvents]) =>
               buildResolvedIssues(
                 events,
-                essentialEvents as NostrEvent[],
+                essentialEvents.essentials,
                 [
                   ...(commentEvents as NostrEvent[]),
                   ...(legacyReplyEvents as NostrEvent[]),
                 ],
                 zapEvents as NostrEvent[],
                 memberSet,
-                options,
+                {
+                  ...options,
+                  essentialDeletionEvents: [
+                    ...(options.essentialDeletionEvents ?? []),
+                    ...essentialEvents.deletions,
+                  ],
+                },
               ),
           ),
         );

@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useActiveAccount } from "applesauce-react/hooks";
 import { map, type Observable } from "rxjs";
 import { use$ } from "./use$";
+import { deletionEvents$ } from "@/services/nostr";
 import { useEventStore } from "./useEventStore";
 import {
   acquireNotificationStore,
@@ -208,6 +209,7 @@ export function useNotifications(): {
       readState$,
       repoCoords$,
       nonGitEventIds$,
+      deletionEvents$,
     ) as unknown as Observable<NotificationModelOutput>;
   }, [pubkey, readState$, repoCoords$, nonGitEventIds$, store]);
 
@@ -282,6 +284,7 @@ export function useUnreadNotificationCount(): number {
         readState$,
         repoCoords$,
         nonGitEventIds$,
+        deletionEvents$,
       ) as unknown as Observable<NotificationModelOutput>
     ).pipe(map((output) => output.unreadCount));
   }, [pubkey, readState$, repoCoords$, nonGitEventIds$, store]);

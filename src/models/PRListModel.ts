@@ -5,9 +5,6 @@ import {
   PATCH_KIND,
   PR_KIND,
   PR_UPDATE_KIND,
-  LABEL_KIND,
-  DELETION_KIND,
-  STATUS_KINDS,
   COMMENT_KIND,
   LEGACY_REPLY_KINDS,
   pubkeyFromCoordinate,
@@ -19,8 +16,7 @@ import {
 import { hasNameValueTag, type Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
-/** All essential kinds fetched alongside PRs/patches. */
-const ESSENTIALS_KINDS = [...STATUS_KINDS, LABEL_KIND, DELETION_KIND] as const;
+import { ItemEssentialEventsModel } from "./ItemEssentialEventsModel";
 
 /**
  * PRListModel — subscribes to patches (kind:1617) and PRs (kind:1618) and
@@ -74,9 +70,10 @@ export function PRListModel(
 
         const ids = events.map((e) => e.id);
 
-        const essentials$ = store.timeline([
-          { kinds: [...ESSENTIALS_KINDS], "#e": ids } as Filter,
-        ]);
+        const essentials$ = store.model(
+          ItemEssentialEventsModel,
+          ids.sort().join(","),
+        );
         // Comments (kind:1111) and PR Updates (kind:1619) both use the
         // uppercase E root tag. Split them here so PR Updates don't inflate
         // comment counts but still factor into lastActivityAt.
@@ -112,12 +109,13 @@ export function PRListModel(
               );
               return buildResolvedPRs(
                 events,
-                essentialEvents as NostrEvent[],
+                essentialEvents.essentials,
                 commentEvents,
                 zapEvents as NostrEvent[],
                 memberSet,
                 prUpdateEvents,
                 roleHistory,
+                essentialEvents.deletions,
               );
             },
           ),

@@ -601,6 +601,7 @@ export function groupNotifications(
   selfPubkey: string,
   threadEvents?: Map<string, NostrEvent>,
   nonGitEventIds?: Set<string>,
+  validStatusEventIds?: ReadonlySet<string>,
 ): ThreadNotificationItem[] {
   const readIdSet = new Set(state.ri);
   const archivedIdSet = new Set(state.ai);
@@ -613,6 +614,11 @@ export function groupNotifications(
 
   for (const ev of events) {
     if (isNotificationEventFromSelf(ev, selfPubkey)) continue;
+    if (
+      (STATUS_KINDS as readonly number[]).includes(ev.kind) &&
+      !validStatusEventIds?.has(ev.id)
+    )
+      continue;
 
     // Skip events pending async root-kind resolution (ambiguous zap receipts
     // with no #k tag). They are held back until confirmed as git-related.

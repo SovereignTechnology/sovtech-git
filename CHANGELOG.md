@@ -16,11 +16,19 @@
 
 ### Changed
 
+- Share status essentials requests per item and relay across lists, previews, and notifications, skip unnecessary comment fetching, and index deletion evidence once for all item resolvers.
+
 - Require an observed relay list and coverage of every outbox relay (all but one when there are at least three) before creating the shared notification key. Routine notification sync keeps its existing relay quorum.
 - Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
 - Add typo-tolerant, relevance-ranked local search for repository, issue, and pull request lists while preserving exact event ID and facet filtering behavior.
 
 ### Fixed
+
+- Exclude invalid status events from unread notifications and recent-activity ordering, and summarize the latest valid unread status change after reopenings.
+
+- Apply shared status validity checks to embedded previews, notifications, activity feeds, lists, and detail timelines. Only changes targeting the item from its author or a confirmed member at publication time count; withdrawn changes are excluded, and late repository history updates the displayed result.
+
+- Only show status changes targeting the current issue or PR in its timeline, preventing closures of other items that merely mention it from appearing as "set status to closed".
 
 - Load current issue and PR statuses for homepage notifications instead of leaving resolved, closed, or merged items with the open-looking fallback icon.
 

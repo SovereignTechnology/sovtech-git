@@ -26,6 +26,10 @@ import {
   of,
   timer,
   EMPTY,
+  defer,
+  finalize,
+  share,
+  ReplaySubject,
 } from "rxjs";
 import {
   catchError,
@@ -872,27 +876,44 @@ const REACTION_KIND = 7;
 /** Kind 10018 — NIP-51 Git repositories follow list; used for repo follower counts. */
 const GIT_REPOS_FOLLOW_KIND = 10018 as const;
 
+/** Active essentials requests, shared across list, preview and notification consumers. */
+const itemEssentialsRequests = new Map<
+  string,
+  Observable<PaginatedTagValueResponse>
+>();
+
 /**
- * List-level loader for a single item.
- *
- * Fires both essentials (status, labels, deletions) and comments loaders for
- * the given item ID against the provided relay list. Each loader handles its
- * own historical fetch (backward pagination until exhausted) and persistent
- * live subscription.
- *
- * The relay list is a static snapshot — callers are responsible for
- * reactivity. nip34RepoLoader re-fires this function when the RelayGroup
- * gains new relays. useNip34ItemLoader re-subscribes via use$() when
- * repoRelayKey changes (driven by useRelayGroupUrls).
- *
- * Because nip34EssentialsLoader and nip34CommentsLoader are singleton
- * instances, calls within the same buffer window are batched into a single
- * REQ per relay automatically.
- *
- * @param itemId - The event ID of the issue / patch / PR
- * @param relays - Relay URLs to query (snapshot at call time)
+ * Load essentials and withdrawals without comments. Share each item/relay pair
+ * across callers, including calls in different batching windows. Release the
+ * entry when its last subscriber leaves; the singleton loaders still batch
+ * different items into relay requests.
  */
-export function nip34ListLoader(
+export function nip34ItemEssentialsLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return merge(
+    ...[...new Set(relays.map(normalizeUrl))].map((relay) =>
+      defer(() => {
+        const key = JSON.stringify([itemId, relay]);
+        let request = itemEssentialsRequests.get(key);
+        if (!request) {
+          request = createItemEssentialsRequest(itemId, [relay]).pipe(
+            finalize(() => itemEssentialsRequests.delete(key)),
+            share({
+              connector: () => new ReplaySubject<PaginatedTagValueResponse>(1),
+              resetOnRefCountZero: true,
+            }),
+          );
+          itemEssentialsRequests.set(key, request);
+        }
+        return request;
+      }),
+    ),
+  );
+}
+
+function createItemEssentialsRequest(
   itemId: string,
   relays: string[],
 ): Observable<PaginatedTagValueResponse> {
@@ -923,18 +944,21 @@ export function nip34ListLoader(
       },
     });
 
-    const commentsSub = nip34CommentsLoader({
-      value: itemId,
-      relays,
-    }).subscribe({
-      next: (msg) => subscriber.next(msg),
-    });
-
     return () => {
       essentialsSub.unsubscribe();
-      commentsSub.unsubscribe();
     };
   });
+}
+
+/** Full list-level loading: essentials, withdrawals, and comments. */
+export function nip34ListLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return merge(
+    nip34ItemEssentialsLoader(itemId, relays),
+    nip34CommentsLoader({ value: itemId, relays }),
+  );
 }
 
 /**

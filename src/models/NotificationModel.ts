@@ -22,6 +22,10 @@ import {
 import type { Model } from "applesauce-core/event-store";
 import type { NostrEvent } from "nostr-tools";
 import { getZapEventPointer } from "applesauce-common/helpers";
+import {
+  ValidStatusEventsModel,
+  statusRootsKey,
+} from "./ValidStatusEventsModel";
 import { REPO_KIND } from "@/lib/nip34";
 import {
   buildThreadEventMap,
@@ -63,12 +67,20 @@ export function NotificationModel(
   readState$: Observable<NotificationReadState>,
   repoCoords$: Observable<string[]>,
   nonGitEventIds$: Observable<Set<string>>,
+  deletionEvents$?: Observable<NostrEvent[]>,
 ): Model<NotificationModelOutput> {
   return (store) => {
     const threadFilters = buildNotificationFilters(pubkey);
 
     // Thread events — static filters (includes zap receipts on thread items)
     const threadEvents$ = store.timeline(threadFilters);
+    const validStatusEventIds$ = threadEvents$.pipe(
+      map(statusRootsKey),
+      distinctUntilChanged(),
+      switchMap((key) =>
+        store.model(ValidStatusEventsModel, key, deletionEvents$),
+      ),
+    );
 
     // Zap receipts identify their target event rather than its thread root.
     // Watch targets that do not independently match notification filters.
@@ -131,6 +143,7 @@ export function NotificationModel(
       repoZapEvents$,
       repoCoords$,
       nonGitEventIds$,
+      validStatusEventIds$,
     ]).pipe(
       // Collapse rapid emissions (e.g. many events arriving at once)
       auditTime(100),
@@ -144,6 +157,7 @@ export function NotificationModel(
           zapEventsRaw,
           coords,
           nonGitEventIds,
+          validStatusEventIds,
         ]) => {
           const allThreadEvents = threadEventsRaw as NostrEvent[];
           const targetEvents = zappedTargetEvents as NostrEvent[];
@@ -179,6 +193,7 @@ export function NotificationModel(
             pubkey,
             threadEventsById,
             nonGitEventIds,
+            validStatusEventIds,
           );
           const socialItems = groupSocialNotifications(
             allStarEvents,
