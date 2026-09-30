@@ -17,8 +17,8 @@ export function normaliseHashtag(tag: string): string {
   return stripInvisibleChar(tag.toLocaleLowerCase());
 }
 
-/** Extract issue labels from Markdown prose, excluding code and other literals. */
-export function extractIssueHashtags(content: string): string[] {
+/** Extract hashtags from Markdown prose, excluding code and other literals. */
+export function extractMarkdownHashtags(content: string): string[] {
   const labels = new Set<string>();
 
   function visit(node: MarkdownNode): void {
@@ -32,4 +32,13 @@ export function extractIssueHashtags(content: string): string[] {
 
   visit(parser.parse(content));
   return [...labels];
+}
+
+/** Replace automatically derived tags before appending any explicit hashtags. */
+export function replaceMarkdownHashtags(content: string) {
+  const hashtags = extractMarkdownHashtags(content);
+  return (tags: string[][]): string[][] => [
+    ...tags.filter(([name]) => name !== "t"),
+    ...hashtags.map((hashtag) => ["t", hashtag]),
+  ];
 }

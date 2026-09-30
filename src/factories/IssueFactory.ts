@@ -14,7 +14,7 @@
  */
 
 import { blankEventTemplate, EventFactory } from "applesauce-core/factories";
-import { extractIssueHashtags } from "@/lib/issueHashtags";
+import { extractMarkdownHashtags } from "@/lib/markdownHashtags";
 import {
   addAddressPointerTag,
   addNameValueTag,
@@ -88,7 +88,7 @@ export class IssueFactory extends EventFactory<
       )
       .modifyPublicTags((tags) => [...tags, ["subject", subject]])
       .modifyPublicTags(
-        ...extractIssueHashtags(content).map((label) =>
+        ...extractMarkdownHashtags(content).map((label) =>
           addNameValueTag(["t", label]),
         ),
       )

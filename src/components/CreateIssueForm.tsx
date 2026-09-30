@@ -22,7 +22,10 @@ import { composerHasNsec } from "@/lib/composerUtils";
 import { extractContentTags } from "@/lib/nostrContentTags";
 import type { Nip94Tags } from "@/hooks/useBlossomUpload";
 import { Loader2, Paperclip, Plus, X, CircleDot } from "lucide-react";
-import { extractIssueHashtags, normaliseHashtag } from "@/lib/issueHashtags";
+import {
+  extractMarkdownHashtags,
+  normaliseHashtag,
+} from "@/lib/markdownHashtags";
 
 /**
  * Returns true if the string is a valid hashtag per applesauce's regex
@@ -104,7 +107,10 @@ export function CreateIssueForm({
   );
 
   // Labels derived from #hashtags in the content — read-only, auto-synced
-  const contentLabels = useMemo(() => extractIssueHashtags(content), [content]);
+  const contentLabels = useMemo(
+    () => extractMarkdownHashtags(content),
+    [content],
+  );
 
   const handleLockClick = useCallback(() => {
     setShowHashtagHint(true);
