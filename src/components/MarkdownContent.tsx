@@ -418,19 +418,18 @@ function GitImage({
 
 type GitFileLinkProps = Omit<React.ComponentPropsWithoutRef<"a">, "href"> & {
   href: string;
-  commitHash: string;
+  gitRef: string;
   filePath: string;
 };
 
 /**
- * Link to another file in the same repository, at the same commit the
- * surrounding markdown was read from — mirroring how GitImage resolves
- * relative image sources. Outside a repo page context there is no base path
+ * Link to another file in the same repository at the selected branch, tag,
+ * or commit. Outside a repo page context there is no base path
  * to resolve against, so the original href is preserved.
  */
 function GitFileLink({
   href,
-  commitHash,
+  gitRef,
   filePath,
   className,
   children,
@@ -459,9 +458,11 @@ function GitFileLink({
   // The resolver returns a git path; URL delimiters in filenames must stay data.
   const encodedPath = resolvedPath.split("/").map(encodeURIComponent).join("/");
 
+  const encodedRef = gitRef.split("/").map(encodeURIComponent).join("/");
+
   return (
     <Link
-      to={`${gitContext.basePath}/tree/${commitHash}/${encodedPath}${suffix}`}
+      to={`${gitContext.basePath}/tree/${encodedRef}/${encodedPath}${suffix}`}
       className={cn(markdownLinkClassName, className)}
       {...props}
     >
@@ -600,6 +601,7 @@ function buildComponents(
   cloneUrls: string[],
   commitHash: string | null,
   filePath: string,
+  gitRef: string | null,
 ): Components {
   const hasGitContext = cloneUrls.length > 0 && commitHash !== null;
 
@@ -651,7 +653,7 @@ function buildComponents(
         return (
           <GitFileLink
             href={href}
-            commitHash={commitHash!}
+            gitRef={gitRef || commitHash!}
             filePath={filePath}
             className={propsClassName}
             {...props}
@@ -904,6 +906,8 @@ export interface MarkdownContentProps {
    * Commit hash to use when fetching relative images from git.
    */
   commitHash?: string | null;
+  /** Selected branch, tag, or commit for relative file links; defaults to commitHash. */
+  gitRef?: string | null;
   /**
    * Path of the markdown file within the repository (e.g. "docs/guide.md").
    * Used to resolve relative image paths correctly.
@@ -923,6 +927,7 @@ function MarkdownContent({
   className,
   cloneUrls = EMPTY_CLONE_URLS,
   commitHash = null,
+  gitRef = null,
   filePath = "",
   allowHtml = false,
 }: MarkdownContentProps) {
@@ -930,8 +935,8 @@ function MarkdownContent({
   // this map on every render remounts embedded previews, briefly resetting
   // loaded avatars to their fallback while Radix reloads the image.
   const components = useMemo(
-    () => buildComponents(cloneUrls, commitHash, filePath),
-    [cloneUrls, commitHash, filePath],
+    () => buildComponents(cloneUrls, commitHash, filePath, gitRef),
+    [cloneUrls, commitHash, filePath, gitRef],
   );
   const rehypePlugins = allowHtml ? rehypePluginsWithHtml : rehypePluginsBase;
 
