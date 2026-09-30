@@ -14,6 +14,27 @@ interface MarkdownNode {
   children?: MarkdownNode[];
 }
 
+/** Autocomplete belongs in prose, including a lone # before it becomes a heading. */
+export function isHashtagProse(content: string, position: number): boolean {
+  const probe =
+    content.slice(0, position + 1) + "hashtag" + content.slice(position + 1);
+  function containsText(node: MarkdownNode): boolean {
+    if (node.type === "link" || node.type === "linkReference") return false;
+    if (node.type === "text") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      return (
+        start !== undefined &&
+        end !== undefined &&
+        start <= position &&
+        position < end
+      );
+    }
+    return node.children?.some(containsText) ?? false;
+  }
+  return containsText(parser.parse(probe));
+}
+
 /** Resolve only unambiguous issue/PR prefixes in prose, preserving Markdown. */
 export function resolveShortItemReferences(
   content: string,

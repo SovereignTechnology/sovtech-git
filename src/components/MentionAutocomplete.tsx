@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useId } from "react";
 import { nip19 } from "nostr-tools";
 import { UserAutocompleteDropdown } from "@/components/UserAutocompleteDropdown";
+import { HashtagAutocompleteDropdown } from "@/components/HashtagAutocompleteDropdown";
+import { isHashtagProse } from "@/lib/shortItemReferences";
 
 export {
   UserAutocompleteDropdown,
@@ -119,9 +121,8 @@ function getCaretCoordinates(
 // ---------------------------------------------------------------------------
 
 /**
- * Detects `@query` at the cursor position in a textarea and shows
- * a contact autocomplete dropdown. On selection, replaces `@query`
- * with `nostr:npub1...` in the content.
+ * Detects @ contacts and # repository labels/items at the textarea cursor.
+ * One owner coordinates caret position, dismissal, insertion and ARIA state.
  */
 export function MentionAutocomplete({
   textareaRef,
@@ -132,6 +133,7 @@ export function MentionAutocomplete({
   const listboxId = useId();
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
+  const [trigger, setTrigger] = useState<"@" | "#">("@");
   const [isOpen, setIsOpen] = useState(false);
   const [activeDescendantId, setActiveDescendantId] = useState<
     string | undefined
@@ -142,24 +144,32 @@ export function MentionAutocomplete({
     height: number;
   } | null>(null);
 
-  // Detect @mention query at cursor.
+  // Detect a query at the cursor, sharing one dropdown owner for both triggers.
   const detectMention = useCallback(
     (text?: string, cursorPos?: number) => {
       const textarea = textareaRef.current;
       if (!textarea) return;
+      if (document.activeElement !== textarea || textarea.disabled) {
+        setIsOpen(false);
+        return;
+      }
 
       const cursor = cursorPos ?? textarea.selectionStart;
       const value = text ?? textarea.value;
 
-      // Walk back from cursor to find an unescaped @ that starts a mention
+      // Walk back to a trigger at a word boundary.
       let atPos = -1;
       for (let i = cursor - 1; i >= 0; i--) {
         const ch = value[i];
         // Stop at whitespace or newline — no match
         if (ch === " " || ch === "\n" || ch === "\t") break;
-        if (ch === "@") {
+        if (ch === "@" || ch === "#") {
           // Must be at start of text or preceded by whitespace
-          if (i === 0 || /\s/.test(value[i - 1])) {
+          if (
+            i === 0 ||
+            /\s/.test(value[i - 1]) ||
+            (ch === "#" && value[i - 1] === "(")
+          ) {
             atPos = i;
           }
           break;
@@ -174,9 +184,15 @@ export function MentionAutocomplete({
       }
 
       const query = value.slice(atPos + 1, cursor);
+      const nextTrigger = value[atPos] as "@" | "#";
 
       // Show for empty query (top contacts); dismiss for very long queries
-      if (query.length > 50) {
+      if (
+        query.length > (nextTrigger === "#" ? 64 : 50) ||
+        (nextTrigger === "#" &&
+          (!/^[\p{L}\p{N}\p{M}_-]*$/u.test(query) ||
+            !isHashtagProse(value, atPos)))
+      ) {
         setIsOpen(false);
         setMentionQuery("");
         setMentionStart(-1);
@@ -185,6 +201,7 @@ export function MentionAutocomplete({
 
       setMentionQuery(query);
       setMentionStart(atPos);
+      setTrigger(nextTrigger);
       setIsOpen(true);
 
       // Position the dropdown below the @ character.
@@ -283,6 +300,40 @@ export function MentionAutocomplete({
     },
     [mentionStart, mentionQuery, textareaRef, onInsertMention],
   );
+
+  const selectHashtag = useCallback(
+    (replacement: string) => {
+      const textarea = textareaRef.current;
+      const cursor =
+        textarea?.selectionStart ?? mentionStart + mentionQuery.length + 1;
+      // Replace the rest of the token too when completing from its middle.
+      const suffix =
+        content.slice(cursor).match(/^[\p{L}\p{N}\p{M}_-]*/u)?.[0] ?? "";
+      onInsertMention({
+        start: mentionStart,
+        end: cursor + suffix.length,
+        replacement,
+      });
+      setIsOpen(false);
+      setMentionQuery("");
+      setMentionStart(-1);
+    },
+    [textareaRef, mentionStart, mentionQuery, content, onInsertMention],
+  );
+
+  if (trigger === "#") {
+    return isOpen && dropdownPos ? (
+      <HashtagAutocompleteDropdown
+        query={mentionQuery}
+        position={dropdownPos}
+        textareaRef={textareaRef}
+        listboxId={listboxId}
+        onSelect={selectHashtag}
+        onClose={() => setIsOpen(false)}
+        onActiveDescendantChange={setActiveDescendantId}
+      />
+    ) : null;
+  }
 
   return (
     <UserAutocompleteDropdown
