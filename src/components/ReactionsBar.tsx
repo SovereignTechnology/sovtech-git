@@ -54,7 +54,13 @@ import { useOptionalRepoContext } from "@/pages/repo/RepoContext";
 // Preset emojis (matching gitworkshop)
 // ---------------------------------------------------------------------------
 
-const PRESET_EMOJIS = ["+", "🚀", "🤙", "🙏", "❤️", "🫂", "👀", "😂"];
+const PRESET_EMOJIS = ["+", "-", "🚀", "🤙", "🙏", "❤️", "🫂", "👀", "😂"];
+
+function reactionDisplay(emoji: string): string {
+  if (emoji === "+") return "👍";
+  if (emoji === "-") return "👎";
+  return emoji;
+}
 
 // ---------------------------------------------------------------------------
 // ReactionsBar
@@ -265,12 +271,13 @@ export function ReactionsBar({
                     type="button"
                     disabled={sending}
                     onClick={() => sendReaction(emoji)}
+                    aria-label={`React with ${reactionDisplay(emoji)}`}
                     className={cn(
                       "rounded border border-border/40 px-1.5 py-0.5 text-sm",
                       "hover:bg-muted/60 transition-colors disabled:opacity-40 text-foreground",
                     )}
                   >
-                    {emoji === "+" ? "👍" : emoji}
+                    {reactionDisplay(emoji)}
                   </button>
                 ),
               )}
@@ -336,7 +343,7 @@ function ReactionPill({
   disabled: boolean;
   onClick: () => void;
 }) {
-  const display = emoji === "+" ? "👍" : emoji;
+  const display = reactionDisplay(emoji);
 
   return (
     <button
@@ -376,7 +383,7 @@ function ReactionGroup({
   onClickMine: () => void;
   onClickOther: () => void;
 }) {
-  const display = emoji === "+" ? "👍" : emoji;
+  const display = reactionDisplay(emoji);
 
   return (
     <div
