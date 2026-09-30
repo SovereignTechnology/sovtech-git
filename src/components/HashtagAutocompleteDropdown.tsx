@@ -165,10 +165,12 @@ export function HashtagAutocompleteDropdown({
           id={listboxId}
           role="listbox"
           aria-label="Labels, issues and pull requests"
-          className="overflow-y-auto py-1"
+          className="overflow-y-auto py-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border hover:[&::-webkit-scrollbar-thumb]:bg-border/80"
           style={{
             maxHeight:
               "max(0px, min(320px, calc(var(--radix-popover-content-available-height) - 2px)))",
+            scrollbarWidth: "thin",
+            scrollbarColor: "hsl(var(--border)) transparent",
           }}
         >
           {labels.length > 0 && (
