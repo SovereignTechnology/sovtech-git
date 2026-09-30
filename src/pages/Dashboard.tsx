@@ -41,6 +41,7 @@ import { useUserFollowedRepos } from "@/hooks/useUserFollowedRepos";
 import { useAccessiblePrivateRepositories } from "@/hooks/useAccessiblePrivateRepositories";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useNotificationPageEssentials } from "@/hooks/useNotificationPageEssentials";
 import { useUserProfileSubscription } from "@/hooks/useUserProfileSubscription";
 import { useUserPath } from "@/hooks/useUserPath";
 import { useActiveAccount } from "applesauce-react/hooks";
@@ -616,6 +617,7 @@ function NotificationsPanel() {
     () => items?.filter((item) => !item.archived).slice(0, NOTIF_LIMIT),
     [items],
   );
+  const resolvedMap = useNotificationPageEssentials(inboxItems ?? []);
 
   const hasMore =
     (items?.filter((item) => !item.archived).length ?? 0) > NOTIF_LIMIT;
@@ -690,6 +692,7 @@ function NotificationsPanel() {
                   actions={actions}
                   compact
                   currentView="inbox"
+                  resolvedMap={resolvedMap}
                 />
               ))}
             </ul>
