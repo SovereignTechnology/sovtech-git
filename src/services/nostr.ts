@@ -26,6 +26,10 @@ import {
   of,
   timer,
   EMPTY,
+  defer,
+  finalize,
+  share,
+  ReplaySubject,
 } from "rxjs";
 import {
   catchError,
@@ -872,11 +876,44 @@ const REACTION_KIND = 7;
 /** Kind 10018 — NIP-51 Git repositories follow list; used for repo follower counts. */
 const GIT_REPOS_FOLLOW_KIND = 10018 as const;
 
+/** Active essentials requests, shared across list, preview and notification consumers. */
+const itemEssentialsRequests = new Map<
+  string,
+  Observable<PaginatedTagValueResponse>
+>();
+
 /**
- * Load essentials and their withdrawals without fetching comments. Reuse the
- * singleton loaders so requests within each buffer window are batched together.
+ * Load essentials and withdrawals without comments. Share each item/relay pair
+ * across callers, including calls in different batching windows. Release the
+ * entry when its last subscriber leaves; the singleton loaders still batch
+ * different items into relay requests.
  */
 export function nip34ItemEssentialsLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return merge(
+    ...[...new Set(relays.map(normalizeUrl))].map((relay) =>
+      defer(() => {
+        const key = JSON.stringify([itemId, relay]);
+        let request = itemEssentialsRequests.get(key);
+        if (!request) {
+          request = createItemEssentialsRequest(itemId, [relay]).pipe(
+            finalize(() => itemEssentialsRequests.delete(key)),
+            share({
+              connector: () => new ReplaySubject<PaginatedTagValueResponse>(1),
+              resetOnRefCountZero: true,
+            }),
+          );
+          itemEssentialsRequests.set(key, request);
+        }
+        return request;
+      }),
+    ),
+  );
+}
+
+function createItemEssentialsRequest(
   itemId: string,
   relays: string[],
 ): Observable<PaginatedTagValueResponse> {

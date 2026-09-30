@@ -224,7 +224,8 @@ export function useNotificationPageEssentials(
   // ── Stable key for Part C: relay map contents ────────────────────────────
   // Changes only when the actual relay URLs change, not on every Map reference
   // change. When new relays are discovered, relayMapKey changes and Part C
-  // re-runs with the updated relay list.
+  // re-runs with the updated relay list. The essentials loader shares active
+  // item/relay requests across mounted consumers.
   const relayMapKey = useMemo(() => {
     if (!relayMap) return "";
     return [...relayMap.entries()]
