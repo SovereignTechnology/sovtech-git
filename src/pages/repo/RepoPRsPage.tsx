@@ -1,7 +1,4 @@
-import {
-  RepoListSortMenu,
-  RepoListSortFeedback,
-} from "@/components/RepoListSortMenu";
+import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
 import { compareRepoItems } from "@/lib/repoListSort";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
@@ -23,8 +20,6 @@ import { StatusIcon } from "@/components/StatusIcon";
 import { StatusTabs } from "@/components/StatusTabs";
 import { LabelBadge } from "@/components/LabelBadge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
 import type { MultiSelectOption } from "@/components/ui/multi-select";
 import {
@@ -34,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, MessageCircle, Users, X, Zap, GitBranch } from "lucide-react";
+import { MessageCircle, Users, Zap, GitBranch, ListFilter } from "lucide-react";
 import {
   hasAcceptedRepositoryReference,
   type IssueStatus,
@@ -299,113 +294,78 @@ export default function RepoPRsPage() {
 
   return (
     <div className="container max-w-screen-xl px-4 md:px-8 py-6">
-      {/* Search + filters */}
-      <div className="flex flex-col md:flex-row gap-3 mb-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search PRs, event ID or npub..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-background/60"
-          />
-        </div>
-
-        <div className="flex gap-2 flex-wrap items-center ml-auto">
-          <RepoListSortMenu sorting={sorting} label="Sort pull requests" />
+      <RepoListToolbar
+        list="prs"
+        sorting={sorting}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        searching={!!searchQuery.trim() && !searchPubkey}
+        labelOptions={labelOptions}
+        labelFilter={labelFilter}
+        setLabelFilter={setLabelFilter}
+        authors={allAuthors}
+        authorFilter={authorFilter}
+        setAuthorFilter={setAuthorFilter}
+        hasActiveFilters={hasActiveFilters}
+        onReset={clearFilters}
+        beforeFilters={
           <MultiSelect
             options={TYPE_OPTIONS}
             selected={typeFilter}
             onChange={(v) => setTypeFilter(v as PRItemType[])}
             placeholder="Type"
+            icon={<ListFilter aria-hidden="true" className="h-4 w-4" />}
             className="w-[140px]"
           />
-
-          {allLabels.length > 0 && (
-            <MultiSelect
-              options={labelOptions}
-              selected={labelFilter}
-              onChange={setLabelFilter}
-              placeholder="Label"
-              className="w-[150px]"
-            />
-          )}
-
-          {allAuthors.length > 1 && (
-            <Select
-              value={authorFilter ?? "__all__"}
-              onValueChange={(v) => setAuthorFilter(v === "__all__" ? null : v)}
+        }
+      >
+        {nonDefaultTargetBranches.length > 0 && (
+          <Select
+            value={
+              targetBranchFilter === null
+                ? "__all__"
+                : targetBranchFilter === ""
+                  ? "__default__"
+                  : `branch:${targetBranchFilter}`
+            }
+            onValueChange={(value) =>
+              setTargetBranchFilter(
+                value === "__all__"
+                  ? null
+                  : value === "__default__"
+                    ? ""
+                    : value.slice("branch:".length),
+              )
+            }
+          >
+            <SelectTrigger
+              aria-label="Filter by target branch"
+              className="w-[168px] h-9 gap-2 text-sm"
             >
-              <SelectTrigger className="w-[160px] h-9 text-sm">
-                <SelectValue placeholder="Author" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Authors</SelectItem>
-                {allAuthors.map((pk) => (
-                  <SelectItem key={pk} value={pk}>
-                    <AuthorSelectLabel pubkey={pk} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {nonDefaultTargetBranches.length > 0 && (
-            <Select
-              value={
-                targetBranchFilter === null
-                  ? "__all__"
-                  : targetBranchFilter === ""
-                    ? "__default__"
-                    : `branch:${targetBranchFilter}`
-              }
-              onValueChange={(value) =>
-                setTargetBranchFilter(
-                  value === "__all__"
-                    ? null
-                    : value === "__default__"
-                      ? ""
-                      : value.slice("branch:".length),
-                )
-              }
-            >
-              <SelectTrigger className="w-[168px] h-9 text-sm">
+              <GitBranch
+                aria-hidden="true"
+                className="h-4 w-4 shrink-0 text-muted-foreground"
+              />
+              <span className="min-w-0 flex-1 text-left truncate">
                 <SelectValue placeholder="Target branch" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All target branches</SelectItem>
-                <SelectItem value="__default__">
-                  {repoState?.headBranch
-                    ? `Default (${repoState.headBranch})`
-                    : "Default branch"}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All target branches</SelectItem>
+              <SelectItem value="__default__">
+                {repoState?.headBranch
+                  ? `Default (${repoState.headBranch})`
+                  : "Default branch"}
+              </SelectItem>
+              {nonDefaultTargetBranches.map((branch) => (
+                <SelectItem key={branch} value={`branch:${branch}`}>
+                  {branch}
                 </SelectItem>
-                {nonDefaultTargetBranches.map((branch) => (
-                  <SelectItem key={branch} value={`branch:${branch}`}>
-                    {branch}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {(hasActiveFilters || sorting.sort !== sorting.defaultSort) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 text-sm text-muted-foreground hover:text-foreground"
-              onClick={clearFilters}
-            >
-              <X className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <RepoListSortFeedback
-        sorting={sorting}
-        searching={!!searchQuery.trim() && !searchPubkey}
-      />
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </RepoListToolbar>
 
       {idMatchesOutsideFilters > 0 && (
         <p
@@ -516,15 +476,6 @@ export default function RepoPRsPage() {
           </div>
         </section>
       )}
-    </div>
-  );
-}
-
-function AuthorSelectLabel({ pubkey }: { pubkey: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <UserAvatar pubkey={pubkey} size="sm" />
-      <UserName pubkey={pubkey} className="text-sm" />
     </div>
   );
 }

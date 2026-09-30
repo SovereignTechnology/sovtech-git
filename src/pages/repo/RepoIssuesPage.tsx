@@ -1,7 +1,4 @@
-import {
-  RepoListSortMenu,
-  RepoListSortFeedback,
-} from "@/components/RepoListSortMenu";
+import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
@@ -24,7 +21,6 @@ import { StatusTabs } from "@/components/StatusTabs";
 import { LabelBadge } from "@/components/LabelBadge";
 import { CreateIssueForm } from "@/components/CreateIssueForm";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,26 +29,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { MultiSelect } from "@/components/ui/multi-select";
-
 import type { MultiSelectOption } from "@/components/ui/multi-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Search,
-  MessageCircle,
-  Users,
-  CircleDot,
-  X,
-  Plus,
-  Zap,
-  ListFilter,
-} from "lucide-react";
+import { MessageCircle, Users, CircleDot, Plus, Zap } from "lucide-react";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
   hasAcceptedRepositoryReference,
@@ -298,76 +276,20 @@ export default function RepoIssuesPage() {
         </Dialog>
       )}
 
-      {/* Search + filters */}
-      <div className="flex flex-col md:flex-row gap-3 mb-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search issues, event ID or npub..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-background/60"
-          />
-        </div>
-
-        <div className="flex gap-2 flex-wrap items-center ml-auto">
-          <RepoListSortMenu sorting={sorting} label="Sort issues" />
-          {allLabels.length > 0 && (
-            <MultiSelect
-              options={labelOptions}
-              selected={labelFilter}
-              onChange={setLabelFilter}
-              placeholder="Label"
-              icon={<ListFilter aria-hidden="true" className="h-4 w-4" />}
-              className="w-[150px]"
-            />
-          )}
-
-          {allAuthors.length > 1 && (
-            <Select
-              value={authorFilter ?? "__all__"}
-              onValueChange={(v) => setAuthorFilter(v === "__all__" ? null : v)}
-            >
-              <SelectTrigger
-                aria-label="Filter by author"
-                className="w-[160px] h-9 gap-2 text-sm"
-              >
-                <Users
-                  aria-hidden="true"
-                  className="h-4 w-4 shrink-0 text-muted-foreground"
-                />
-                <span className="min-w-0 flex-1 text-left truncate">
-                  <SelectValue placeholder="Author" />
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Authors</SelectItem>
-                {allAuthors.map((pk) => (
-                  <SelectItem key={pk} value={pk}>
-                    <AuthorSelectLabel pubkey={pk} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {(hasActiveFilters || sorting.sort !== sorting.defaultSort) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 text-sm text-muted-foreground hover:text-foreground"
-              onClick={clearFilters}
-            >
-              <X className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <RepoListSortFeedback
+      <RepoListToolbar
+        list="issues"
         sorting={sorting}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
         searching={!!searchQuery.trim() && !searchPubkey}
+        labelOptions={labelOptions}
+        labelFilter={labelFilter}
+        setLabelFilter={setLabelFilter}
+        authors={allAuthors}
+        authorFilter={authorFilter}
+        setAuthorFilter={setAuthorFilter}
+        hasActiveFilters={hasActiveFilters}
+        onReset={clearFilters}
       />
 
       {idMatchesOutsideFilters > 0 && (
@@ -466,15 +388,6 @@ export default function RepoIssuesPage() {
           </div>
         </section>
       )}
-    </div>
-  );
-}
-
-function AuthorSelectLabel({ pubkey }: { pubkey: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <UserAvatar pubkey={pubkey} size="sm" />
-      <UserName pubkey={pubkey} className="text-sm" />
     </div>
   );
 }
