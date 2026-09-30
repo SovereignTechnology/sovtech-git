@@ -525,6 +525,44 @@ some client still retains it. No compare-and-swap, deletion discovery, automatic
 UI mutation retry, or post-write relay query is introduced. Both writers retain
 the durable outbox's delivery retries, independently of preflight readiness.
 
+## GitWorkshop preferences
+
+The account-authored kind `30078` coordinate `gitworkshop-preferences` is a
+**personal singleton** integrated into the active-account identity owner.
+`userIdentitySubscription` includes its exact author/kind/identifier filter in
+the same unpaginated request as the identity kinds. The shared relay frontier
+is the union of NIP-65 outboxes, user indexes, and fallbacks. It never requests
+all kind `30078` events. The notification owner's coordinates stay separate.
+Preferences contain only non-sensitive, unencrypted UI values; no repository
+coordinates enter the query or payload. Page hooks read from the EventStore
+and use `userIdentityCoverage` rather than opening another relay subscription.
+The existing identity/deletion writers retain their outbox/user-index voters;
+deletion discovery keeps its previous outbox/user-index relay frontier.
+
+Mailbox discovery and the outbox/fallback quorum follow the notification-state
+policy above, including covered mailbox absence for accounts without outboxes.
+Fallbacks vote instead of user indexes because indexes may reject kind `30078`.
+A bounded cache read hydrates the coordinate when the account owner starts.
+Saving waits for shared warm coverage and checks the exact cache coordinate if
+no winner is present, then rebases the selected field onto the current
+winner, preserves unknown fields/tags, and rejects malformed content. Account,
+owner lifetime, coverage, relay frontier, and the winner are rechecked after
+signing. Changing accounts or leaving the page cancels outstanding publication.
+
+There is no automatic write on mount or sort-menu selection and no
+notification-key bootstrap. Menu changes are immediate, local to the current
+account and repository component, separately for issues and PRs, until refresh,
+and remain usable while offline.
+The shared in-memory list state retains choices across navigation; Reset clears
+them with the filters. Only the explicit "Set default" menu action (or its manual retry) signs and publishes the
+account-wide `listSort` preference shared by issues and PRs. Readers retain the
+legacy `issueSort` fallback. A saved default seeds lists without a temporary selection; incoming
+default changes do not replace an active local selection. Restoring recent
+activity as the saved default is also an explicit replacement. Writes use durable outbox
+publication to the same outbox/fallback frontier, with visible manual recovery.
+NIP-09 discovery, post-write echo queries, encryption, and compare-and-swap
+between devices are excluded. Simultaneous saves follow NIP-01 replacement.
+
 ## Software publication
 
 NIP-82 software metadata is a **publisher-owned addressable** category with two
@@ -600,6 +638,7 @@ policy in the same change.
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Account identity and lists                 | `0`, `3`, `10002`, `10017`, `10018`, `10063`, `10317`, `10318`, `10617`         | Personal singleton; one account-owned identity lease plus the shared deletion lease where required. Initial account creation of `0` and `10002` is the bootstrap-identity exception. |
 | Notification and repository selection sync | Three `30078` coordinates                                                       | Convergent application state; one account-owned encrypted envelope/state owner.                                                                                                      |
+| GitWorkshop sorting preferences            | `30078:gitworkshop-preferences`                                                 | Personal singleton; exact filter in the shared account identity lease, outbox/fallback voters, and bounded cache hydration.                                                          |
 | Repository metadata and state              | `30617`, `30618`                                                                | Repository authority graph and repository operational state; one page-owned repository evidence scope plus focused evidence only for genuinely new author coordinates.               |
 | Software applications and releases         | `32267`, `30063`                                                                | Publisher-owned addressable; one publisher lease plus one debounced exact release-candidate lease.                                                                                   |
 | Software assets                            | `3063`                                                                          | Regular append-only event; no replaceable preflight.                                                                                                                                 |

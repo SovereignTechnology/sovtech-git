@@ -4,6 +4,8 @@
 
 ### Added
 
+- Add issue and PR sorting by creation date, activity, and reply count in either direction, keeping recent activity as the default. Sort choices persist per repository until refresh, like filters; an explicit Set default menu action syncs the choice across repositories and devices through NIP-78.
+
 - Search and select reaction emojis by name, with category browsing and skin tones alongside the existing quick reactions.
 
 - Suggest repository labels, issues, and PRs when typing `#` in the composer. Prioritize exact IDs, then open items by recent activity, while keeping closed and merged items searchable.

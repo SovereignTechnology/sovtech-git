@@ -1,3 +1,9 @@
+import {
+  RepoListSortMenu,
+  RepoListSortFeedback,
+} from "@/components/RepoListSortMenu";
+import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
+import { compareRepoItems } from "@/lib/repoListSort";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useMemo } from "react";
 import type { IFuseOptions } from "fuse.js";
@@ -82,6 +88,7 @@ export default function RepoPRsPage() {
   const { pubkey, repoId, resolved, prs, basePath, repoState, cloneUrls } =
     useRepoContext();
   const repo = resolved?.repo;
+  const sorting = useRepoListSortPreference(repo?.componentId, "prs");
   const repoOwnerProfile = useProfile(pubkey);
   const { pool: gitPool, poolState: gitPoolState } = useGitPool(cloneUrls, {
     private: repo?.isPrivate,
@@ -194,20 +201,22 @@ export default function RepoPRsPage() {
 
   const facetFilteredPRs = useMemo(
     () =>
-      prs?.filter(
-        (pr) =>
-          (statusFilter.length === 0 || statusFilter.includes(pr.status)) &&
-          (typeFilter.length === 0 || typeFilter.includes(pr.itemType)) &&
-          !(
-            labelFilter.length > 0 &&
-            !labelFilter.some((label) => pr.labels.includes(label))
-          ) &&
-          (!authorFilter || pr.pubkey === authorFilter) &&
-          (targetBranchFilter === null ||
-            (targetBranchFilter === ""
-              ? !pr.targetBranch
-              : pr.targetBranch === targetBranchFilter)),
-      ),
+      prs
+        ?.filter(
+          (pr) =>
+            (statusFilter.length === 0 || statusFilter.includes(pr.status)) &&
+            (typeFilter.length === 0 || typeFilter.includes(pr.itemType)) &&
+            !(
+              labelFilter.length > 0 &&
+              !labelFilter.some((label) => pr.labels.includes(label))
+            ) &&
+            (!authorFilter || pr.pubkey === authorFilter) &&
+            (targetBranchFilter === null ||
+              (targetBranchFilter === ""
+                ? !pr.targetBranch
+                : pr.targetBranch === targetBranchFilter)),
+        )
+        .sort(compareRepoItems(sorting.sort)),
     [
       prs,
       statusFilter,
@@ -215,6 +224,7 @@ export default function RepoPRsPage() {
       labelFilter,
       authorFilter,
       targetBranchFilter,
+      sorting.sort,
     ],
   );
   const fuzzyPRs = useFuzzySearch(
@@ -302,6 +312,7 @@ export default function RepoPRsPage() {
         </div>
 
         <div className="flex gap-2 flex-wrap items-center ml-auto">
+          <RepoListSortMenu sorting={sorting} label="Sort pull requests" />
           <MultiSelect
             options={TYPE_OPTIONS}
             selected={typeFilter}
@@ -377,7 +388,7 @@ export default function RepoPRsPage() {
             </Select>
           )}
 
-          {hasActiveFilters && (
+          {(hasActiveFilters || sorting.sort !== sorting.defaultSort) && (
             <Button
               variant="ghost"
               size="sm"
@@ -390,6 +401,11 @@ export default function RepoPRsPage() {
           )}
         </div>
       </div>
+
+      <RepoListSortFeedback
+        sorting={sorting}
+        searching={!!searchQuery.trim() && !searchPubkey}
+      />
 
       {idMatchesOutsideFilters > 0 && (
         <p

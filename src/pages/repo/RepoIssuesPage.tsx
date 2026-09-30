@@ -1,3 +1,7 @@
+import {
+  RepoListSortMenu,
+  RepoListSortFeedback,
+} from "@/components/RepoListSortMenu";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
@@ -30,6 +34,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { MultiSelect } from "@/components/ui/multi-select";
+
 import type { MultiSelectOption } from "@/components/ui/multi-select";
 import {
   Select,
@@ -46,6 +51,7 @@ import {
   X,
   Plus,
   Zap,
+  ListFilter,
 } from "lucide-react";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
@@ -59,6 +65,8 @@ import {
   RepoItemAttributionWarning,
 } from "@/components/RepoItemAttributionWarning";
 import { useFuzzySearch } from "@/hooks/useFuzzySearch";
+import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
+import { compareRepoItems } from "@/lib/repoListSort";
 
 const DEFAULT_STATUS_FILTER = REPO_LIST_DEFAULTS.issues.statusFilter;
 const ISSUE_SEARCH_OPTIONS: IFuseOptions<ResolvedIssueLite> = {
@@ -77,6 +85,7 @@ export default function RepoIssuesPage() {
   const { pubkey, repoId, resolved, issues, basePath } = useRepoContext();
   const repo = resolved?.repo;
   const account = useActiveAccount();
+  const sorting = useRepoListSortPreference(repo?.componentId, "issues");
   const repoOwnerProfile = useProfile(pubkey);
   const isReadOnlyRepository =
     repo?.coordinateStatus === "archived" ||
@@ -174,16 +183,19 @@ export default function RepoIssuesPage() {
 
   const facetFilteredIssues = useMemo(
     () =>
-      issues?.filter(
-        (issue) =>
-          (statusFilter.length === 0 || statusFilter.includes(issue.status)) &&
-          !(
-            labelFilter.length > 0 &&
-            !labelFilter.some((label) => issue.labels.includes(label))
-          ) &&
-          (!authorFilter || issue.pubkey === authorFilter),
-      ),
-    [issues, statusFilter, labelFilter, authorFilter],
+      issues
+        ?.filter(
+          (issue) =>
+            (statusFilter.length === 0 ||
+              statusFilter.includes(issue.status)) &&
+            !(
+              labelFilter.length > 0 &&
+              !labelFilter.some((label) => issue.labels.includes(label))
+            ) &&
+            (!authorFilter || issue.pubkey === authorFilter),
+        )
+        .sort(compareRepoItems(sorting.sort)),
+    [issues, statusFilter, labelFilter, authorFilter, sorting.sort],
   );
   const fuzzyIssues = useFuzzySearch(
     facetFilteredIssues,
@@ -299,12 +311,14 @@ export default function RepoIssuesPage() {
         </div>
 
         <div className="flex gap-2 flex-wrap items-center ml-auto">
+          <RepoListSortMenu sorting={sorting} label="Sort issues" />
           {allLabels.length > 0 && (
             <MultiSelect
               options={labelOptions}
               selected={labelFilter}
               onChange={setLabelFilter}
               placeholder="Label"
+              icon={<ListFilter aria-hidden="true" className="h-4 w-4" />}
               className="w-[150px]"
             />
           )}
@@ -314,8 +328,17 @@ export default function RepoIssuesPage() {
               value={authorFilter ?? "__all__"}
               onValueChange={(v) => setAuthorFilter(v === "__all__" ? null : v)}
             >
-              <SelectTrigger className="w-[160px] h-9 text-sm">
-                <SelectValue placeholder="Author" />
+              <SelectTrigger
+                aria-label="Filter by author"
+                className="w-[160px] h-9 gap-2 text-sm"
+              >
+                <Users
+                  aria-hidden="true"
+                  className="h-4 w-4 shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 text-left truncate">
+                  <SelectValue placeholder="Author" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">All Authors</SelectItem>
@@ -328,7 +351,7 @@ export default function RepoIssuesPage() {
             </Select>
           )}
 
-          {hasActiveFilters && (
+          {(hasActiveFilters || sorting.sort !== sorting.defaultSort) && (
             <Button
               variant="ghost"
               size="sm"
@@ -341,6 +364,11 @@ export default function RepoIssuesPage() {
           )}
         </div>
       </div>
+
+      <RepoListSortFeedback
+        sorting={sorting}
+        searching={!!searchQuery.trim() && !searchPubkey}
+      />
 
       {idMatchesOutsideFilters > 0 && (
         <p

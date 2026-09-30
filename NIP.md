@@ -625,3 +625,27 @@ When the coordinator publishes a NIP-05 identity, the profile resolves it back t
 - Coordinator Advertisements, Readiness Lists, and Repository Status are independent signed service claims. Matching a repository does not make their author a maintainer or trusted runner.
 - A Job Result is the provider's execution claim. A Workflow Result is the coordinator's claim that it scheduled or accepted those quoted results. gitworkshop shows both identities instead of collapsing them.
 - Repository coordinate matching uses the full multi-maintainer coordinate set, while mutations retain the exact selected or author-rooted perspective required by the CI NIP.
+
+## GitWorkshop Preferences (kind 30078)
+
+[NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) stores account-wide GitWorkshop preferences at `30078:<account-pubkey>:gitworkshop-preferences`.
+The account signs the event and publishes it to its NIP-65 outboxes and the
+configured fallback relays. The `d` tag is `gitworkshop-preferences` and content
+is a JSON object, currently `{ "listSort": "created-desc" }`. This non-sensitive
+sorting preference is unencrypted; it contains no repository identifiers or
+search/filter history. It does not use or bootstrap the notification key.
+
+`listSort` accepts `activity-desc` (the default), `activity-asc`, `created-desc`,
+`created-asc`, `replies-desc`, or `replies-asc`. Missing or unknown values display
+the default. Readers fall back to the legacy `issueSort` field when `listSort` is
+missing or unrecognized. The sort menu changes the repository's temporary selection until refresh; it
+does not publish an event. Choices are kept in memory per repository component
+and account, separately for issues and PRs, alongside the list filters. Reset restores the saved default. The
+explicit **Set default** menu action saves the selected value
+for all repositories and devices. Saving `activity-desc` explicitly restores
+recent activity as the account default. Newest NIP-01 addressable-event
+replacement wins, including its event-ID tiebreaker for simultaneous writes.
+Writers preserve unknown JSON fields and tags and refuse to replace malformed
+JSON. Readers apply the shared preference across repository issue and PR lists;
+text searches continue to rank by relevance. Repository-specific filters are
+outside this schema.

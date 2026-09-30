@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { IssueStatus, PRItemType } from "@/lib/nip34";
+import type { RepoListSort } from "@/lib/repoListSort";
 
 interface RepoListState {
   statusFilter: IssueStatus[];
@@ -9,6 +10,7 @@ interface RepoListState {
   typeFilter: PRItemType[];
   // null = all targets; empty string = the repository's default branch.
   targetBranchFilter: string | null;
+  sortByAccount: Readonly<Record<string, RepoListSort>>;
 }
 type ListKind = "issues" | "prs";
 
@@ -18,6 +20,7 @@ const commonDefaults = {
   searchQuery: "",
   typeFilter: [],
   targetBranchFilter: null,
+  sortByAccount: {},
 };
 export const REPO_LIST_DEFAULTS: Record<ListKind, RepoListState> = {
   issues: { ...commonDefaults, statusFilter: ["open"] },
