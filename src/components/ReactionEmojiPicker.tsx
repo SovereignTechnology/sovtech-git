@@ -7,6 +7,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const EmojiPicker = lazy(
   () => import("@/components/ReactionEmojiPickerContent"),
@@ -23,12 +28,23 @@ export function ReactionEmojiPicker({
 
   return (
     <Popover open={open && !disabled} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button type="button" variant="outline" size="sm" disabled={disabled}>
-          <SmilePlus className="mr-2 h-4 w-4" aria-hidden="true" />
-          Search emojis
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={disabled}
+              aria-label="Search emojis"
+            >
+              <SmilePlus className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Search emojis</TooltipContent>
+      </Tooltip>
       <PopoverContent
         align="start"
         collisionPadding={8}
