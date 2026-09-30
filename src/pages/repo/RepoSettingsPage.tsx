@@ -2864,8 +2864,8 @@ function RepoSettingsForm({
                 <p className="text-sm font-medium">Delete repository</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                   Delete your repository announcement, including its previous
-                  versions. Other maintainers’ announcements and hosted Git data
-                  are unaffected.
+                  versions. Servers that honor this request may permanently
+                  delete all repository events and Git data.
                 </p>
               </div>
               <Button
@@ -2892,11 +2892,15 @@ function RepoSettingsForm({
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete repository?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This requests deletion of your announcement for “{repo.dTag}
-                    ” and all its previous versions. Other maintainers’
-                    announcements, issues, pull requests, and hosted Git data
-                    are unaffected. This cannot be undone, and some relays may
-                    retain copies.
+                    <strong>
+                      This may permanently delete all your repository data.
+                    </strong>{" "}
+                    Deleting your announcement for “{repo.dTag}” and its
+                    previous versions asks servers to remove the repository.
+                    GRASP servers that honor this request may delete all related
+                    events and Git data, including issues, pull requests, and
+                    commit history. Recovery is not guaranteed. Back up anything
+                    you want to keep before continuing.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 {deleteError && (
