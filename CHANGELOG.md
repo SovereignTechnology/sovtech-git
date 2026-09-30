@@ -20,7 +20,7 @@
 
 ### Fixed
 
-- Remember issue and PR filters independently per repository for the current tab session, including after navigation and reload; Reset restores the default view.
+- Remember issue and PR filters independently per repository when navigating away and back; refreshing the page or selecting Reset restores the default view.
 
 - Convert typed or pasted short issue/PR references such as `#6aa901d6` into Nostr links when a unique loaded item matches, while retaining description-derived labels for other hashtags.
 
