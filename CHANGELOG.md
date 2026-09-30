@@ -16,7 +16,7 @@
 
 ### Changed
 
-- Share status essentials requests per item and relay across lists, previews, and notifications, skip unnecessary comment fetching, and index deletion evidence once for all item resolvers.
+- Load status essentials and withdrawals for previews and notifications without fetching unused comments.
 
 - Require an observed relay list and coverage of every outbox relay (all but one when there are at least three) before creating the shared notification key. Routine notification sync keeps its existing relay quorum.
 - Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
