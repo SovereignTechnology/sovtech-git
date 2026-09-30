@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
+import { useMemo } from "react";
 import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
 import {
@@ -63,7 +64,7 @@ const TYPE_OPTIONS: MultiSelectOption[] = [
   { value: "patch", label: "Patches" },
 ];
 
-const DEFAULT_STATUS_FILTER: IssueStatus[] = ["open", "draft"];
+const DEFAULT_STATUS_FILTER = REPO_LIST_DEFAULTS.prs.statusFilter;
 const PR_SEARCH_OPTIONS: IFuseOptions<ResolvedPRLite> = {
   keys: [
     { name: "currentSubject", weight: 4 },
@@ -99,18 +100,32 @@ export default function RepoPRsPage() {
   );
   const { coordinatorState, trust } = useRepositoryCITrust(repo, ciRuns);
 
-  // Filters — all multi-select; status defaults to open+draft
-  const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(
-    DEFAULT_STATUS_FILTER,
-  );
-  const [typeFilter, setTypeFilter] = useState<PRItemType[]>([]);
-  const [labelFilter, setLabelFilter] = useState<string[]>([]);
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
-  // null = all targets, empty string = repository default branch.
-  const [targetBranchFilter, setTargetBranchFilter] = useState<string | null>(
-    null,
-  );
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    state: filters,
+    update: updateFilter,
+    reset: clearFilters,
+  } = useRepoListState(repo?.componentId, "prs");
+  const {
+    statusFilter,
+    labelFilter,
+    authorFilter,
+    searchQuery,
+    typeFilter,
+    targetBranchFilter,
+  } = filters;
+
+  const setStatusFilter = (value: typeof filters.statusFilter) =>
+    updateFilter("statusFilter", value);
+  const setLabelFilter = (value: typeof filters.labelFilter) =>
+    updateFilter("labelFilter", value);
+  const setAuthorFilter = (value: typeof filters.authorFilter) =>
+    updateFilter("authorFilter", value);
+  const setSearchQuery = (value: typeof filters.searchQuery) =>
+    updateFilter("searchQuery", value);
+  const setTypeFilter = (value: typeof filters.typeFilter) =>
+    updateFilter("typeFilter", value);
+  const setTargetBranchFilter = (value: typeof filters.targetBranchFilter) =>
+    updateFilter("targetBranchFilter", value);
 
   // Status counts describe only work addressed to the accepted repository.
   const { statusCounts, unconfirmedStatusCounts } = useMemo(() => {
@@ -262,15 +277,6 @@ export default function RepoPRsPage() {
     !!authorFilter ||
     targetBranchFilter !== null ||
     searchQuery.trim().length > 0;
-
-  const clearFilters = () => {
-    setStatusFilter(DEFAULT_STATUS_FILTER);
-    setTypeFilter([]);
-    setLabelFilter([]);
-    setAuthorFilter(null);
-    setTargetBranchFilter(null);
-    setSearchQuery("");
-  };
 
   useSeoMeta({
     title: repo ? `PRs - ${repo.name} - ngit` : "Pull Requests - ngit",

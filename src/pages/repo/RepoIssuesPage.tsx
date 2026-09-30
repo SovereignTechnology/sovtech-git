@@ -1,3 +1,4 @@
+import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
 import { useMemo, useState } from "react";
 import type { IFuseOptions } from "fuse.js";
@@ -59,7 +60,7 @@ import {
 } from "@/components/RepoItemAttributionWarning";
 import { useFuzzySearch } from "@/hooks/useFuzzySearch";
 
-const DEFAULT_STATUS_FILTER: IssueStatus[] = ["open"];
+const DEFAULT_STATUS_FILTER = REPO_LIST_DEFAULTS.issues.statusFilter;
 const ISSUE_SEARCH_OPTIONS: IFuseOptions<ResolvedIssueLite> = {
   keys: [
     { name: "currentSubject", weight: 4 },
@@ -98,13 +99,21 @@ export default function RepoIssuesPage() {
     setOpenDraft(draftKey);
   }
 
-  // Filters — all multi-select; status defaults to open
-  const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(
-    DEFAULT_STATUS_FILTER,
-  );
-  const [labelFilter, setLabelFilter] = useState<string[]>([]);
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    state: filters,
+    update: updateFilter,
+    reset: clearFilters,
+  } = useRepoListState(repo?.componentId, "issues");
+  const { statusFilter, labelFilter, authorFilter, searchQuery } = filters;
+
+  const setStatusFilter = (value: typeof filters.statusFilter) =>
+    updateFilter("statusFilter", value);
+  const setLabelFilter = (value: typeof filters.labelFilter) =>
+    updateFilter("labelFilter", value);
+  const setAuthorFilter = (value: typeof filters.authorFilter) =>
+    updateFilter("authorFilter", value);
+  const setSearchQuery = (value: typeof filters.searchQuery) =>
+    updateFilter("searchQuery", value);
 
   // Status counts describe only work addressed to the accepted repository.
   const { statusCounts, unconfirmedStatusCounts } = useMemo(() => {
@@ -235,13 +244,6 @@ export default function RepoIssuesPage() {
     labelFilter.length > 0 ||
     !!authorFilter ||
     searchQuery.trim().length > 0;
-
-  const clearFilters = () => {
-    setStatusFilter(DEFAULT_STATUS_FILTER);
-    setLabelFilter([]);
-    setAuthorFilter(null);
-    setSearchQuery("");
-  };
 
   useSeoMeta({
     title: repo ? `Issues - ${repo.name} - ngit` : "Repository Issues - ngit",
