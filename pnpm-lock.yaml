@@ -189,6 +189,9 @@ importers:
       embla-carousel-react:
         specifier: ^8.6.0
         version: 8.6.0(react@18.3.1)
+      emoji-picker-react:
+        specifier: ^4.22.3
+        version: 4.22.3(react@18.3.1)
       fflate:
         specifier: 0.8.2
         version: 0.8.2
@@ -3788,6 +3791,15 @@ packages:
         integrity: sha512-SjWyZBHJPbqxHOzckOfo8lHisEaJWmwd23XppYFYVh10bU66/Pn5tkVkbkCMZVdbUE5eTCI2nD8OyIP4Z+uwkA==,
       }
 
+  emoji-picker-react@4.22.3:
+    resolution:
+      {
+        integrity: sha512-jrAkkoN69l5lA2Xp6P5axqoK1YdHNS1+MKMlLxwltnnnaXrojUjZaolgI/U8vdx8vFWqG42yYqpLSR83f6pwiw==,
+      }
+    engines: { node: ">=10" }
+    peerDependencies:
+      react: ">=16.8"
+
   emoji-regex@8.0.0:
     resolution:
       {
@@ -6377,6 +6389,12 @@ packages:
         integrity: sha512-eAVKTMedR5ckPo4xne/PjYQYrU3qx78gtJZ+sHlXEg5IHhhoQhMfZVzetTYuaJS0L2Ef3AcCRzCHV8T0WI6nIQ==,
       }
     engines: { node: ">=20" }
+
+  shipstyles@1.0.0:
+    resolution:
+      {
+        integrity: sha512-1AcihfXo/mSxqeOdoKqq/5TNv+vSH0dBYPFq88PUX5FBkK5pRmY5TP9SuMNio85PQ+euUI67+KpSVk1cUVDCgA==,
+      }
 
   side-channel-list@1.0.0:
     resolution:
@@ -9562,6 +9580,11 @@ snapshots:
 
   embla-carousel@8.6.0: {}
 
+  emoji-picker-react@4.22.3(react@18.3.1):
+    dependencies:
+      react: 18.3.1
+      shipstyles: 1.0.0
+
   emoji-regex@8.0.0: {}
 
   encodeurl@2.0.0: {}
@@ -11397,6 +11420,8 @@ snapshots:
       "@shikijs/types": 4.0.2
       "@shikijs/vscode-textmate": 10.0.2
       "@types/hast": 3.0.4
+
+  shipstyles@1.0.0: {}
 
   side-channel-list@1.0.0:
     dependencies:

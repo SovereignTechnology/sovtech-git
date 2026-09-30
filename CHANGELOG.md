@@ -4,6 +4,8 @@
 
 ### Added
 
+- Search and select reaction emojis by name, with category browsing and skin tones alongside the existing quick reactions.
+
 - Suggest repository labels, issues, and PRs when typing `#` in the composer. Prioritize exact IDs, then open items by recent activity, while keeping closed and merged items searchable.
 
 - Search and filter repository workflow runs by workflow, trigger, status, branch, requester and coordinator, with responsive rows and expandable run details.
