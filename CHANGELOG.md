@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-10-01
+
+**Better discovery & reliable collaboration**
+
+Find repositories and conversations faster with fuzzy search, flexible sorting,
+and composer suggestions. Dashboard ordering now syncs privately across devices,
+while status handling and merge recovery give a clearer picture of ongoing work.
+
 ### Added
+
+- Search issues and PRs by author using an npub, nprofile, or full hexadecimal public key.
+
+- Add thumbs-down reactions alongside the existing quick reactions.
 
 - Add repository announcement deletion with confirmation to the settings Danger zone. Maintainers can delete their own announcement and its prior versions.
 
@@ -25,6 +37,12 @@
 - Add typo-tolerant, relevance-ranked local search for repository, issue, and pull request lists while preserving exact event ID and facet filtering behavior.
 
 ### Fixed
+
+- Keep relative README and Markdown file links inside the repository at the selected branch, tag, or commit, including filenames with encoded characters.
+
+- Ignore hashtags inside Markdown code when deriving issue labels and comment metadata.
+
+- Render Nostr references in status update bodies with embedded previews.
 
 - Exclude invalid status events from unread notifications and recent-activity ordering, and summarize the latest valid unread status change after reopenings.
 
