@@ -668,6 +668,7 @@ export function startNotificationSync(
   let failedStateId: string | null = null;
   let baseState = readState$.getValue() ?? { ...DEFAULT_READ_STATE };
   let pendingUpdates: PendingNotificationChange[] = [];
+  let lastActionOrder = 0;
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   let publishRequested = false;
   let lastChangeAt = 0;
@@ -839,8 +840,10 @@ export function startNotificationSync(
         if (raw && scopeNotificationPubkey) {
           const receipt = JSON.parse(raw) as NostrEvent & {
             notificationChanges?: string[];
+            notificationOrder?: number;
           };
           const changes = receipt.notificationChanges;
+          const order = receipt.notificationOrder;
           if (
             receipt.pubkey === scopeNotificationPubkey &&
             receipt.kind === NIP78_KIND &&
@@ -851,6 +854,12 @@ export function startNotificationSync(
             verifyEvent(receipt)
           ) {
             acknowledged = Array.isArray(changes) ? changes : [];
+            if (
+              typeof order === "number" &&
+              Number.isSafeInteger(order) &&
+              order >= 0
+            )
+              lastActionOrder = Math.max(lastActionOrder, order);
             peerVersions.add(receipt.id);
             if (peerVersions.size > 100)
               peerVersions.delete(peerVersions.values().next().value!);
@@ -877,11 +886,13 @@ export function startNotificationSync(
       pendingUpdates = [...stored, ...retained].sort(
         (a, b) => a.order - b.order || a.id.localeCompare(b.id),
       );
-      for (const change of pendingUpdates)
+      for (const change of pendingUpdates) {
+        lastActionOrder = Math.max(lastActionOrder, change.order);
         lastChangeAt = Math.max(
           lastChangeAt,
           Math.min(Date.now(), change.changedAt),
         );
+      }
       if (pendingUpdates.length) publishRequested = true;
       const next = replayUpdates(baseState, pendingUpdates);
       if (!stateEquals(next, readState$.getValue())) readState$.next(next);
@@ -925,6 +936,9 @@ export function startNotificationSync(
       JSON.stringify({
         ...event,
         notificationChanges: changes.map((change) => change.id),
+        // Keep later actions after already-published actions retained by a
+        // paused window, including when the editing window has reloaded.
+        notificationOrder: lastActionOrder,
       }),
     );
     for (const change of changes)
@@ -1366,7 +1380,7 @@ export function startNotificationSync(
         id: crypto.randomUUID(),
         changedAt: Date.now(),
         replace,
-        order: Math.max(0, ...pendingUpdates.map((item) => item.order)) + 1,
+        order: lastActionOrder + 1,
         before: structuredClone(previous),
         after: structuredClone(next),
       };
@@ -1383,6 +1397,7 @@ export function startNotificationSync(
         return false;
       }
       pendingUpdates.push(change);
+      lastActionOrder = change.order;
       lastChangeAt = change.changedAt;
       hasLocalChanges = true;
       publishRequested = true;

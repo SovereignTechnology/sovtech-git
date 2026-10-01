@@ -494,6 +494,10 @@ failures reject the action visibly rather than pretending it was saved.
 Same-origin windows serialize publication using an account-scoped Web Lock.
 After durable outbox enqueue, the publisher commits the signed encrypted event
 and the IDs of the included actions as one receipt, then deletes those actions.
+The receipt also retains the highest observed local action sequence so numbering
+does not restart between batches or after reload. Concurrent actions can still
+tie and use the existing deterministic ID order; this does not infer user intent
+across independent devices.
 A crash between receipt and cleanup is recoverable. Locally signed drafts that
 failed publication reconcile through the same decrypted-baseline path as remote
 winners before retry can acknowledge pending actions. Receivers verify the signature
