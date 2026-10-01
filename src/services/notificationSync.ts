@@ -674,7 +674,6 @@ export function startNotificationSync(
   let hasLocalChanges = false;
   let publishing = false;
   let publishFailure: string | null = null;
-  let lastPublishedEventId: string | null = null;
   const relayObservations = new Map<
     string,
     { event: NostrEvent; receivedAt: number }
@@ -1054,7 +1053,6 @@ export function startNotificationSync(
         requestReconcile();
         return;
       }
-      lastPublishedEventId = signed.id;
       eventStore.add(signed);
       await outboxStore.publish(signed, notificationGroupIds(pubkey), {
         hidden: true,
@@ -1280,9 +1278,9 @@ export function startNotificationSync(
     if (stopped || revision !== ownerRevision) return;
 
     const latest = currentEvent(stateFilter(notificationPubkey));
-    if (latest?.id === lastPublishedEventId) {
-      appliedStateEventId = latest.id;
-    } else if (latest && latest.id !== appliedStateEventId) {
+    // A locally signed draft may have failed before outbox persistence. Adopt
+    // its actual payload like any other winner before acknowledging intent.
+    if (latest && latest.id !== appliedStateEventId) {
       if (failedStateId === latest.id) {
         emitPaused(
           "state",

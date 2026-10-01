@@ -494,7 +494,9 @@ failures reject the action visibly rather than pretending it was saved.
 Same-origin windows serialize publication using an account-scoped Web Lock.
 After durable outbox enqueue, the publisher commits the signed encrypted event
 and the IDs of the included actions as one receipt, then deletes those actions.
-A crash between receipt and cleanup is recoverable. Receivers verify the signature
+A crash between receipt and cleanup is recoverable. Locally signed drafts that
+failed publication reconcile through the same decrypted-baseline path as remote
+winners before retry can acknowledge pending actions. Receivers verify the signature
 and exact derived coordinate before dropping acknowledged actions; the receipt
 also hydrates the signed baseline after reload. Relay delivery remains the
 outbox's responsibility. The journal's latest action time guards the five-second
