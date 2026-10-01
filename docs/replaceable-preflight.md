@@ -491,6 +491,15 @@ reloads without windows overwriting one another's queues. Every window reads the
 same ordered journal and rebases it over the verified signed winner. Storage
 failures reject the action visibly rather than pretending it was saved.
 
+A small account-scoped localStorage map retains timestamps for IDs still in the
+read or archive list. Accepted state projections record timestamps from locally
+available events and discard metadata only once neither list needs the ID.
+Cutoff pruning uses either loaded events or this optional timestamp evidence;
+unknown IDs are retained. This preserves the existing cutoff policy and NIP-78
+payload, avoids relay reads for compaction, and does not claim complete discovery.
+Concurrent cache eviction can defer compaction but cannot authorize deleting an
+ID with an unknown timestamp.
+
 Same-origin windows serialize publication using an account-scoped Web Lock.
 After durable outbox enqueue, the publisher commits the signed encrypted event
 and the IDs of the included actions as one receipt, then deletes those actions.

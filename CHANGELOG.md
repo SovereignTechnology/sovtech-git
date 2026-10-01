@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Preserve read/archive IDs for unloaded notifications and cache their timestamps locally so cutoff compaction does not require fetching them again.
+
 - Bind notification models to the current store instance so recreating the store cannot show stale unread or dismissed items.
 
 - Preserve pending notification actions across reloads and freeze their timestamps and affected items so other windows replay the same intent.

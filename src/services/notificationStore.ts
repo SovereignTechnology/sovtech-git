@@ -87,6 +87,7 @@ import {
   type NotificationSyncController,
 } from "./notificationSync";
 
+import { retainNotificationTimestamps } from "./notificationTimestamps";
 import { recordNotificationSnapshot } from "./notificationHistory";
 import { normalizeUrl } from "@/lib/url";
 
@@ -231,6 +232,12 @@ export function acquireNotificationStore(
   // Persist to localStorage on every change
   const localSub = readState$.subscribe((state) => {
     saveToLocalStorage(pubkey, state);
+    const ids = [...new Set([...state.ri, ...state.ai])];
+    retainNotificationTimestamps(
+      pubkey,
+      state,
+      ids.length ? eventStore.getByFilters([{ ids }]) : [],
+    );
     void recordNotificationSnapshot(pubkey, state, "Local projection");
   });
 
