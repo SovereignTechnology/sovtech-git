@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Preserve pending notification actions across reloads and freeze their timestamps and affected items so other windows replay the same intent.
+
 - Batch notification publication after five quiet seconds and coordinate open windows to avoid duplicate state events; retries and changes during signing respect the same delay.
 
 - Sync notification read/archive changes between open windows, including unread and unarchive reversals, and discard stale publish drafts when state changes during signing.

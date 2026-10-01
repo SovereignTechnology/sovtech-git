@@ -115,8 +115,16 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
     );
     if (!mounted.current) return;
     if (saved) {
-      updateReadState(entry, () => structuredClone(snapshot.state));
-      setMessage("Version restored locally and queued for sync.");
+      const queued = updateReadState(
+        entry,
+        () => structuredClone(snapshot.state),
+        true,
+      );
+      setMessage(
+        queued
+          ? "Version restored locally and queued for sync."
+          : "Restore could not be saved in browser storage. Free storage space and try again.",
+      );
     } else {
       setMessage(
         "Restore cancelled: the current state could not be backed up.",

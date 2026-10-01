@@ -454,7 +454,7 @@ agree. Publishing encrypted content to those relays still reveals event
 existence, timing, and approximate size; it does not reveal the plaintext.
 
 Read/archive actions remain immediate while coverage or decryption is pending.
-The store records their updater functions as local deltas, decrypts the current
+The store records their frozen state transitions as durable local deltas, decrypts the current
 remote winner, and replays those deltas over it before signing. It must not
 publish a stale whole-state snapshot merely because local UI state changed
 first. Several rapid actions are debounced into one write after five quiet
@@ -484,26 +484,25 @@ between concurrent clients are excluded. Warm-subscription events reconcile
 cross-client updates, while the durable outbox reports publication delivery
 separately.
 
-Local windows also exchange read/archive transitions through account-scoped
-localStorage action events, separately from the cached projection. Receivers
-enqueue every field/set delta through the same warm owner, preserving removals
-and pending local intent instead of unioning whole snapshots. Received actions
-and relay projections are never rebroadcast as new actions, preventing echo
-loops. Deleted or malformed storage values are not reset instructions. Signing drafts are
-rechecked against the current winner and local projection before publication.
+Local actions are evaluated once at click time and stored synchronously as frozen
+before/after deltas, each under a unique account-scoped localStorage key. This
+preserves action timestamps, affected IDs, reversals, and pending intent across
+reloads without windows overwriting one another's queues. Every window reads the
+same ordered journal and rebases it over the verified signed winner. Storage
+failures reject the action visibly rather than pretending it was saved.
 
-Same-origin windows serialize state publication using an account-scoped Web
-Lock. After durable outbox enqueue, the publisher shares the signed encrypted
-event in localStorage. The next window verifies its signature and exact derived
-coordinate, reconciles it through the existing owner, and drops pending deltas
-that leave that winner unchanged. This prevents duplicate events without waiting
-for relay echo and allows another open window to publish if the editing window
-closes. The shared action timestamp also guards the quiet period before delayed
-storage events arrive. This coordinates browser windows, not independent devices;
-relay quorum and cross-device replacement semantics are unchanged. Without Web
-Locks, only windows with local edits publish automatically; a peer can explicitly
-retry to take over. If shared storage is unavailable, relay updates remain the
-source of cross-window publication evidence and duplicate suppression is best effort.
+Same-origin windows serialize publication using an account-scoped Web Lock.
+After durable outbox enqueue, the publisher commits the signed encrypted event
+and the IDs of the included actions as one receipt, then deletes those actions.
+A crash between receipt and cleanup is recoverable. Receivers verify the signature
+and exact derived coordinate before dropping acknowledged actions; the receipt
+also hydrates the signed baseline after reload. Relay delivery remains the
+outbox's responsibility. The journal's latest action time guards the five-second
+quiet period at reconciliation, lock acquisition, and after signing. This
+coordinates browser windows, not independent devices; relay quorum and
+cross-device replacement semantics are unchanged. Without Web Locks, editing
+windows (including a reload recovering pending actions) publish automatically;
+a peer can explicitly retry to take over.
 
 The direct-access `/notifications/diagnostics` page shows a live list of saved
 versions, with signed event timestamps in UTC, observation times, short event IDs,
@@ -522,7 +521,8 @@ recorded. Clearing all browser storage removes this local history; replaced even
 that were never retained cannot be reconstructed. Explicit restore saves the current
 projection first, then queues the selected state through the same warm owner and
 five-second publication debounce. Merely opening the list or modal does not restore
-or publish anything. No Nostr schema changes are introduced.
+or publish anything. Restore persists an absolute replacement intent so relay
+hydration cannot change the selected snapshot. No Nostr schema changes are introduced.
 
 ## Repository selection state
 

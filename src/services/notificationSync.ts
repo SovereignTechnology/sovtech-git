@@ -7,6 +7,12 @@
  * See docs/replaceable-preflight.md, "Notification-state adoption decision".
  */
 
+import {
+  pendingNotificationPrefix,
+  readPendingNotifications,
+  replayNotificationChanges as replayUpdates,
+  type PendingNotificationChange,
+} from "./notificationPending";
 import { recordNotificationSnapshot } from "./notificationHistory";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import type { Filter } from "applesauce-core/helpers";
@@ -104,7 +110,7 @@ export type NotificationSyncState = (
 export interface NotificationSyncController {
   readonly state$: BehaviorSubject<NotificationSyncState>;
   /** Apply immediately in the UI and retain as a rebasable local delta. */
-  enqueue(update: NotificationStateUpdater, fromOtherWindow?: boolean): void;
+  enqueue(update: NotificationStateUpdater, replace?: boolean): boolean;
   /** Retry only the currently failed decrypt, coverage, or publish step. */
   retry(): void;
   /** Create the notification key on the user's explicit request for ordering sync. */
@@ -264,13 +270,6 @@ function syncStateEquals(
     first.pendingChanges === second.pendingChanges &&
     JSON.stringify(first.relayCoverage) === JSON.stringify(second.relayCoverage)
   );
-}
-
-function replayUpdates(
-  base: NotificationReadState,
-  updates: readonly NotificationStateUpdater[],
-): NotificationReadState {
-  return updates.reduce((state, update) => update(state), base);
 }
 
 /** Derive the notification state author without prompting the account signer. */
@@ -668,12 +667,13 @@ export function startNotificationSync(
   let failedEnvelopeId: string | null = null;
   let failedStateId: string | null = null;
   let baseState = readState$.getValue() ?? { ...DEFAULT_READ_STATE };
-  let pendingUpdates: NotificationStateUpdater[] = [];
+  let pendingUpdates: PendingNotificationChange[] = [];
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   let publishRequested = false;
   let lastChangeAt = 0;
   let hasLocalChanges = false;
   let publishing = false;
+  let publishFailure: string | null = null;
   let lastPublishedEventId: string | null = null;
   const relayObservations = new Map<
     string,
@@ -829,25 +829,128 @@ export function startNotificationSync(
     requestReconcile();
   };
 
+  // Read the signed receipt before dropping acknowledged intent. The receipt is
+  // committed before journal deletion, so a crash at either write is recoverable.
+  const refreshPending = () => {
+    try {
+      let acknowledged: string[] = [];
+      let receiptApplied = false;
+      const raw = localStorage.getItem(`notifications_publication:${pubkey}`);
+      try {
+        if (raw && scopeNotificationPubkey) {
+          const receipt = JSON.parse(raw) as NostrEvent & {
+            notificationChanges?: string[];
+          };
+          const changes = receipt.notificationChanges;
+          if (
+            receipt.pubkey === scopeNotificationPubkey &&
+            receipt.kind === NIP78_KIND &&
+            receipt.tags.some(
+              ([key, value]) =>
+                key === "d" && value === NOTIFICATION_STATE_D_TAG,
+            ) &&
+            verifyEvent(receipt)
+          ) {
+            acknowledged = Array.isArray(changes) ? changes : [];
+            peerVersions.add(receipt.id);
+            if (peerVersions.size > 100)
+              peerVersions.delete(peerVersions.values().next().value!);
+            eventStore.add(receipt);
+            receiptApplied =
+              appliedStateEventId === receipt.id ||
+              currentEvent(stateFilter(scopeNotificationPubkey))?.id ===
+                appliedStateEventId;
+          }
+        }
+      } catch {
+        /* A corrupt receipt must not block pending-action recovery. */
+      }
+      const stored = readPendingNotifications(pubkey).filter(
+        (change) => !acknowledged.includes(change.id),
+      );
+      // Missing keys are acknowledgements only when a signed durable receipt
+      // exists. Unavailable storage must never discard in-memory user intent.
+      const retained = receiptApplied
+        ? []
+        : pendingUpdates.filter(
+            (change) => !stored.some((other) => other.id === change.id),
+          );
+      pendingUpdates = [...stored, ...retained].sort(
+        (a, b) => a.order - b.order || a.id.localeCompare(b.id),
+      );
+      for (const change of pendingUpdates)
+        lastChangeAt = Math.max(
+          lastChangeAt,
+          Math.min(Date.now(), change.changedAt),
+        );
+      if (pendingUpdates.length) publishRequested = true;
+      const next = replayUpdates(baseState, pendingUpdates);
+      if (!stateEquals(next, readState$.getValue())) readState$.next(next);
+    } catch {
+      // The live queue remains usable if browser storage becomes unavailable.
+    }
+  };
+
+  const acknowledge = (
+    changes: readonly PendingNotificationChange[],
+    event: NostrEvent,
+  ) => {
+    // Finish cleanup from a receipt committed just before a previous crash.
+    const previous = localStorage.getItem(
+      `notifications_publication:${pubkey}`,
+    );
+    try {
+      if (previous) {
+        const receipt = JSON.parse(previous) as NostrEvent & {
+          notificationChanges?: string[];
+        };
+        const changes = receipt.notificationChanges;
+        if (
+          receipt.pubkey === event.pubkey &&
+          receipt.kind === NIP78_KIND &&
+          receipt.tags.some(
+            ([key, value]) => key === "d" && value === NOTIFICATION_STATE_D_TAG,
+          ) &&
+          verifyEvent(receipt) &&
+          Array.isArray(changes)
+        ) {
+          for (const id of changes)
+            localStorage.removeItem(pendingNotificationPrefix(pubkey) + id);
+        }
+      }
+    } catch {
+      /* A malformed old receipt does not invalidate this publication. */
+    }
+    localStorage.setItem(
+      `notifications_publication:${pubkey}`,
+      JSON.stringify({
+        ...event,
+        notificationChanges: changes.map((change) => change.id),
+      }),
+    );
+    for (const change of changes)
+      localStorage.removeItem(pendingNotificationPrefix(pubkey) + change.id);
+    const ids = new Set(changes.map((change) => change.id));
+    pendingUpdates = pendingUpdates.filter((change) => !ids.has(change.id));
+  };
+
+  const onStorage = (event: StorageEvent) => {
+    if (
+      event.storageArea !== localStorage ||
+      !(
+        event.key?.startsWith(pendingNotificationPrefix(pubkey)) ||
+        event.key === `notifications_publication:${pubkey}`
+      )
+    )
+      return;
+    refreshPending();
+    requestReconcile();
+  };
+
   // Enforce the quiet period at every publication entry, including retry,
   // lock acquisition and asynchronous signing. Local changes remain immediate.
   const quietPeriodElapsed = () => {
-    let latestChange = lastChangeAt;
-    try {
-      const raw = localStorage.getItem(`notifications_change:${pubkey}`);
-      const change = raw
-        ? (JSON.parse(raw) as { changedAt?: unknown })
-        : undefined;
-      if (
-        typeof change?.changedAt === "number" &&
-        Number.isFinite(change.changedAt) &&
-        change.changedAt <= Date.now()
-      ) {
-        latestChange = Math.max(latestChange, change.changedAt);
-      }
-    } catch {
-      /* The local deadline still applies without shared storage. */
-    }
+    const latestChange = lastChangeAt;
     const remaining = latestChange + PUBLISH_DEBOUNCE_MS - Date.now();
     if (remaining <= 0) return true;
     if (publishTimer) clearTimeout(publishTimer);
@@ -860,6 +963,7 @@ export function startNotificationSync(
   };
 
   const publishUnderLock = async () => {
+    refreshPending();
     if (
       stopped ||
       !publishRequested ||
@@ -873,7 +977,7 @@ export function startNotificationSync(
 
     publishRequested = false;
     const revision = ownerRevision;
-    const updateCount = pendingUpdates.length;
+    const publishingChanges = [...pendingUpdates];
     const snapshot = readState$.getValue();
     try {
       const notificationPubkey = await resolvedSigner.signer.getPublicKey();
@@ -908,8 +1012,13 @@ export function startNotificationSync(
         return;
       }
       if (current && stateEquals(baseState, snapshot)) {
-        // Another window already published all of our queued intent.
-        pendingUpdates = pendingUpdates.slice(updateCount);
+        // A cached draft is not proof of durable publication (the previous
+        // window may have closed between signing and outbox persistence).
+        const { outboxStore } = await import("@/services/outbox");
+        await outboxStore.publish(current, notificationGroupIds(pubkey), {
+          hidden: true,
+        });
+        acknowledge(publishingChanges, current);
         hasLocalChanges = pendingUpdates.length > 0;
         emitReady();
         return;
@@ -933,6 +1042,7 @@ export function startNotificationSync(
         .sign();
 
       if (stopped || revision !== ownerRevision) return;
+      refreshPending();
       // Signing is async: a new winner or local action invalidates this draft.
       if (
         currentEvent(stateFilter(notificationPubkey))?.id !== current?.id ||
@@ -956,18 +1066,12 @@ export function startNotificationSync(
         signed.id,
         { createdAt: signed.created_at },
       );
-      try {
-        localStorage.setItem(
-          `notifications_publication:${pubkey}`,
-          JSON.stringify(signed),
-        );
-      } catch {
-        // Other windows can still learn this winner through their warm relay owner.
-      }
+      // Outbox persistence precedes acknowledgement; delivery/retry is owned by
+      // the outbox. Keep the queue when either durable write fails.
+      acknowledge(publishingChanges, signed);
       if (stopped || revision !== ownerRevision) return;
 
       baseState = snapshot;
-      pendingUpdates = pendingUpdates.slice(updateCount);
       hasLocalChanges = pendingUpdates.length > 0;
       const rebased = replayUpdates(baseState, pendingUpdates);
       if (!stateEquals(rebased, readState$.getValue()))
@@ -980,12 +1084,11 @@ export function startNotificationSync(
       }
     } catch (error) {
       publishRequested = true;
-      emitPaused(
-        "state",
+      publishFailure =
         error instanceof Error
           ? `Cross-device notification state could not be saved: ${error.message}`
-          : "Cross-device notification state could not be saved.",
-      );
+          : "Cross-device notification state could not be saved.";
+      emitPaused("state", publishFailure);
     }
   };
 
@@ -1007,18 +1110,18 @@ export function startNotificationSync(
       }
     } catch (error) {
       publishRequested = true;
-      emitPaused(
-        "state",
+      publishFailure =
         error instanceof Error
           ? `Notification publication coordination failed: ${error.message}`
-          : "Notification publication coordination failed.",
-      );
+          : "Notification publication coordination failed.";
+      emitPaused("state", publishFailure);
     } finally {
       publishing = false;
     }
   };
 
   async function reconcileOnce(): Promise<void> {
+    refreshPending();
     const activeCoverage = coverage;
     if (!activeCoverage) return;
     const revision = ownerRevision;
@@ -1213,6 +1316,7 @@ export function startNotificationSync(
         );
         baseState = relayState;
         appliedStateEventId = latest.id;
+        refreshPending();
         const rebased = replayUpdates(baseState, pendingUpdates);
         if (!stateEquals(rebased, readState$.getValue()))
           readState$.next(rebased);
@@ -1229,6 +1333,10 @@ export function startNotificationSync(
       }
     }
 
+    if (publishFailure) {
+      emitPaused("state", publishFailure);
+      return;
+    }
     emitReady();
     await flushPublish();
   }
@@ -1241,32 +1349,55 @@ export function startNotificationSync(
     },
   );
 
+  refreshPending();
+  hasLocalChanges = pendingUpdates.length > 0;
+  window.addEventListener("storage", onStorage);
   restartWarmOwner(scopeNotificationPubkey);
 
   return {
     state$,
-    enqueue(update, fromOtherWindow = false) {
-      if (stopped) return;
+    enqueue(update, replace = false) {
+      if (stopped) return false;
+      refreshPending();
       const previous = readState$.getValue();
+      // Evaluate once: mark-all timestamps and notification sets must not move
+      // when this action is rebased or replayed in another window.
       const next = update(previous);
-      if (stateEquals(previous, next)) return;
-      lastChangeAt = Date.now();
-      hasLocalChanges ||= !fromOtherWindow;
-      publishRequested = false;
-      pendingUpdates.push(update);
+      if (!replace && stateEquals(previous, next)) return true;
+      const change: PendingNotificationChange = {
+        id: crypto.randomUUID(),
+        changedAt: Date.now(),
+        replace,
+        order: Math.max(0, ...pendingUpdates.map((item) => item.order)) + 1,
+        before: structuredClone(previous),
+        after: structuredClone(next),
+      };
+      try {
+        localStorage.setItem(
+          pendingNotificationPrefix(pubkey) + change.id,
+          JSON.stringify(change),
+        );
+      } catch {
+        emitPaused(
+          "state",
+          "This notification change could not be saved in browser storage. Free storage space and try the action again.",
+        );
+        return false;
+      }
+      pendingUpdates.push(change);
+      lastChangeAt = change.changedAt;
+      hasLocalChanges = true;
+      publishRequested = true;
       readState$.next(next);
-      if (publishTimer) clearTimeout(publishTimer);
-      publishTimer = setTimeout(() => {
-        publishTimer = undefined;
-        publishRequested = true;
-        requestReconcile();
-      }, PUBLISH_DEBOUNCE_MS);
+      quietPeriodElapsed();
       const current = state$.getValue();
       emitState({ ...current, pendingChanges: true });
+      return true;
     },
     retry() {
       if (stopped) return;
       selectionSync.retry();
+      publishFailure = null;
       hasLocalChanges ||= pendingUpdates.length > 0;
       const restartCoverage = coverageBlocked;
       failedEnvelopeId = null;
@@ -1289,6 +1420,7 @@ export function startNotificationSync(
     stop() {
       if (stopped) return;
       stopped = true;
+      window.removeEventListener("storage", onStorage);
       selectionSync.stop();
       ownerRevision += 1;
       if (publishTimer) clearTimeout(publishTimer);

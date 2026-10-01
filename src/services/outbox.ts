@@ -389,9 +389,12 @@ async function idbPut(item: OutboxItem): Promise<void> {
   const database = await getDb();
   return new Promise((resolve, reject) => {
     const tx = database.transaction(STORE_NAME, "readwrite");
-    const req = tx.objectStore(STORE_NAME).put(item);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
+    tx.objectStore(STORE_NAME).put(item);
+    // Request success precedes transaction commit. Callers may discard their
+    // pending intent only after the complete durable write succeeds.
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("Outbox write aborted"));
+    tx.onerror = () => reject(tx.error);
   });
 }
 
