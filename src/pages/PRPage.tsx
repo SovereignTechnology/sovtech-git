@@ -1520,6 +1520,7 @@ export default function PRPage() {
           <InferredPRStackMap
             relation={inferredParent}
             items={inferredStackItems}
+            prs={prs}
             currentRootId={pr.rootEvent.id}
             ambiguousChildren={inferredAmbiguousChildren}
             branchedChildren={inferredBranchedChildren}
