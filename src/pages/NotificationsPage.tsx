@@ -112,8 +112,15 @@ type NotificationDisplayEntry =
 
 export default function NotificationsPage() {
   const activeAccount = useActiveAccount();
-  const { items, unreadCount, actions, history, sync, retrySync } =
-    useNotifications();
+  const {
+    items,
+    unreadCount,
+    discoveryLoading,
+    actions,
+    history,
+    sync,
+    retrySync,
+  } = useNotifications();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentView = notificationViewFromParam(searchParams.get("view"));
   const groupingMode = groupingModeFromParam(searchParams.get("group"));
@@ -365,7 +372,23 @@ export default function NotificationsPage() {
     <div className="container max-w-screen-xl px-4 md:px-8 py-6">
       {/* Header */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">Notifications</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Notifications
+          </h1>
+          {discoveryLoading && (
+            <span
+              role="status"
+              className="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm text-muted-foreground"
+            >
+              <Loader2
+                aria-hidden="true"
+                className="h-4 w-4 motion-safe:animate-spin"
+              />
+              Loading…
+            </span>
+          )}
+        </div>
 
         {/* Tabs */}
         <div className="hidden w-fit max-w-full items-center gap-1 rounded-lg border border-border/60 bg-muted/30 p-0.5 sm:flex">
@@ -596,7 +619,8 @@ export default function NotificationsPage() {
 
       {/* Notification list */}
       <div className="rounded-lg border border-border/60 bg-card overflow-hidden">
-        {!displayEntries || (displayEntries.length === 0 && history.loading) ? (
+        {!displayEntries ||
+        (displayEntries.length === 0 && discoveryLoading) ? (
           // Loading skeleton — also shown when list is empty but still fetching
           // to avoid a flash of the empty state before the first page arrives
           <ul className="divide-y divide-border/40">
@@ -687,7 +711,10 @@ export default function NotificationsPage() {
         <div className="flex justify-center mt-3">
           {history.loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2
+                aria-hidden="true"
+                className="h-4 w-4 motion-safe:animate-spin"
+              />
               Loading older notifications…
             </div>
           ) : (

@@ -44,6 +44,7 @@
 
 import {
   BehaviorSubject,
+  Observable,
   combineLatest,
   merge,
   of,
@@ -61,6 +62,7 @@ import { MailboxesModel } from "applesauce-core/models";
 import { onlyEvents } from "applesauce-relay";
 import { pool, eventStore } from "@/services/nostr";
 import { fallbackRelays, gitIndexRelays } from "@/services/settings";
+import { createRelaySubscriptionCoverage } from "@/lib/relaySubscriptionCoverage";
 import { resilientSubscription } from "@/lib/resilientSubscription";
 import { isGitThreadNotification } from "@/lib/resolveThreadRootKind";
 import {
@@ -80,7 +82,6 @@ import {
 } from "@/lib/manualTimelineLoader";
 import type { Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
-import type { Observable } from "rxjs";
 import {
   startNotificationSync,
   evictNotificationSigner,
@@ -150,6 +151,9 @@ export interface NotificationStoreEntry {
   nonGitEventIds$: BehaviorSubject<Set<string>>;
   /** Manual timeline loader for paged history fetches */
   historyLoader: ManualTimelineLoader | null;
+  /** Current discovery work, not proof of complete relay history. */
+  discoveryLoading$?: BehaviorSubject<boolean>;
+  historyLoading$?: BehaviorSubject<boolean>;
   /** @deprecated Retained for lightweight test-entry compatibility. */
   publishTimer: ReturnType<typeof setTimeout> | null;
   /** @deprecated Retained for lightweight test-entry compatibility. */
@@ -241,6 +245,51 @@ export function acquireNotificationStore(
     void recordNotificationSnapshot(pubkey, state, "Local projection");
   });
 
+  const discoveryLoading$ = new BehaviorSubject(false);
+  const historyLoading$ = new BehaviorSubject(false);
+  const activeDiscovery = new Set<symbol>();
+  const updateDiscovery = () => {
+    const loading = historyLoading$.value || activeDiscovery.size > 0;
+    if (discoveryLoading$.value !== loading) discoveryLoading$.next(loading);
+  };
+  const historyStatusSub = historyLoading$.subscribe(updateDiscovery);
+  let historyLoadingSub: Subscription | undefined;
+
+  // Observe existing requests only. A settled/failed/timed-out request stops
+  // its indicator; it does not establish exhaustive notification discovery.
+  const discover = (
+    relays: string[] | Observable<string[]>,
+    filters: Filter[],
+  ) =>
+    new Observable<NostrEvent>((subscriber) => {
+      const owner = Symbol();
+      const pending = new Set<string>();
+      const coverage = createRelaySubscriptionCoverage({
+        settlementTimeoutMs: 5_000,
+      });
+      const status = coverage.changes$.subscribe(({ relay, phase }) => {
+        if (phase === "initial" || phase === "catching-up") pending.add(relay);
+        else pending.delete(relay);
+        if (pending.size) activeDiscovery.add(owner);
+        else activeDiscovery.delete(owner);
+        updateDiscovery();
+      });
+      const relayList$ = Array.isArray(relays) ? of(relays) : relays;
+      const request = resilientSubscription(pool, relayList$, filters, {
+        retryCount: Infinity,
+        onRelayLifecycle: coverage.onLifecycle,
+      })
+        .pipe(onlyEvents(), mapEventsToStore(eventStore))
+        .subscribe(subscriber);
+      return () => {
+        request.unsubscribe();
+        status.unsubscribe();
+        coverage.stop();
+        activeDiscovery.delete(owner);
+        updateDiscovery();
+      };
+    });
+
   // ---------------------------------------------------------------------------
   // Phase 1 — Badge: live subscription with limit:10 badge filters.
   // Reactive to MailboxesModel — re-subscribes when inbox relays change.
@@ -252,11 +301,7 @@ export function acquireNotificationStore(
   // repoActivitySub (which combines it) also reacts to relay list changes.
   const inboxRelays$ = inboxRelaysObservable(pubkey);
 
-  const badgeSub = resilientSubscription(pool, inboxRelays$, badgeFilters, {
-    retryCount: Infinity,
-  })
-    .pipe(onlyEvents(), mapEventsToStore(eventStore))
-    .subscribe();
+  const badgeSub = discover(inboxRelays$, badgeFilters).subscribe();
 
   // ---------------------------------------------------------------------------
   // Phase 2 — History loader: created lazily on first activateFullFetch() call.
@@ -280,14 +325,7 @@ export function acquireNotificationStore(
   const repoCoords$ = new BehaviorSubject<string[]>([]);
 
   const ownRepoFilter: Filter = { kinds: [REPO_KIND], authors: [pubkey] };
-  const ownRepoSub = resilientSubscription(
-    pool,
-    gitIndexRelays,
-    [ownRepoFilter],
-    { retryCount: Infinity },
-  )
-    .pipe(onlyEvents(), mapEventsToStore(eventStore))
-    .subscribe();
+  const ownRepoSub = discover(gitIndexRelays, [ownRepoFilter]).subscribe();
 
   const repoCoordsStoreSub = (
     eventStore.timeline([ownRepoFilter]) as unknown as Observable<NostrEvent[]>
@@ -366,20 +404,12 @@ export function acquireNotificationStore(
         const inboxSet = new Set(inboxRelays);
         const extraRepoRelays = repoRelays.filter((r) => !inboxSet.has(r));
 
-        const streams = [
-          resilientSubscription(pool, repoRelays, [starFilter, zapFilter], {
-            retryCount: Infinity,
-          }).pipe(onlyEvents(), mapEventsToStore(eventStore)),
-        ];
+        const streams = [discover(repoRelays, [starFilter, zapFilter])];
 
         if (extraRepoRelays.length > 0) {
           // Badge filters on extra repo relays so we don't miss thread activity
           // on repos whose relays aren't in the user's inbox
-          streams.push(
-            resilientSubscription(pool, extraRepoRelays, badgeFilters, {
-              retryCount: Infinity,
-            }).pipe(onlyEvents(), mapEventsToStore(eventStore)),
-          );
+          streams.push(discover(extraRepoRelays, badgeFilters));
         }
 
         return merge(...streams);
@@ -474,6 +504,8 @@ export function acquireNotificationStore(
     repoCoords$,
     nonGitEventIds$: excludedEventIds$,
     historyLoader: null,
+    discoveryLoading$,
+    historyLoading$,
     publishTimer: null,
     lastPublishedStateAt: 0,
     notificationSync,
@@ -486,7 +518,11 @@ export function acquireNotificationStore(
       repoActivitySub.unsubscribe();
       inboxRelaysMirrorSub.unsubscribe();
       nonGitWatcherSub.unsubscribe();
+      historyLoadingSub?.unsubscribe();
+      historyStatusSub.unsubscribe();
       entry.historyLoader?.destroy();
+      discoveryLoading$.complete();
+      historyLoading$.complete();
       repoCoords$.complete();
       excludedEventIds$.complete();
     },
@@ -531,6 +567,9 @@ export function acquireNotificationStore(
       },
     );
     entry.historyLoader = loader;
+    historyLoadingSub = loader.historyLoading$.subscribe((loading) =>
+      historyLoading$.next(loading),
+    );
     // Fire the first full page immediately
     loader.loadMore(NOTIFICATION_PAGE_LIMIT);
     historyLoaderPromise = Promise.resolve(loader);

@@ -16,6 +16,8 @@
 
 ### Added
 
+- Show notification discovery loading on the page and bell badge, and settle empty history loads without implying complete relay coverage.
+
 - Add a direct-access `/notifications/diagnostics` page with a live version list, UTC event and observation timestamps, per-window production/download provenance, restore actions, and full state in a modal. Retain 100 distinct signed versions independently from local checkpoints and pre-restore backups, available through a compact view switch.
 
 ## [4.2.0] - 2026-10-01

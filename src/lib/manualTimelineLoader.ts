@@ -31,6 +31,7 @@
  * EOSE / settle signal:
  *   Each arriving event resets a debounce timer. When no events arrive for
  *   settleMs after the first event of a block, the block is considered done.
+ *   Empty or silent blocks also get a bounded settling fallback.
  *   This naturally handles multiple relays — the debounce waits for the
  *   last relay to deliver its final event before flipping historyLoading$ off.
  *
@@ -55,7 +56,7 @@
  */
 
 import { BehaviorSubject, Observable, Subject } from "rxjs";
-import { debounceTime, mergeAll, tap } from "rxjs/operators";
+import { debounceTime, finalize, mergeAll, tap } from "rxjs/operators";
 import { mapEventsToStore } from "applesauce-core";
 import { getSeenRelays } from "applesauce-core/helpers";
 import { loadBlocksFromRelay } from "applesauce-loaders/loaders";
@@ -63,7 +64,8 @@ import { onlyEvents } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
 import type { EventStore } from "applesauce-core";
 import type { RelayPool } from "applesauce-relay";
-import type { TimelessFilter } from "applesauce-loaders";
+import type { NostrRequest, TimelessFilter } from "applesauce-loaders";
+import { resilientRequest } from "@/lib/resilientSubscription";
 import type { Subscription } from "rxjs";
 
 export interface ManualTimelineLoader {
@@ -146,6 +148,19 @@ export function createManualTimelineLoader(
   // Each arriving event resets this debounce. When quiet for settleMs the
   // block is considered done and we flip the loading state.
   const eventActivity$ = new Subject<void>();
+  let emptyBlockDeadline: ReturnType<typeof setTimeout> | undefined;
+  let blockTimedOut = false;
+  let activeRequests = 0;
+  const request: NostrRequest = (urls, requestFilters) => {
+    activeRequests++;
+    return resilientRequest(pool, urls, requestFilters).pipe(
+      onlyEvents(),
+      finalize(() => {
+        activeRequests--;
+        eventActivity$.next();
+      }),
+    );
+  };
 
   // -------------------------------------------------------------------------
   // Per-relay tracking for historyReachedArchive$
@@ -199,10 +214,12 @@ export function createManualTimelineLoader(
   const settledSub: Subscription = eventActivity$
     .pipe(debounceTime(settleMs))
     .subscribe(() => {
+      if (emptyBlockDeadline) clearTimeout(emptyBlockDeadline);
+      emptyBlockDeadline = undefined;
       inFlight = false;
       historyLoading$.next(false);
-      historyHasMore$.next(blockCount >= blockLimit);
-      checkReachedArchive();
+      historyHasMore$.next(blockTimedOut || blockCount >= blockLimit);
+      if (!blockTimedOut) checkReachedArchive();
     });
 
   // -------------------------------------------------------------------------
@@ -257,7 +274,7 @@ export function createManualTimelineLoader(
     knownRelays.add(url);
 
     const relayStream = window$.pipe(
-      loadBlocksFromRelay(pool, url, mutableFilters, {}),
+      loadBlocksFromRelay(request, url, mutableFilters, {}),
     );
     relayStreams$.next(relayStream);
   }
@@ -287,6 +304,7 @@ export function createManualTimelineLoader(
       if (inFlight) return;
       inFlight = true;
       blockCount = 0;
+      blockTimedOut = false;
       blockLimit = limit;
       // Reset per-block relay counts so exhaustion is measured per block
       relayBlockCount.clear();
@@ -296,9 +314,18 @@ export function createManualTimelineLoader(
         f.limit = limit;
       }
       historyLoading$.next(true);
+      // With no events, the activity debounce never starts. This is a UI
+      // settlement bound, not evidence that every relay's history was read.
+      emptyBlockDeadline = setTimeout(() => {
+        blockTimedOut = true;
+        eventActivity$.next();
+      }, 5_000);
       window$.next({ since: -Infinity });
+      // Exhausted cursors (or no configured relays) start no new requests.
+      if (activeRequests === 0) eventActivity$.next();
     },
     destroy: () => {
+      if (emptyBlockDeadline) clearTimeout(emptyBlockDeadline);
       relayListSub.unsubscribe();
       settledSub.unsubscribe();
       historySub.unsubscribe();
