@@ -69,6 +69,8 @@ import {
   buildRepoStarFilter,
   buildRepoZapFilter,
   parseReadState,
+  notificationStateDelta,
+  isNotificationReadState,
   DEFAULT_READ_STATE,
   ZAP_RECEIPT_KIND,
   type NotificationReadState,
@@ -86,6 +88,7 @@ import {
   evictNotificationSigner,
   type NotificationSyncController,
 } from "./notificationSync";
+
 import { normalizeUrl } from "@/lib/url";
 
 // ---------------------------------------------------------------------------
@@ -111,7 +114,9 @@ function saveToLocalStorage(
   state: NotificationReadState,
 ): void {
   try {
-    localStorage.setItem(localStorageKey(pubkey), JSON.stringify(state));
+    const serialized = JSON.stringify(state);
+    if (localStorage.getItem(localStorageKey(pubkey)) !== serialized)
+      localStorage.setItem(localStorageKey(pubkey), serialized);
   } catch {
     // ignore
   }
@@ -166,7 +171,26 @@ export function updateReadState(
   updater: (prev: NotificationReadState) => NotificationReadState,
 ): void {
   if (entry.notificationSync) {
+    const before = entry.readState$.getValue();
     entry.notificationSync.enqueue(updater);
+    const after = entry.readState$.getValue();
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      try {
+        // Transport user intent separately from cached projections. Relay
+        // hydration and received changes must never echo as new user actions.
+        localStorage.setItem(
+          `notifications_change:${entry.pubkey}`,
+          JSON.stringify({
+            id: crypto.randomUUID(),
+            changedAt: Date.now(),
+            before,
+            after,
+          }),
+        );
+      } catch {
+        // Relay sync remains available when browser storage is unavailable.
+      }
+    }
   } else {
     // Lightweight test and migration entries may not own relay sync.
     const next = updater(entry.readState$.getValue());
@@ -255,6 +279,32 @@ export function acquireNotificationStore(
   // decryption, delta replay, and debounced publication. It replaces the old
   // address loaders and overlapping persistent subscriptions.
   const notificationSync = startNotificationSync(pubkey, readState$);
+
+  const onStorage = (event: StorageEvent) => {
+    if (
+      event.storageArea !== localStorage ||
+      event.key !== `notifications_change:${pubkey}` ||
+      !event.newValue
+    )
+      return;
+    try {
+      const change = JSON.parse(event.newValue) as Record<string, unknown>;
+      if (
+        !isNotificationReadState(change.before) ||
+        !isNotificationReadState(change.after)
+      )
+        return;
+      // Apply every delivered transition in order, even if a newer action is
+      // already in storage. Skipping intermediate deltas loses rapid edits.
+      notificationSync.enqueue(
+        notificationStateDelta(change.before, change.after),
+        true,
+      );
+    } catch {
+      // Clearing or corrupting storage is not an instruction to reset state.
+    }
+  };
+  window.addEventListener("storage", onStorage);
 
   // ---------------------------------------------------------------------------
   // Repo discovery — own repos for relay coverage and star notifications
@@ -461,6 +511,7 @@ export function acquireNotificationStore(
     lastPublishedStateAt: 0,
     notificationSync,
     cleanup: () => {
+      window.removeEventListener("storage", onStorage);
       localSub.unsubscribe();
       badgeSub.unsubscribe();
       notificationSync.stop();

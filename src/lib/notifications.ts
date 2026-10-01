@@ -977,3 +977,45 @@ export function mergeReadStates(
     ai: [...new Set([...a.ai, ...b.ai])],
   };
 }
+
+/** Replay a local-storage transition without replacing unrelated window edits. */
+export function notificationStateDelta(
+  before: NotificationReadState,
+  after: NotificationReadState,
+): (state: NotificationReadState) => NotificationReadState {
+  const updateIds = (current: string[], oldIds: string[], newIds: string[]) => {
+    const removed = new Set(oldIds.filter((id) => !newIds.includes(id)));
+    const added = newIds.filter((id) => !oldIds.includes(id));
+    return [
+      ...new Set([...current.filter((id) => !removed.has(id)), ...added]),
+    ];
+  };
+  return (state) => ({
+    rb: before.rb === after.rb ? state.rb : after.rb,
+    ab: before.ab === after.ab ? state.ab : after.ab,
+    ri: updateIds(state.ri, before.ri, after.ri),
+    ai: updateIds(state.ai, before.ai, after.ai),
+  });
+}
+
+export function isNotificationReadState(
+  value: unknown,
+): value is NotificationReadState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Record<string, unknown>;
+  return (
+    [state.rb, state.ab].every(
+      (cutoff) =>
+        typeof cutoff === "number" &&
+        Number.isSafeInteger(cutoff) &&
+        cutoff >= 0,
+    ) &&
+    [state.ri, state.ai].every(
+      (ids) =>
+        Array.isArray(ids) &&
+        ids.every(
+          (id: unknown) => typeof id === "string" && /^[0-9a-f]{64}$/.test(id),
+        ),
+    )
+  );
+}

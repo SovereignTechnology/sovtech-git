@@ -457,7 +457,9 @@ Read/archive actions remain immediate while coverage or decryption is pending.
 The store records their updater functions as local deltas, decrypts the current
 remote winner, and replays those deltas over it before signing. It must not
 publish a stale whole-state snapshot merely because local UI state changed
-first. Several rapid actions are debounced into one write. A new remote winner
+first. Several rapid actions are debounced into one write after five quiet
+seconds following the most recent change. Retry, lock acquisition, coverage
+recovery and changes during signing must all respect that deadline. A new remote winner
 replaces the accepted base state, after which still-pending local deltas are
 replayed; this preserves remote reversals such as marking an item unread or
 restoring it. A failed current-envelope or current-state decrypt is not retried
@@ -481,6 +483,27 @@ deletion discovery, a post-write echo request, and a compare-and-swap protocol
 between concurrent clients are excluded. Warm-subscription events reconcile
 cross-client updates, while the durable outbox reports publication delivery
 separately.
+
+Local windows also exchange read/archive transitions through account-scoped
+localStorage action events, separately from the cached projection. Receivers
+enqueue every field/set delta through the same warm owner, preserving removals
+and pending local intent instead of unioning whole snapshots. Received actions
+and relay projections are never rebroadcast as new actions, preventing echo
+loops. Deleted or malformed storage values are not reset instructions. Signing drafts are
+rechecked against the current winner and local projection before publication.
+
+Same-origin windows serialize state publication using an account-scoped Web
+Lock. After durable outbox enqueue, the publisher shares the signed encrypted
+event in localStorage. The next window verifies its signature and exact derived
+coordinate, reconciles it through the existing owner, and drops pending deltas
+that leave that winner unchanged. This prevents duplicate events without waiting
+for relay echo and allows another open window to publish if the editing window
+closes. The shared action timestamp also guards the quiet period before delayed
+storage events arrive. This coordinates browser windows, not independent devices;
+relay quorum and cross-device replacement semantics are unchanged. Without Web
+Locks, only windows with local edits publish automatically; a peer can explicitly
+retry to take over. If shared storage is unavailable, relay updates remain the
+source of cross-window publication evidence and duplicate suppression is best effort.
 
 ## Repository selection state
 

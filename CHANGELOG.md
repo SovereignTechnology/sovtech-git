@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Batch notification publication after five quiet seconds and coordinate open windows to avoid duplicate state events; retries and changes during signing respect the same delay.
+
+- Sync notification read/archive changes between open windows, including unread and unarchive reversals, and discard stale publish drafts when state changes during signing.
+
 ## [4.2.0] - 2026-10-01
 
 **Better discovery & reliable collaboration**

@@ -18,7 +18,12 @@ import {
 } from "applesauce-common/helpers/app-data";
 import { onlyEvents } from "applesauce-relay";
 import { PrivateKeySigner } from "applesauce-signers/signers";
-import { generateSecretKey, getPublicKey, type NostrEvent } from "nostr-tools";
+import {
+  generateSecretKey,
+  getPublicKey,
+  verifyEvent,
+  type NostrEvent,
+} from "nostr-tools";
 import {
   BehaviorSubject,
   combineLatest,
@@ -99,7 +104,7 @@ export type NotificationSyncState = (
 export interface NotificationSyncController {
   readonly state$: BehaviorSubject<NotificationSyncState>;
   /** Apply immediately in the UI and retain as a rebasable local delta. */
-  enqueue(update: NotificationStateUpdater): void;
+  enqueue(update: NotificationStateUpdater, fromOtherWindow?: boolean): void;
   /** Retry only the currently failed decrypt, coverage, or publish step. */
   retry(): void;
   /** Create the notification key on the user's explicit request for ordering sync. */
@@ -128,7 +133,7 @@ interface ResolvedNotificationSigner {
   envelopeEventId: string;
 }
 
-const PUBLISH_DEBOUNCE_MS = 2_000;
+const PUBLISH_DEBOUNCE_MS = 5_000;
 const CACHE_HYDRATION_TIMEOUT_MS = 1_000;
 const signerCache = new Map<string, ResolvedNotificationSigner>();
 const signerInFlight = new Map<
@@ -232,7 +237,20 @@ function stateEquals(
   first: NotificationReadState,
   second: NotificationReadState,
 ): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
+  const sameIds = (left: string[], right: string[]) => {
+    const leftIds = new Set(left);
+    const rightIds = new Set(right);
+    return (
+      leftIds.size === rightIds.size &&
+      [...leftIds].every((id) => rightIds.has(id))
+    );
+  };
+  return (
+    first.rb === second.rb &&
+    first.ab === second.ab &&
+    sameIds(first.ri, second.ri) &&
+    sameIds(first.ai, second.ai)
+  );
 }
 
 function syncStateEquals(
@@ -653,6 +671,8 @@ export function startNotificationSync(
   let pendingUpdates: NotificationStateUpdater[] = [];
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   let publishRequested = false;
+  let lastChangeAt = 0;
+  let hasLocalChanges = false;
   let publishing = false;
   let lastPublishedEventId: string | null = null;
   let ownerRevision = 0;
@@ -786,11 +806,41 @@ export function startNotificationSync(
     requestReconcile();
   };
 
-  const flushPublish = async () => {
+  // Enforce the quiet period at every publication entry, including retry,
+  // lock acquisition and asynchronous signing. Local changes remain immediate.
+  const quietPeriodElapsed = () => {
+    let latestChange = lastChangeAt;
+    try {
+      const raw = localStorage.getItem(`notifications_change:${pubkey}`);
+      const change = raw
+        ? (JSON.parse(raw) as { changedAt?: unknown })
+        : undefined;
+      if (
+        typeof change?.changedAt === "number" &&
+        Number.isFinite(change.changedAt) &&
+        change.changedAt <= Date.now()
+      ) {
+        latestChange = Math.max(latestChange, change.changedAt);
+      }
+    } catch {
+      /* The local deadline still applies without shared storage. */
+    }
+    const remaining = latestChange + PUBLISH_DEBOUNCE_MS - Date.now();
+    if (remaining <= 0) return true;
+    if (publishTimer) clearTimeout(publishTimer);
+    publishTimer = setTimeout(() => {
+      publishTimer = undefined;
+      publishRequested = true;
+      requestReconcile();
+    }, remaining);
+    return false;
+  };
+
+  const publishUnderLock = async () => {
     if (
       stopped ||
-      publishing ||
       !publishRequested ||
+      !quietPeriodElapsed() ||
       pendingUpdates.length === 0 ||
       !resolvedSigner ||
       state$.getValue().status !== "ready"
@@ -798,14 +848,51 @@ export function startNotificationSync(
       return;
     }
 
-    publishing = true;
     publishRequested = false;
     const revision = ownerRevision;
     const updateCount = pendingUpdates.length;
     const snapshot = readState$.getValue();
     try {
       const notificationPubkey = await resolvedSigner.signer.getPublicKey();
+      // Share the durable publication result without waiting for relay echo.
+      // Only the signed event is evidence; never trust a peer's plaintext claim.
+      try {
+        const raw = localStorage.getItem(`notifications_publication:${pubkey}`);
+        if (raw) {
+          const peer = JSON.parse(raw) as NostrEvent;
+          if (
+            peer.pubkey === notificationPubkey &&
+            peer.kind === NIP78_KIND &&
+            peer.tags.some(
+              ([key, value]) =>
+                key === "d" && value === NOTIFICATION_STATE_D_TAG,
+            ) &&
+            verifyEvent(peer)
+          ) {
+            eventStore.add(peer);
+          }
+        }
+      } catch {
+        // Missing/corrupt browser storage does not replace relay evidence.
+      }
       const current = currentEvent(stateFilter(notificationPubkey));
+      if (current && current.id !== appliedStateEventId) {
+        publishRequested = true;
+        requestReconcile();
+        return;
+      }
+      if (current && stateEquals(baseState, snapshot)) {
+        // Another window already published all of our queued intent.
+        pendingUpdates = pendingUpdates.slice(updateCount);
+        hasLocalChanges = pendingUpdates.length > 0;
+        emitReady();
+        return;
+      }
+      const { outboxStore } = await import("@/services/outbox");
+      if (!quietPeriodElapsed()) {
+        publishRequested = true;
+        return;
+      }
       const createdAt = Math.max(
         Math.floor(Date.now() / 1_000),
         (current?.created_at ?? 0) + 1,
@@ -820,16 +907,35 @@ export function startNotificationSync(
         .sign();
 
       if (stopped || revision !== ownerRevision) return;
+      // Signing is async: a new winner or local action invalidates this draft.
+      if (
+        currentEvent(stateFilter(notificationPubkey))?.id !== current?.id ||
+        !stateEquals(snapshot, readState$.getValue()) ||
+        state$.getValue().status !== "ready" ||
+        !quietPeriodElapsed()
+      ) {
+        publishRequested = true;
+        requestReconcile();
+        return;
+      }
       lastPublishedEventId = signed.id;
       eventStore.add(signed);
-      const { outboxStore } = await import("@/services/outbox");
       await outboxStore.publish(signed, notificationGroupIds(pubkey), {
         hidden: true,
       });
+      try {
+        localStorage.setItem(
+          `notifications_publication:${pubkey}`,
+          JSON.stringify(signed),
+        );
+      } catch {
+        // Other windows can still learn this winner through their warm relay owner.
+      }
       if (stopped || revision !== ownerRevision) return;
 
       baseState = snapshot;
       pendingUpdates = pendingUpdates.slice(updateCount);
+      hasLocalChanges = pendingUpdates.length > 0;
       const rebased = replayUpdates(baseState, pendingUpdates);
       if (!stateEquals(rebased, readState$.getValue()))
         readState$.next(rebased);
@@ -846,6 +952,33 @@ export function startNotificationSync(
         error instanceof Error
           ? `Cross-device notification state could not be saved: ${error.message}`
           : "Cross-device notification state could not be saved.",
+      );
+    }
+  };
+
+  const flushPublish = async () => {
+    if (stopped || publishing || !publishRequested || !quietPeriodElapsed())
+      return;
+    // Older browsers without Web Locks publish only from the editing window.
+    // Peers still project changes; manual retry can take over publication.
+    if (!navigator.locks && !hasLocalChanges) return;
+    publishing = true;
+    try {
+      if (navigator.locks) {
+        await navigator.locks.request(
+          `notifications-publish:${pubkey}`,
+          publishUnderLock,
+        );
+      } else {
+        await publishUnderLock();
+      }
+    } catch (error) {
+      publishRequested = true;
+      emitPaused(
+        "state",
+        error instanceof Error
+          ? `Notification publication coordination failed: ${error.message}`
+          : "Notification publication coordination failed.",
       );
     } finally {
       publishing = false;
@@ -1039,11 +1172,14 @@ export function startNotificationSync(
 
   return {
     state$,
-    enqueue(update) {
+    enqueue(update, fromOtherWindow = false) {
       if (stopped) return;
       const previous = readState$.getValue();
       const next = update(previous);
       if (stateEquals(previous, next)) return;
+      lastChangeAt = Date.now();
+      hasLocalChanges ||= !fromOtherWindow;
+      publishRequested = false;
       pendingUpdates.push(update);
       readState$.next(next);
       if (publishTimer) clearTimeout(publishTimer);
@@ -1058,6 +1194,7 @@ export function startNotificationSync(
     retry() {
       if (stopped) return;
       selectionSync.retry();
+      hasLocalChanges ||= pendingUpdates.length > 0;
       const restartCoverage = coverageBlocked;
       failedEnvelopeId = null;
       failedStateId = null;
