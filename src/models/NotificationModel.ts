@@ -9,7 +9,7 @@
  * (backed by a BehaviorSubject in the hook layer) so the model can react to
  * both store changes and read-state changes.
  *
- * Cache key: the user's pubkey (one model per logged-in user).
+ * Cache key: the user's pubkey and the notification store's state stream.
  */
 
 import { combineLatest, of, type Observable } from "rxjs";
@@ -59,8 +59,8 @@ export interface NotificationModelOutput {
  *   the async resolver. Populated by the zap-receipt watcher in
  *   notificationStore. Events in this set are excluded from thread grouping.
  *
- * Cache key: pubkey only (via getKey). The BehaviorSubject references are
- * stable for the lifetime of the store entry.
+ * The state stream identifies a store entry. Consumers of that entry share
+ * a model; a recreated entry must not inherit the previous model's streams.
  */
 export function NotificationModel(
   pubkey: string,
@@ -228,9 +228,19 @@ export function NotificationModel(
   };
 }
 
-/**
- * Cache key: pubkey only. The readState$ and repoCoords$ arguments are
- * intentionally excluded so the model instance is reused across acquire/release
- * cycles for the same pubkey.
- */
-NotificationModel.getKey = (pubkey: string) => pubkey;
+// Weak keys do not retain discarded store entries beyond the model cache's
+// own lifetime. A state's identity stays stable across page/badge consumers.
+const stateStreamIds = new WeakMap<Observable<NotificationReadState>, number>();
+let nextStateStreamId = 0;
+
+NotificationModel.getKey = (
+  pubkey: string,
+  readState$: Observable<NotificationReadState>,
+) => {
+  let id = stateStreamIds.get(readState$);
+  if (id === undefined) {
+    id = ++nextStateStreamId;
+    stateStreamIds.set(readState$, id);
+  }
+  return `${pubkey}:${id}`;
+};

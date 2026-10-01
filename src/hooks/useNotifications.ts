@@ -197,9 +197,8 @@ export function useNotifications(): {
       return entry.historyLoader.historyReachedArchive$;
     }, [entry?.historyLoader]) ?? false;
 
-  // model cache key is pubkey only; readState$, repoCoords$, and
-  // nonGitEventIds$ are passed as separate arguments and are not part of the
-  // cache key.
+  // Page and badge share a model for this store entry. Its readState$ identity
+  // prevents a recreated entry from reusing a model bound to retired streams.
   const output = use$(() => {
     if (!pubkey || !readState$ || !repoCoords$ || !nonGitEventIds$)
       return undefined;
