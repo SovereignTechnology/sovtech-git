@@ -5,6 +5,36 @@ import react from "@vitejs/plugin-react-swc";
 import { defineConfig, type Plugin } from "vitest/config";
 import { name } from "./package.json";
 
+/** Notification owners cannot be replaced while React retains their old entries. */
+function notificationReloadPlugin(): Plugin {
+  const owner = path.resolve(__dirname, "src/hooks/useNotifications.ts");
+  return {
+    name: "notification-owner-reload",
+    apply: "serve",
+    handleHotUpdate({ modules, server, timestamp }) {
+      // Follow importers so changes to transitive state/relay dependencies
+      // also restart the owners. Component and stylesheet edits keep HMR.
+      const affected = new Set(modules);
+      for (const module of affected) {
+        for (const importer of module.importers) affected.add(importer);
+      }
+      if (![...affected].some((module) => module.file === owner)) return;
+
+      const invalidated = new Set<(typeof modules)[number]>();
+      for (const module of modules) {
+        server.moduleGraph.invalidateModule(
+          module,
+          invalidated,
+          timestamp,
+          true,
+        );
+      }
+      server.ws.send({ type: "full-reload" });
+      return [];
+    },
+  };
+}
+
 function getGitCommit(): string {
   try {
     return execSync("git rev-parse --short HEAD").toString().trim();
@@ -128,7 +158,12 @@ export default defineConfig(() => ({
     host: "::",
     port: 8080,
   },
-  plugins: [react(), htmlAppNamePlugin(), manifestPlugin()],
+  plugins: [
+    notificationReloadPlugin(),
+    react(),
+    htmlAppNamePlugin(),
+    manifestPlugin(),
+  ],
   test: {
     globals: true,
     environment: "jsdom",
