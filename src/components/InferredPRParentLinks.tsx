@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 import { GitBranch, HelpCircle } from "lucide-react";
 import { eventIdToNevent } from "@/lib/routeUtils";
 import { cn } from "@/lib/utils";
+import { StatusIcon } from "@/components/StatusIcon";
+import type { ResolvedPRLite } from "@/lib/nip34";
 import type {
   InferredPRParent,
   InferredPRParentRelation,
@@ -14,6 +16,7 @@ export function InferredPRStackMap({
   repoPath,
   relayHints,
   layer,
+  prs,
   ambiguousChildren = [],
   branchedChildren = [],
 }: {
@@ -23,6 +26,7 @@ export function InferredPRStackMap({
   repoPath: string;
   relayHints: string[];
   layer?: { position: number; size: number };
+  prs?: readonly Pick<ResolvedPRLite, "id" | "status">[];
   ambiguousChildren?: InferredPRParent[];
   branchedChildren?: InferredPRParent[];
 }) {
@@ -79,6 +83,7 @@ export function InferredPRStackMap({
           >
             {displayedItems.map((item, index) => {
               const isCurrent = item.rootId === currentRootId;
+              const status = prs?.find((pr) => pr.id === item.rootId)?.status;
               return (
                 <li
                   key={item.rootId}
@@ -113,6 +118,21 @@ export function InferredPRStackMap({
                           ? "↳"
                           : index + 1}
                     </span>
+                    {status && (
+                      <span
+                        title={
+                          status === "resolved"
+                            ? "Merged"
+                            : status.charAt(0).toUpperCase() + status.slice(1)
+                        }
+                      >
+                        <StatusIcon
+                          status={status}
+                          variant="pr"
+                          className="h-4 w-4"
+                        />
+                      </span>
+                    )}
                     {isCurrent ? (
                       <span className="min-w-0 max-w-64 truncate font-medium">
                         {item.subject}
