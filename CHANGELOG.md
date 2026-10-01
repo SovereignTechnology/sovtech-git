@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-10-01
+
+**Reliable notification sync & recovery**
+
 ### Fixed
 
 - Preserve read/archive IDs for unloaded notifications and cache their timestamps locally so cutoff compaction does not require fetching them again.
@@ -14,7 +18,13 @@
 
 - Sync notification read/archive changes between open windows, including unread and unarchive reversals, and discard stale publish drafts when state changes during signing.
 
+- Preserve notification action order between publication batches and reconcile failed drafts before retrying, retaining recovery checkpoints when publication fails.
+
+- Reload notification state owners together during development so hot updates cannot leave stale sync subscriptions active.
+
 ### Added
+
+- Show status icons and readable status labels for PRs in inferred stacks.
 
 - Show notification discovery loading on the page and bell badge, and settle empty history loads without implying complete relay coverage.
 
