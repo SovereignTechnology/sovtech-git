@@ -505,6 +505,25 @@ Locks, only windows with local edits publish automatically; a peer can explicitl
 retry to take over. If shared storage is unavailable, relay updates remain the
 source of cross-window publication evidence and duplicate suppression is best effort.
 
+The direct-access `/notifications/diagnostics` page shows a live list of saved
+versions, with signed event timestamps in UTC, observation times, short event IDs,
+per-window provenance, and restore actions. Full state opens in a modal. Same-origin
+windows share the IndexedDB journal but prefer their own observations when showing
+an event; independent browsers each retain their own history. Committed journal
+writes notify open pages without polling or additional relay queries.
+
+Only events received by the existing relay subscription are labelled as downloads,
+including older versions it supplies. Shared-window and cache hydration are labelled
+separately. Produced versions are recorded after durable outbox enqueue, not as an
+assertion of relay acknowledgement. The journal retains up to 100 snapshots per
+account, including local recovery checkpoints that are omitted from the version
+list. Legacy observations without reliable provenance are labelled as previously
+recorded. Clearing all browser storage removes this local history; replaced events
+that were never retained cannot be reconstructed. Explicit restore saves the current
+projection first, then queues the selected state through the same warm owner and
+five-second publication debounce. Merely opening the list or modal does not restore
+or publish anything. No Nostr schema changes are introduced.
+
 ## Repository selection state
 
 Private dashboard ordering is **convergent application state** with the same

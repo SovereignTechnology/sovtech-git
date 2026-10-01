@@ -8,6 +8,10 @@
 
 - Sync notification read/archive changes between open windows, including unread and unarchive reversals, and discard stale publish drafts when state changes during signing.
 
+### Added
+
+- Add a direct-access `/notifications/diagnostics` page with a live version list, UTC event and observation timestamps, per-window production/download provenance, restore actions, and full state in a modal. Keep a separate 100-snapshot recovery journal per account.
+
 ## [4.2.0] - 2026-10-01
 
 **Better discovery & reliable collaboration**

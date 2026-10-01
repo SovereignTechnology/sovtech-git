@@ -17,6 +17,7 @@ import { AppFooter } from "./components/AppFooter";
 import Index from "./pages/Index";
 import { LandingPage } from "./pages/LandingPage";
 import RepositoriesPage from "./pages/RepositoriesPage";
+import NotificationDiagnosticsPage from "./pages/NotificationDiagnosticsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import RelayPage from "./pages/RelayPage";
 import CICoordinatorPage from "./pages/CICoordinatorPage";
@@ -548,6 +549,10 @@ function AppRouter() {
             <Route path="/search" element={<RepositoriesPage />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/outbox" element={<OutboxPage />} />
+            <Route
+              path="/notifications/diagnostics"
+              element={<NotificationDiagnosticsPage />}
+            />
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Portable documentation redirects — these run in Netlify, static
                 builds, nsites, and native builds after the SPA fallback. */}

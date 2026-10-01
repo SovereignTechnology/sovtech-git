@@ -7,8 +7,8 @@
  * See docs/replaceable-preflight.md, "Notification-state adoption decision".
  */
 
+import { recordNotificationSnapshot } from "./notificationHistory";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { mapEventsToStore } from "applesauce-core";
 import type { Filter } from "applesauce-core/helpers";
 import { AppDataFactory } from "applesauce-common/factories";
 import {
@@ -675,6 +675,12 @@ export function startNotificationSync(
   let hasLocalChanges = false;
   let publishing = false;
   let lastPublishedEventId: string | null = null;
+  const relayObservations = new Map<
+    string,
+    { event: NostrEvent; receivedAt: number }
+  >();
+  const downloadedVersions = new Set<string>();
+  const peerVersions = new Set<string>();
   let ownerRevision = 0;
   let initialCacheHydration: Promise<void> = Promise.resolve();
   let bootstrapCacheCheckedRevision = -1;
@@ -801,8 +807,25 @@ export function startNotificationSync(
       retryCount: Infinity,
       onRelayLifecycle: (event) => nextCoverage.onLifecycle(event),
     })
-      .pipe(onlyEvents(), mapEventsToStore(eventStore))
-      .subscribe();
+      .pipe(onlyEvents())
+      .subscribe((event) => {
+        if (
+          event.kind === NIP78_KIND &&
+          event.pubkey === notificationPubkey &&
+          event.tags.some(
+            ([key, value]) => key === "d" && value === NOTIFICATION_STATE_D_TAG,
+          ) &&
+          !downloadedVersions.has(event.id) &&
+          !relayObservations.has(event.id) &&
+          verifyEvent(event)
+        ) {
+          relayObservations.set(event.id, { event, receivedAt: Date.now() });
+          if (relayObservations.size > 100)
+            relayObservations.delete(relayObservations.keys().next().value!);
+        }
+        eventStore.add(event);
+        requestReconcile();
+      });
     requestReconcile();
   };
 
@@ -869,6 +892,9 @@ export function startNotificationSync(
             ) &&
             verifyEvent(peer)
           ) {
+            peerVersions.add(peer.id);
+            if (peerVersions.size > 100)
+              peerVersions.delete(peerVersions.values().next().value!);
             eventStore.add(peer);
           }
         }
@@ -923,6 +949,13 @@ export function startNotificationSync(
       await outboxStore.publish(signed, notificationGroupIds(pubkey), {
         hidden: true,
       });
+      void recordNotificationSnapshot(
+        pubkey,
+        snapshot,
+        "Produced version",
+        signed.id,
+        { createdAt: signed.created_at },
+      );
       try {
         localStorage.setItem(
           `notifications_publication:${pubkey}`,
@@ -1095,6 +1128,35 @@ export function startNotificationSync(
       return;
     }
 
+    // Record actual network observations, even if the event is already in the
+    // cache or loses replacement ordering. Do not label cache/peer reads as downloads.
+    for (const [id, observation] of relayObservations) {
+      relayObservations.delete(id);
+      if (observation.event.pubkey !== notificationPubkey) continue;
+      try {
+        const state = await decryptStateEvent(
+          observation.event,
+          resolvedSigner.signer,
+        );
+        if (stopped || revision !== ownerRevision) return;
+        downloadedVersions.add(id);
+        if (downloadedVersions.size > 100)
+          downloadedVersions.delete(downloadedVersions.values().next().value!);
+        void recordNotificationSnapshot(
+          pubkey,
+          state,
+          "Downloaded version",
+          id,
+          {
+            createdAt: observation.event.created_at,
+            recordedAt: observation.receivedAt,
+          },
+        );
+      } catch {
+        // The winning state's normal decrypt path reports failures to the user.
+      }
+    }
+
     const assessment = assessCoverage(relayScope, activeCoverage);
     if (!assessment.met) {
       emitCoverageState("state", assessment);
@@ -1138,6 +1200,17 @@ export function startNotificationSync(
           requestReconcile();
           return;
         }
+        void recordNotificationSnapshot(
+          pubkey,
+          relayState,
+          downloadedVersions.has(latest.id)
+            ? "Downloaded version"
+            : peerVersions.has(latest.id)
+              ? "Other window version"
+              : "Cached version",
+          latest.id,
+          { createdAt: latest.created_at },
+        );
         baseState = relayState;
         appliedStateEventId = latest.id;
         const rebased = replayUpdates(baseState, pendingUpdates);

@@ -89,6 +89,7 @@ import {
   type NotificationSyncController,
 } from "./notificationSync";
 
+import { recordNotificationSnapshot } from "./notificationHistory";
 import { normalizeUrl } from "@/lib/url";
 
 // ---------------------------------------------------------------------------
@@ -243,9 +244,13 @@ export function acquireNotificationStore(
   const localState = loadFromLocalStorage(pubkey);
   const readState$ = new BehaviorSubject<NotificationReadState>(localState);
 
+  // Preserve the initial cache before a relay winner can replace it.
+  void recordNotificationSnapshot(pubkey, localState, "Loaded local cache");
+
   // Persist to localStorage on every change
   const localSub = readState$.subscribe((state) => {
     saveToLocalStorage(pubkey, state);
+    void recordNotificationSnapshot(pubkey, state, "Local projection");
   });
 
   // ---------------------------------------------------------------------------
@@ -299,6 +304,11 @@ export function acquireNotificationStore(
       notificationSync.enqueue(
         notificationStateDelta(change.before, change.after),
         true,
+      );
+      void recordNotificationSnapshot(
+        pubkey,
+        readState$.getValue(),
+        "Other window action",
       );
     } catch {
       // Clearing or corrupting storage is not an instruction to reset state.
