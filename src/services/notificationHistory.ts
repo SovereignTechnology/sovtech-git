@@ -117,14 +117,51 @@ export async function recordNotificationSnapshot(
             JSON.stringify(last.state) === JSON.stringify(snapshot.state)
           )
             return;
-          store.add(snapshot);
           changed = true;
-          // Retain a rolling, bounded journal independently for each account.
-          for (const record of records.slice(
-            0,
-            Math.max(0, records.length - 99),
-          )) {
-            if (record.id !== undefined) store.delete(record.id);
+          // Independent budgets: local activity cannot evict signed versions or
+          // the safety copies made before restoring. Bound observations within
+          // each version too, while preserving its original production record.
+          const all = [...records, snapshot];
+          const versions = [
+            ...new Set(
+              all
+                .filter((record) => record.eventId)
+                .sort(
+                  (a, b) =>
+                    (b.createdAt ?? b.recordedAt / 1000) -
+                    (a.createdAt ?? a.recordedAt / 1000),
+                )
+                .map((record) => record.eventId),
+            ),
+          ].slice(0, 100);
+          const keep = new Set<NotificationSnapshot>();
+          for (const id of versions) {
+            const observations = all.filter((record) => record.eventId === id);
+            const produced = observations.find(
+              (record) => record.source === "Produced version",
+            );
+            if (produced) keep.add(produced);
+            for (const observation of observations.slice(-12))
+              keep.add(observation);
+          }
+          for (const checkpoint of all
+            .filter(
+              (record) =>
+                !record.eventId && record.source !== "Before manual restore",
+            )
+            .slice(-50))
+            keep.add(checkpoint);
+          for (const backup of all
+            .filter(
+              (record) =>
+                !record.eventId && record.source === "Before manual restore",
+            )
+            .slice(-20))
+            keep.add(backup);
+          if (keep.has(snapshot)) store.add(snapshot);
+          for (const record of records) {
+            if (!keep.has(record) && record.id !== undefined)
+              store.delete(record.id);
           }
         };
         transaction.oncomplete = () => resolve();

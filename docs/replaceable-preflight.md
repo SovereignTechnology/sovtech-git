@@ -514,15 +514,17 @@ writes notify open pages without polling or additional relay queries.
 Only events received by the existing relay subscription are labelled as downloads,
 including older versions it supplies. Shared-window and cache hydration are labelled
 separately. Produced versions are recorded after durable outbox enqueue, not as an
-assertion of relay acknowledgement. The journal retains up to 100 snapshots per
-account, including local recovery checkpoints that are omitted from the version
-list. Legacy observations without reliable provenance are labelled as previously
+assertion of relay acknowledgement. The journal retains 100 distinct signed versions per account, independently of
+50 rolling local checkpoints and 20 pre-restore backups. Each signed version
+retains its original production observation and its 12 latest observations.
+A compact Local checkpoints switch exposes unsent state and pre-restore backups
+with the same view and restore controls. Explicit restore is a durable absolute
+replacement intent, so later relay hydration cannot change the selected snapshot. Legacy observations without reliable provenance are labelled as previously
 recorded. Clearing all browser storage removes this local history; replaced events
 that were never retained cannot be reconstructed. Explicit restore saves the current
 projection first, then queues the selected state through the same warm owner and
 five-second publication debounce. Merely opening the list or modal does not restore
-or publish anything. Restore persists an absolute replacement intent so relay
-hydration cannot change the selected snapshot. No Nostr schema changes are introduced.
+or publish anything. No Nostr schema changes are introduced.
 
 ## Repository selection state
 

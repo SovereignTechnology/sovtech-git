@@ -12,7 +12,7 @@
 
 ### Added
 
-- Add a direct-access `/notifications/diagnostics` page with a live version list, UTC event and observation timestamps, per-window production/download provenance, restore actions, and full state in a modal. Keep a separate 100-snapshot recovery journal per account.
+- Add a direct-access `/notifications/diagnostics` page with a live version list, UTC event and observation timestamps, per-window production/download provenance, restore actions, and full state in a modal. Retain 100 distinct signed versions independently from local checkpoints and pre-restore backups, available through a compact view switch.
 
 ## [4.2.0] - 2026-10-01
 

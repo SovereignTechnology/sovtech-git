@@ -39,6 +39,7 @@ function sourceLabel(snapshot: NotificationSnapshot): string {
     return here ? "Downloaded from relay" : "Relay download in another window";
   if (snapshot.source === "Other window version") return "From another window";
   if (snapshot.source === "Cached version") return "Loaded from cache";
+  if (!snapshot.eventId) return snapshot.source;
   // Older journal entries did not distinguish relay delivery from cache hydration.
   return "Previously recorded";
 }
@@ -69,6 +70,7 @@ function versions(snapshots: NotificationSnapshot[]): NotificationSnapshot[] {
 function AccountDiagnostics({ pubkey }: { pubkey: string }) {
   const [entry, setEntry] = useState<NotificationStoreEntry>();
   const [history, setHistory] = useState<NotificationSnapshot[]>();
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
   const [selected, setSelected] = useState<NotificationSnapshot>();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -82,8 +84,7 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
       const revision = ++readRevision;
       void readNotificationHistory(pubkey).then(
         (snapshots) => {
-          if (active && revision === readRevision)
-            setHistory(versions(snapshots));
+          if (active && revision === readRevision) setHistory(snapshots);
         },
         () => {
           if (active)
@@ -133,6 +134,12 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
     setBusy(false);
   };
 
+  const visible =
+    history &&
+    (showCheckpoints
+      ? history.filter((snapshot) => !snapshot.eventId)
+      : versions(history));
+
   return (
     <div className="container max-w-4xl py-8 space-y-6">
       <Link to="/notifications" className="underline underline-offset-4">
@@ -144,18 +151,35 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
           Updates live. All timestamps are UTC.
         </p>
       </div>
-      {!history ? (
+      <div className="flex gap-2" role="group" aria-label="Version type">
+        <Button
+          variant={showCheckpoints ? "outline" : "default"}
+          aria-pressed={!showCheckpoints}
+          onClick={() => setShowCheckpoints(false)}
+        >
+          Signed versions
+        </Button>
+        <Button
+          variant={showCheckpoints ? "default" : "outline"}
+          aria-pressed={showCheckpoints}
+          onClick={() => setShowCheckpoints(true)}
+        >
+          Local checkpoints
+        </Button>
+      </div>
+      {!visible ? (
         <Skeleton className="h-32 w-full" />
-      ) : history.length === 0 ? (
+      ) : visible.length === 0 ? (
         <p className="rounded-lg border border-dashed p-8 text-muted-foreground">
-          No saved versions yet. Versions appear when notification state is
-          produced or received.
+          {showCheckpoints
+            ? "No local checkpoints yet."
+            : "No saved versions yet. Versions appear when notification state is produced or received."}
         </p>
       ) : (
         <ul className="divide-y rounded-xl border">
-          {history.map((snapshot) => (
+          {visible.map((snapshot) => (
             <li
-              key={snapshot.eventId}
+              key={snapshot.eventId ?? snapshot.id}
               className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0 space-y-1">
@@ -168,13 +192,16 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
                     >
                       {utc(snapshot.createdAt * 1000).replace(".000", "")}
                     </time>
-                  ) : (
+                  ) : snapshot.eventId ? (
                     "Version timestamp unavailable"
+                  ) : (
+                    utc(snapshot.recordedAt)
                   )}
                 </p>
                 <p>{sourceLabel(snapshot)}</p>
                 <p className="text-sm text-muted-foreground tabular-nums">
-                  Seen {utc(snapshot.recordedAt)} ·{" "}
+                  Seen {utc(snapshot.recordedAt)}
+                  {snapshot.eventId && " · "}{" "}
                   <span className="font-mono">
                     {snapshot.eventId?.slice(0, 12)}
                   </span>
@@ -184,7 +211,7 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
                 <Button
                   variant="outline"
                   onClick={() => setSelected(snapshot)}
-                  aria-label={`View version ${snapshot.eventId?.slice(0, 12)}`}
+                  aria-label={`View version ${snapshot.eventId?.slice(0, 12) ?? `checkpoint ${snapshot.id}`}`}
                 >
                   View
                 </Button>
@@ -192,7 +219,7 @@ function AccountDiagnostics({ pubkey }: { pubkey: string }) {
                   variant="outline"
                   disabled={!entry || busy}
                   onClick={() => void restore(snapshot)}
-                  aria-label={`Restore version ${snapshot.eventId?.slice(0, 12)}`}
+                  aria-label={`Restore version ${snapshot.eventId?.slice(0, 12) ?? `checkpoint ${snapshot.id}`}`}
                 >
                   Restore
                 </Button>
