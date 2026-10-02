@@ -3,6 +3,13 @@
 Changes made by the fork. Upstream's changes are in `CHANGELOG.md`, which the
 fork never edits.
 
+## sovtech-v1.0.1 (2026-10-02)
+
+- The header and footer wordmark is the host in use (`git.sovtech.pro` or
+  `git.sovit.xyz`) rather than the fixed product name, split at the first dot
+  so the domain suffix keeps the brand colour. The header's home link
+  `aria-label` follows the host too.
+
 ## sovtech-v1.0.0 (2026-09-28)
 
 - Fork created from upstream `420c0c3d` (v4.1.0 plus 31 commits).

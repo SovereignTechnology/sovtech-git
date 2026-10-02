@@ -169,6 +169,14 @@ export function AppHeader() {
   const activeAccount = useActiveAccount();
   const [createRepoOpen, setCreateRepoOpen] = useState(false);
 
+  // The app is served on two names (git.sovtech.pro and git.sovit.xyz) from one
+  // web root, so the wordmark is the host actually in use, not a fixed product
+  // name. Split at the first dot so the domain suffix keeps the brand colour.
+  const host = window.location.hostname;
+  const dot = host.indexOf(".");
+  const hostLabel = dot > 0 ? host.slice(0, dot) : host;
+  const hostSuffix = dot > 0 ? host.slice(dot) : "";
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <a
@@ -184,7 +192,7 @@ export function AppHeader() {
       <div className="container flex h-14 max-w-screen-xl items-center px-4 md:px-8">
         <Link
           to="/"
-          aria-label="SovTech Git home"
+          aria-label={`${host} home`}
           className={cn(
             "flex shrink-0 items-center gap-2 rounded-md transition-opacity duration-150 ease-out hover:opacity-80",
             FOCUS_RING,
@@ -194,7 +202,8 @@ export function AppHeader() {
             <BrandMark className="h-5 w-5" />
           </span>
           <span className="hidden font-mono text-base font-bold tracking-tight sm:inline">
-            SovTech<span className="text-brand"> Git</span>
+            {hostLabel}
+            <span className="text-brand">{hostSuffix}</span>
           </span>
         </Link>
 

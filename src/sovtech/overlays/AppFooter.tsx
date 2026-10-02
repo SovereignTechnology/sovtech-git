@@ -115,6 +115,13 @@ function FooterNavLink({ link }: { link: FooterLink }) {
 export function AppFooter() {
   const mode = use$(themeMode);
 
+  // Same host-in-use wordmark as the header (see AppHeader): both names share
+  // one web root, so the brand line is the host actually being served.
+  const host = window.location.hostname;
+  const dot = host.indexOf(".");
+  const hostLabel = dot > 0 ? host.slice(0, dot) : host;
+  const hostSuffix = dot > 0 ? host.slice(dot) : "";
+
   return (
     <footer className="mt-24 border-t border-border/40 bg-muted/30">
       <div className="container max-w-screen-xl px-4 md:px-8">
@@ -132,7 +139,8 @@ export function AppFooter() {
                 <BrandMark className="h-4 w-4" />
               </span>
               <span className="font-mono text-sm font-bold tracking-tight">
-                SovTech<span className="text-brand"> Git</span>
+                {hostLabel}
+                <span className="text-brand">{hostSuffix}</span>
               </span>
             </Link>
             <p className="max-w-xs text-sm text-muted-foreground">{TAGLINE}</p>
