@@ -337,7 +337,7 @@ Purpose: the source of `public/og-image.png`, which is 1200×630 and listed in `
   - Top left: `git.sovtech.pro`, mono 24px, `#F7931A`.
   - The hero at y≈170: "Your keys." in `#FAFAFA` and "Your code." in `#F7931A`, mono 88px bold, line-height 1.1, letter-spacing -2px.
   - Below it: "Git collaboration over Nostr, run from El Salvador.", Inter 30px, `#A3A3A3`.
-  - Bottom left: a 56px `#F7931A` rounded tile with a `#0A0A0A` BrandMark, then "SovTech" in `#FAFAFA` and " Git" in `#F7931A`, mono 40px bold.
+  - Bottom left: a 56px `#F7931A` rounded tile with a `#0A0A0A` BrandMark, then "git" in `#FAFAFA` and ".sovtech.pro" in `#F7931A`, mono 40px bold.
   - Bottom right: "NIP-34 · GRASP · ngit", mono 22px, `#8A8A8A`.
   - Every text colour is at least 5.7:1 on `#0A0A0A` (`#8A8A8A` is 5.73:1).
 - Drops the purple/pink palette, the GitWorkshop wordmark, "powered by Git & Nostr" and the preview outline.
