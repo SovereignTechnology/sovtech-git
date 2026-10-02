@@ -1,5 +1,5 @@
 /**
- * SovTech Git's About page. It shadows src/pages/About.tsx through
+ * git.sovtech.pro's About page. It shadows src/pages/About.tsx through
  * ci/sovtech/shadow-map.tsv: honest lineage, the licence, the protocol in
  * brief and where feedback goes. Upstream's essay stays in upstream's source.
  *
@@ -24,7 +24,7 @@ import {
 Reflect.set(globalThis, Symbol.for("sovtech.overlay.About"), true);
 
 const DESCRIPTION =
-  "SovTech Git is Sovereign Technology's fork of gitworkshop, a git-over-Nostr web client: lineage, licence and feedback.";
+  "git.sovtech.pro is Sovereign Technology's fork of gitworkshop, a git-over-Nostr web client: lineage, licence and feedback.";
 
 const PROSE = "prose prose-neutral dark:prose-invert max-w-none mt-4";
 const H2 = "scroll-mt-20 font-mono text-2xl font-bold tracking-tight mt-12";
@@ -76,12 +76,12 @@ export default function About() {
   return (
     <div className="container max-w-screen-md px-4 md:px-8 py-16">
       <h1 className="font-mono text-3xl md:text-4xl font-bold tracking-tight">
-        About SovTech Git
+        About git.sovtech.pro
       </h1>
       <div className={PROSE}>
         <p className="lead">
           {
-            "SovTech Git is Sovereign Technology's build of gitworkshop, the git-over-Nostr web client by DanConwayDev."
+            "git.sovtech.pro is Sovereign Technology's build of gitworkshop, the git-over-Nostr web client by DanConwayDev."
           }
         </p>
       </div>
@@ -130,7 +130,7 @@ export default function About() {
       </h2>
       <div className={PROSE}>
         <p>
-          {"SovTech Git is built on "}
+          {"git.sovtech.pro is built on "}
           <a href={NIP34_URL} className={LINK}>
             NIP-34
           </a>
@@ -169,7 +169,7 @@ export default function About() {
         </h2>
         <p className="mt-2 text-muted-foreground">
           {
-            "Found a bug, or something we changed that you don't like? Open an issue on the SovTech Git repository over Nostr."
+            "Found a bug, or something we changed that you don't like? Open an issue on the git.sovtech.pro repository over Nostr."
           }
         </p>
         <div className="mt-4 flex flex-wrap gap-3">

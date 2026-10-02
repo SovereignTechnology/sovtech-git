@@ -1,5 +1,5 @@
 /**
- * SovTech Git defaults: the relay, GRASP and host lists the fork ships in
+ * git.sovtech.pro defaults: the relay, GRASP and host lists the fork ships in
  * place of upstream's.
  *
  * Upstream modules import these at small seams (listed in
@@ -21,7 +21,7 @@
  * with every other NIP-34 client:
  *   - the git index relay (wss://index.ngit.dev), where ngit and other
  *     clients find repository announcements, so repositories published from
- *     SovTech Git stay discoverable everywhere;
+ *     git.sovtech.pro stay discoverable everywhere;
  *   - the lookup relays, where profiles and relay lists are indexed;
  *   - the Blossom servers (src/lib/blossom.ts) and the CORS proxy
  *     (src/lib/git-grasp-pool/cors-proxy.ts), so media and git data hosted
@@ -78,7 +78,7 @@ export const BOOTSTRAP_RELAYS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Hosts that serve SovTech Git. Links to them are recognised alongside
+ * Hosts that serve git.sovtech.pro. Links to them are recognised alongside
  * upstream's own host, which stays recognised too.
  */
 export const WEB_HOSTS: readonly string[] = Object.freeze([
@@ -86,7 +86,7 @@ export const WEB_HOSTS: readonly string[] = Object.freeze([
   "git.sovit.xyz",
 ]);
 
-/** Whether a host name (any case, no port) is one that serves SovTech Git. */
+/** Whether a host name (any case, no port) is one that serves git.sovtech.pro. */
 export function isSovtechWebHost(host: string | undefined): boolean {
   return host !== undefined && WEB_HOSTS.includes(host.toLowerCase());
 }

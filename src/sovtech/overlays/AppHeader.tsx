@@ -1,5 +1,5 @@
 /**
- * SovTech Git's header. It shadows src/components/AppHeader.tsx through
+ * git.sovtech.pro's header. It shadows src/components/AppHeader.tsx through
  * ci/sovtech/shadow-map.tsv and keeps upstream's controls: search, New
  * repository, notifications, Settings and the login area. It adds a skip
  * link, the SovTech mark and wordmark, and a link to www.sovtech.pro.

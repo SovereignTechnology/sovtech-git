@@ -1,5 +1,5 @@
 /**
- * The SovTech Git overlay engine: one Vite plugin that re-brands upstream at
+ * The git.sovtech.pro overlay engine: one Vite plugin that re-brands upstream at
  * build time, so upstream files stay untouched outside the listed seams.
  *
  * - config: the app name define and hidden source maps.
@@ -21,7 +21,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
-export const APP_NAME = "SovTech Git";
+export const APP_NAME = "git.sovtech.pro";
 export const SITE_URL = "https://git.sovtech.pro";
 
 /** The engine's own sentinel, appended to the app entry. */
@@ -105,28 +105,28 @@ export const EXACT_RULES: ExactRule[] = [
     id: "merge-panel-servers",
     file: "src/components/MergePanel.tsx",
     find: "so gitworkshop can't safely update",
-    replacement: "so SovTech Git can't safely update",
+    replacement: "so git.sovtech.pro can't safely update",
     count: 1,
   },
   {
     id: "merge-panel-direct",
     file: "src/components/MergePanel.tsx",
     find: "merging directly from gitworkshop isn't supported",
-    replacement: "merging directly from SovTech Git isn't supported",
+    replacement: "merging directly from git.sovtech.pro isn't supported",
     count: 1,
   },
   {
     id: "nwc-app-name",
     file: "src/components/zap/NwcQrConnect.tsx",
     find: 'appName = "gitworkshop",',
-    replacement: 'appName = "SovTech Git",',
+    replacement: 'appName = "git.sovtech.pro",',
     count: 1,
   },
   {
     id: "zap-app-name",
     file: "src/components/zap/ZapModal.tsx",
     find: 'appName="gitworkshop zap"',
-    replacement: 'appName="SovTech Git zap"',
+    replacement: 'appName="git.sovtech.pro zap"',
     count: 1,
   },
   {
@@ -376,9 +376,9 @@ export function withAuditedMark(code: string): string {
 
 // ------------------------------------------------------------ index.html ---
 
-const INDEX_TITLE = "SovTech Git — Decentralized Git over Nostr";
+const INDEX_TITLE = "git.sovtech.pro — Decentralized Git over Nostr";
 const INDEX_DESCRIPTION = [
-  "SovTech Git is Sovereign Technology's decentralized Git client over Nostr:",
+  "git.sovtech.pro is Sovereign Technology's decentralized Git client over Nostr:",
   "browse repositories, manage issues and collaborate on pull requests.",
 ].join(" ");
 const OG_IMAGE = `${SITE_URL}/og-image.png`;

@@ -1,5 +1,5 @@
 /**
- * SovTech Git's 404. It shadows src/pages/NotFound.tsx through
+ * git.sovtech.pro's 404. It shadows src/pages/NotFound.tsx through
  * ci/sovtech/shadow-map.tsv. NIP19Page, CICoordinatorPage, CIProviderPage,
  * RelayPage and RepoCoordinatorsPage also render it for bad identifiers, so
  * the copy stays generic.

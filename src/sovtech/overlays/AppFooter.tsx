@@ -1,5 +1,5 @@
 /**
- * SovTech Git's footer. It shadows src/components/AppFooter.tsx through
+ * git.sovtech.pro's footer. It shadows src/components/AppFooter.tsx through
  * ci/sovtech/shadow-map.tsv: the site map, the theme choice, provenance and
  * the build identity, built exactly as upstream builds it.
  */

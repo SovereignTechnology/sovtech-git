@@ -1,5 +1,5 @@
 /**
- * SovTech Git's additions to Tailwind's theme. tailwind.config.ts (an upstream
+ * git.sovtech.pro's additions to Tailwind's theme. tailwind.config.ts (an upstream
  * seam) spreads them into `theme.extend`.
  *
  * - `pink`: upstream's accent is written as literal pink-* classes, so the

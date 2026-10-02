@@ -115,20 +115,20 @@ function metaOf(tags: Tag[], key: string): string | undefined {
 describe("rebrandTitle", () => {
   it("replaces the ngit suffix and keeps its separator", () => {
     const branches = rebrandTitle("Branches - demo - ngit");
-    expect(branches).toBe("Branches - demo - SovTech Git");
-    expect(rebrandTitle("About — ngit")).toBe("About — SovTech Git");
+    expect(branches).toBe("Branches - demo - git.sovtech.pro");
+    expect(rebrandTitle("About — ngit")).toBe("About — git.sovtech.pro");
   });
 
   it("replaces the landing page's ngit prefix", () => {
     const landing = rebrandTitle("ngit — Decentralized Git over Nostr");
-    expect(landing).toBe("SovTech Git — Decentralized Git over Nostr");
+    expect(landing).toBe("git.sovtech.pro — Decentralized Git over Nostr");
   });
 
   it("leaves other mentions of ngit alone", () => {
     expect(rebrandTitle("Install ngit")).toBe("Install ngit");
-    expect(rebrandTitle("ngit - ngit")).toBe("ngit - SovTech Git");
+    expect(rebrandTitle("ngit - ngit")).toBe("ngit - git.sovtech.pro");
     const subject = rebrandTitle("ngit — fix it - ngit");
-    expect(subject).toBe("ngit — fix it - SovTech Git");
+    expect(subject).toBe("ngit — fix it - git.sovtech.pro");
     expect(rebrandTitle("ngit-tools - about")).toBe("ngit-tools - about");
   });
 });
@@ -138,8 +138,8 @@ describe("sovtechTitlePlugin", () => {
     const head = makeHead();
     head.push({ title: "Issues - demo - ngit" });
     const tags = await head.resolveTags();
-    expect(titleOf(tags)).toBe("Issues - demo - SovTech Git");
-    expect(metaOf(tags, "og:title")).toBe("Issues - demo - SovTech Git");
+    expect(titleOf(tags)).toBe("Issues - demo - git.sovtech.pro");
+    expect(metaOf(tags, "og:title")).toBe("Issues - demo - git.sovtech.pro");
   });
 
   it("rewrites the social title and image-alt copies", async () => {
@@ -155,10 +155,10 @@ describe("sovtechTitlePlugin", () => {
       ],
     });
     const tags = await head.resolveTags();
-    const branded = "SovTech Git — Decentralized Git over Nostr";
+    const branded = "git.sovtech.pro — Decentralized Git over Nostr";
     expect(titleOf(tags)).toBe(branded);
     expect(metaOf(tags, "og:title")).toBe(branded);
-    expect(metaOf(tags, "twitter:title")).toBe("PRs - demo - SovTech Git");
+    expect(metaOf(tags, "twitter:title")).toBe("PRs - demo - git.sovtech.pro");
     expect(metaOf(tags, "og:image:alt")).toBe(branded);
     expect(metaOf(tags, "twitter:image:alt")).toBe(branded);
     expect(metaOf(tags, "description")).toBe(landing);

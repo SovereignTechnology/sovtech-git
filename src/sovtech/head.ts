@@ -9,7 +9,7 @@ import { defineHeadPlugin } from "@unhead/react/plugins";
 
 Reflect.set(globalThis, Symbol.for("sovtech-overlay:head"), true);
 
-const APP_NAME = "SovTech Git";
+const APP_NAME = "git.sovtech.pro";
 
 /** " - ngit" or " — ngit" at the end, keeping the separator. */
 const SUFFIX = / ([-—]) ngit$/;

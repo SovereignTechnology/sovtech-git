@@ -185,7 +185,7 @@ export default function OgImagePreview() {
               <BrandMark className="h-9 w-9" />
             </div>
             <div style={wordmark}>
-              SovTech<span style={{ color: ORANGE }}> Git</span>
+              git<span style={{ color: ORANGE }}>.sovtech.pro</span>
             </div>
           </div>
           <div style={tags}>NIP-34 · GRASP · ngit</div>

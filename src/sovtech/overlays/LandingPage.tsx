@@ -1,5 +1,5 @@
 /**
- * SovTech Git's landing page, shown to logged-out visitors on the root route.
+ * git.sovtech.pro's landing page, shown to logged-out visitors on the root route.
  * It shadows src/pages/LandingPage.tsx through ci/sovtech/shadow-map.tsv and
  * sets no head tags: Index.tsx is not shadowed and owns them.
  *
@@ -9,7 +9,7 @@
  *      (hidden when there are none)
  *   3. Live on the network: upstream's featured strip
  *   4. How it works: three steps
- *   5. Why SovTech Git: six tiles
+ *   5. Why git.sovtech.pro: six tiles
  *   6. Closing CTA
  */
 
@@ -412,7 +412,7 @@ function HowItWorks() {
 }
 
 // ---------------------------------------------------------------------------
-// Why SovTech Git
+// Why git.sovtech.pro
 // ---------------------------------------------------------------------------
 
 const FEATURES = [
@@ -460,7 +460,7 @@ function FeatureHighlights() {
       <div className={CONTAINER}>
         <div className="text-center mb-12">
           <h2 id="why-sovtech-git" className={H2}>
-            Why SovTech Git
+            Why git.sovtech.pro
           </h2>
           <p className="mt-2 text-muted-foreground">
             Git that answers to its owners, not to a platform.
@@ -580,7 +580,7 @@ export function LandingPage() {
 
             <p className="mt-6 text-lg md:text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
               {
-                "SovTech Git is a web client for git collaboration over Nostr and "
+                "git.sovtech.pro is a web client for git collaboration over Nostr and "
               }
               <a href={DOCUMENTATION_URLS.grasp} className={TEXT_LINK}>
                 GRASP
@@ -648,7 +648,7 @@ export function LandingPage() {
       {/* How it works */}
       <HowItWorks />
 
-      {/* Why SovTech Git */}
+      {/* Why git.sovtech.pro */}
       <FeatureHighlights />
 
       {/* Closing CTA */}

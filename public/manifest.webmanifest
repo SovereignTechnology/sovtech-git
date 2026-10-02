@@ -1,6 +1,6 @@
 {
-  "name": "SovTech Git",
-  "short_name": "SovTech Git",
+  "name": "git.sovtech.pro",
+  "short_name": "git.sovtech.pro",
   "description": "Decentralized Git over Nostr, from Sovereign Technology",
   "start_url": "/",
   "display": "standalone",

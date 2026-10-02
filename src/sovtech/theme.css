@@ -1,5 +1,5 @@
 /*
- * SovTech Git theme: www.sovtech.pro orange #F7931A on #0A0A0A.
+ * git.sovtech.pro theme: www.sovtech.pro orange #F7931A on #0A0A0A.
  *
  * src/main.tsx imports this file after src/index.css and the Inter font, so
  * its rules win over upstream's palette at equal specificity. It is plain CSS

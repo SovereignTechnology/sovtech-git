@@ -70,8 +70,8 @@ function metaContent(doc: Document, selector: string): string | null {
 
 describe("app name define", () => {
   it("resolves the __APP_NAME__ define from vite.config.ts", () => {
-    expect(__APP_NAME__).toBe("SovTech Git");
-    expect(RUNTIME_APP_NAME).toBe("SovTech Git");
+    expect(__APP_NAME__).toBe("git.sovtech.pro");
+    expect(RUNTIME_APP_NAME).toBe("git.sovtech.pro");
   });
 });
 
@@ -95,11 +95,11 @@ describe("rewriteSource", () => {
       "const brand = 'GitWorkshop.dev';",
     ].join("\n");
     const result = rewriteSource(code, EXAMPLE);
-    expect(result.code).toContain('alt="SovTech Git"');
+    expect(result.code).toContain('alt="git.sovtech.pro"');
     expect(result.code).toContain("`https://git.sovtech.pro/${nip19Id}`");
     expect(result.code).toContain('href="https://git.sovtech.pro"');
     expect(result.code).toContain('label="git.sovtech.pro"');
-    expect(result.code).toContain("const brand = 'SovTech Git';");
+    expect(result.code).toContain("const brand = 'git.sovtech.pro';");
     expect(result.code).not.toMatch(/gitworkshop/i);
     expect(result.hits.get("url")).toBe(2);
     expect(result.hits.get("copy-label")).toBe(1);
@@ -468,7 +468,7 @@ describe("rebrandIndexHtml", () => {
   });
 
   it("replaces all four %APP_NAME% tokens and the titles", () => {
-    const title = "SovTech Git — Decentralized Git over Nostr";
+    const title = "git.sovtech.pro — Decentralized Git over Nostr";
     expect(upstream.split("%APP_NAME%")).toHaveLength(5);
     expect(html).not.toContain("%APP_NAME%");
     expect(doc.title).toBe(title);
@@ -477,15 +477,15 @@ describe("rebrandIndexHtml", () => {
     expect(metaContent(doc, 'name="twitter:image:alt"')).toBe(title);
   });
 
-  it("describes SovTech Git in the description metas", () => {
+  it("describes git.sovtech.pro in the description metas", () => {
     const description = metaContent(doc, 'name="description"');
-    expect(description).toMatch(/^SovTech Git is Sovereign Technology's/);
+    expect(description).toMatch(/^git\.sovtech\.pro is Sovereign Technology's/);
     expect(metaContent(doc, 'property="og:description"')).toBe(description);
   });
 
   it("brands the splash in SovTech colours", () => {
     const name = doc.querySelector(".splash-name")?.textContent;
-    expect(name).toBe("SovTech Git");
+    expect(name).toBe("git.sovtech.pro");
     expect(html).toContain("background: #0A0A0A;");
     expect(html).toContain("border-top-color: #F7931A;");
     expect(html).not.toMatch(/#16171e|#ff79c6/i);
@@ -518,9 +518,9 @@ describe("manifest", () => {
     expect(JSON.parse(MANIFEST_JSON)).toEqual(SOVTECH_MANIFEST);
   });
 
-  it("names SovTech Git and keeps upstream's icon files", () => {
-    expect(SOVTECH_MANIFEST.name).toBe("SovTech Git");
-    expect(SOVTECH_MANIFEST.short_name).toBe("SovTech Git");
+  it("names git.sovtech.pro and keeps upstream's icon files", () => {
+    expect(SOVTECH_MANIFEST.name).toBe("git.sovtech.pro");
+    expect(SOVTECH_MANIFEST.short_name).toBe("git.sovtech.pro");
     expect(SOVTECH_MANIFEST.theme_color).toBe("#0A0A0A");
     expect(SOVTECH_MANIFEST.background_color).toBe("#0A0A0A");
     expect(SOVTECH_MANIFEST.icons).toHaveLength(4);

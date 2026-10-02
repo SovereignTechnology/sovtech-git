@@ -3,6 +3,14 @@
 Changes made by the fork. Upstream's changes are in `CHANGELOG.md`, which the
 fork never edits.
 
+## sovtech-v1.0.2 (2026-10-02)
+
+- Everywhere the app named the product "SovTech Git" it now reads
+  `git.sovtech.pro`: the page title and social metas, the PWA manifest, the
+  About and landing copy, the merge-panel and zap strings, the OG image, and
+  the fork tests that pin them. The header and footer wordmark already show
+  the host in use (v1.0.1).
+
 ## sovtech-v1.0.1 (2026-10-02)
 
 - The header and footer wordmark is the host in use (`git.sovtech.pro` or

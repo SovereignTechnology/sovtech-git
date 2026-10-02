@@ -11,7 +11,7 @@ import { nip19 } from "nostr-tools";
 export const SOVTECH_PUBKEY =
   "83d8bce2f7d6966f306e6f1a712497cf0a2c77d073923136a0e2bb54963b3434";
 
-/** The d-tag of SovTech Git's own repository announcement. */
+/** The d-tag of git.sovtech.pro's own repository announcement. */
 export const SOVTECH_GIT_IDENTIFIER = "sovtech-git";
 
 /**
@@ -32,7 +32,7 @@ export const SOVTECH_GIT_NADDR = nip19.naddrEncode({
   relays: [...SOVTECH_GIT_RELAYS],
 });
 
-/** SovTech Git's repository and its issues, in this app. */
+/** git.sovtech.pro's repository and its issues, in this app. */
 export const SOVTECH_GIT_PATH = `/${SOVTECH_GIT_NADDR}`;
 export const SOVTECH_GIT_ISSUES_PATH = `/${SOVTECH_GIT_NADDR}/issues`;
 
