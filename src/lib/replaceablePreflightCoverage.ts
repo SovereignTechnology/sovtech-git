@@ -231,19 +231,23 @@ export function mailboxOutboxesObservable(
 export function summarizeRelayCoveragePhases(
   coverage: RelaySubscriptionCoverage,
   relays: readonly string[],
+  options: { includeRelays?: boolean } = {},
 ): string {
   type Status =
     | RelayCoveragePhase
     | NonNullable<RelayCoverageState["reason"]>
     | "not-checked";
-  const counts = new Map<Status, number>();
-  for (const relay of relays) {
-    const state = coverage.get(normalizeUrl(relay));
+  const groups = new Map<Status, string[]>();
+  const normalizedRelays = [...new Set(relays.map(normalizeUrl))];
+  for (const relay of normalizedRelays) {
+    const state = coverage.get(relay);
     const phase =
       state?.phase === "unavailable" && state.reason
         ? state.reason
         : (state?.phase ?? "not-checked");
-    counts.set(phase, (counts.get(phase) ?? 0) + 1);
+    const group = groups.get(phase) ?? [];
+    group.push(relay);
+    groups.set(phase, group);
   }
   const labels: Record<Status, string> = {
     initial: "pending",
@@ -260,8 +264,12 @@ export function summarizeRelayCoveragePhases(
     closed: "recovering after closure",
     error: "recovering after an error",
   };
-  return [...counts]
-    .map(([phase, count]) => `${count} ${labels[phase]}`)
+  return [...groups]
+    .map(([phase, group]) =>
+      options.includeRelays
+        ? `${group.length} of ${normalizedRelays.length} ${labels[phase]} (${group.join(", ")})`
+        : `${group.length} ${labels[phase]}`,
+    )
     .join(", ");
 }
 

@@ -1404,7 +1404,9 @@ export function MergePanel({
             {/* Error details */}
             {mergeStep === "failed" && mergeError && !pushDelivery && (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                <p role="alert">{mergeError}</p>
+                <p role="alert" className="break-words">
+                  {mergeError}
+                </p>
                 {statePublishDelivery && (
                   <div className="mt-2 space-y-2 text-xs">
                     <p className="break-all text-muted-foreground">
@@ -1972,7 +1974,7 @@ function StatusHeadline({
     case "error":
       return (
         <div>
-          <p className="text-sm text-amber-600">
+          <p className="break-words text-sm text-amber-600">
             Could not determine mergeability
             {mergeError ? `: ${mergeError}` : ""}
           </p>

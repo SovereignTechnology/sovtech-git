@@ -411,13 +411,14 @@ export function useRepositoryReplaceablePreflight(
           summary: summarizeRelayCoveragePhases(
             current.coverage,
             current.repositoryRelays,
+            { includeRelays: true },
           ),
         }),
         changes: (current) =>
           merge(current.coverage.changes$, resolvedRevision$.pipe(skip(1))),
         error: (assessment) =>
           new Error(
-            `Couldn't finish checking ${candidateId ? "whether the current repository announcement or state was deleted" : "the latest repository announcement and state"}. Relay checks: ${assessment.summary}. Retry to check again.`,
+            `Couldn't finish checking ${candidateId ? "whether the current repository announcement or state was deleted" : "the latest repository announcement and state"}. Repository relay checks: ${assessment.summary}. Retry to check again.`,
           ),
       });
       return {
