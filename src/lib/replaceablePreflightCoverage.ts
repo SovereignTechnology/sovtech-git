@@ -22,6 +22,7 @@ export interface PreflightCoverageAssessment {
   met: boolean;
   possible: boolean;
   summary: string;
+  relayCoverage?: RelayCoverageGroup[];
 }
 
 export interface WaitForCoverageDecisionOptions<T> {
@@ -62,6 +63,17 @@ export interface RelayCoverageDetail {
 export interface RelayCoverageGroup {
   label: string;
   relays: RelayCoverageDetail[];
+}
+
+/** Keep the failed query's relay facts attached as they cross async callers. */
+export class RelayCoverageError extends Error {
+  constructor(
+    message: string,
+    readonly relayCoverage: RelayCoverageGroup[],
+  ) {
+    super(message);
+    this.name = "RelayCoverageError";
+  }
 }
 
 const RELAY_STATUS_LABELS: Record<RelayPreflightStatus, string> = {
@@ -231,7 +243,7 @@ export function mailboxOutboxesObservable(
 export function summarizeRelayCoveragePhases(
   coverage: RelaySubscriptionCoverage,
   relays: readonly string[],
-  options: { includeRelays?: boolean } = {},
+  options: { includeTotal?: boolean } = {},
 ): string {
   type Status =
     | RelayCoveragePhase
@@ -266,8 +278,8 @@ export function summarizeRelayCoveragePhases(
   };
   return [...groups]
     .map(([phase, group]) =>
-      options.includeRelays
-        ? `${group.length} of ${normalizedRelays.length} ${labels[phase]} (${group.join(", ")})`
+      options.includeTotal
+        ? `${group.length} of ${normalizedRelays.length} ${labels[phase]}`
         : `${group.length} ${labels[phase]}`,
     )
     .join(", ");

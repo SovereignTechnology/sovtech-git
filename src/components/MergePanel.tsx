@@ -1,5 +1,10 @@
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { ManualRetryAction } from "@/components/ErrorRetryAction";
+import { RelayCoveragePopover } from "@/components/RelayCoveragePopover";
+import {
+  RelayCoverageError,
+  type RelayCoverageGroup,
+} from "@/lib/replaceablePreflightCoverage";
 /**
  * MergePanel — merge/apply button and status panel for PRs on Grasp repos.
  *
@@ -318,6 +323,9 @@ export function MergePanel({
   // Merge step tracking
   const [mergeStep, setMergeStep] = useState<MergeStep>("idle");
   const [mergeError, setMergeError] = useState<string | null>(null);
+  const [mergeRelayCoverage, setMergeRelayCoverage] = useState<
+    RelayCoverageGroup[]
+  >([]);
   const [pushDelivery, setPushDelivery] = useState<PushDeliverySummary | null>(
     null,
   );
@@ -572,6 +580,9 @@ export function MergePanel({
       const message = err instanceof Error ? err.message : fallbackMessage;
       setMergeStep("failed");
       setMergeError(message);
+      setMergeRelayCoverage(
+        err instanceof RelayCoverageError ? err.relayCoverage : [],
+      );
       toast({ title, description: message, variant: "destructive" });
     },
     [toast],
@@ -1407,6 +1418,12 @@ export function MergePanel({
                 <p role="alert" className="break-words">
                   {mergeError}
                 </p>
+                <RelayCoveragePopover
+                  groups={mergeRelayCoverage}
+                  className="my-2 text-foreground"
+                  align="start"
+                  description="Status at the failed check. At least one repository relay must finish answering. Retry to check again."
+                />
                 {statePublishDelivery && (
                   <div className="mt-2 space-y-2 text-xs">
                     <p className="break-all text-muted-foreground">

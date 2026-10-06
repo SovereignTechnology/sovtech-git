@@ -51,12 +51,16 @@ function statusClass(detail: RelayCoverageDetail): string {
 export interface RelayCoveragePopoverProps {
   groups: readonly RelayCoverageGroup[];
   className?: string;
+  description?: string;
+  align?: "start" | "center" | "end";
 }
 
 /** Small reusable diagnostic for a preflight surface with structured facts. */
 export function RelayCoveragePopover({
   groups,
   className,
+  description = "A write proceeds only when this feature's relay threshold is met.",
+  align = "end",
 }: RelayCoveragePopoverProps) {
   const visibleGroups = groups.filter((group) => group.relays.length > 0);
   if (visibleGroups.length === 0) return null;
@@ -75,15 +79,14 @@ export function RelayCoveragePopover({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        align={align}
+        collisionPadding={16}
         className="w-[min(22rem,calc(100vw-2rem))] p-0"
         aria-label="Relay check details"
       >
         <div className="border-b px-4 py-3">
           <p className="text-sm font-medium">Relay check details</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            A write proceeds only when this feature's relay threshold is met.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
         <div className="max-h-72 space-y-4 overflow-y-auto p-4">
           {visibleGroups.map((group) => (
