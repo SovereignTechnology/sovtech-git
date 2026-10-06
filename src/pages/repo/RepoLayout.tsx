@@ -1269,7 +1269,7 @@ function PrivateRepositoryUnavailable({ reason }: { reason?: string }) {
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
         <AlertCircle className="mx-auto h-8 w-8 text-amber-600 dark:text-amber-400" />
         <h2 className="mt-4 text-xl font-semibold">
-          Private repository unavailable
+          Repository discovery unavailable
         </h2>
         <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
           {reason ??

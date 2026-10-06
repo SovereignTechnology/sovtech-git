@@ -55,6 +55,7 @@ import {
   beginPrivateRelayTrustSession,
   clearPrivateRepositoryScope,
   markPrivateRelayEvent,
+  markPrivateRepositoryCoordinate,
   privateRepositoryScopeRevision$,
 } from "@/services/privateRepositoryScope";
 import { usePrivateRepositoryProbe } from "./usePrivateRepositoryProbe";
@@ -84,8 +85,14 @@ function announcement(key: Uint8Array, maintainers: string[], time = 1) {
   );
 }
 
-function Probe({ pubkey = owner }: { pubkey?: string }) {
-  const state = usePrivateRepositoryProbe(pubkey, "repo", hints);
+function Probe({
+  pubkey = owner,
+  relayHints = hints,
+}: {
+  pubkey?: string;
+  relayHints?: string[];
+}) {
+  const state = usePrivateRepositoryProbe(pubkey, "repo", relayHints);
   statuses.push(state?.status ?? "undefined");
   return (
     <>
@@ -233,3 +240,51 @@ it("invalidates a found result when refresh fails", async () => {
   );
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 });
+
+it("automatically admits public discovery when an unrelated private service is offline", async () => {
+  mocks.classify.mockResolvedValue(false);
+  mocks.snapshot.mockResolvedValue({ complete: false, events: [] });
+  render(<Probe relayHints={["wss://public.example/"]} />);
+  await waitFor(() =>
+    expect(screen.getByTestId("status").textContent).toBe("absent: "),
+  );
+  expect(mocks.snapshot).toHaveBeenCalledWith(
+    expect.anything(),
+    "wss://private.example",
+    [{ kinds: [30617], authors: [owner], "#d": ["repo"] }],
+    expect.any(Number),
+  );
+});
+
+it.each([
+  "listed hint",
+  "classified hint",
+  "known coordinate",
+  "partial announcement",
+])(
+  "keeps public discovery blocked after an outage with %s evidence",
+  async (evidence) => {
+    mocks.classify.mockResolvedValue(evidence === "classified hint");
+    mocks.snapshot.mockResolvedValue({
+      complete: false,
+      events:
+        evidence === "partial announcement"
+          ? [announcement(ownerKey, [owner])]
+          : [],
+    });
+    if (evidence === "known coordinate") {
+      markPrivateRepositoryCoordinate(`30617:${owner}:repo`);
+    }
+    render(
+      <Probe
+        relayHints={
+          evidence === "listed hint" ? [relay] : ["wss://hint.example/"]
+        }
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("unavailable"),
+    );
+    expect(statuses).not.toContain("absent");
+  },
+);
