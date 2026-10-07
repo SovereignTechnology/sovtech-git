@@ -51,25 +51,38 @@ export type ElectrumXServer = {
 /**
  * Default list of Namecoin ElectrumX WSS endpoints, tried in order
  * until one returns a definitive result (name found, expired, or
- * missing). Probe-tested 2026-06-19, then live-verified in Chrome
- * after deployment. Browsers refuse non-publicly-trusted certs
- * (no `rejectUnauthorized: false` escape hatch), so only the LE-cert
- * endpoint is browser-reachable today; the others are kept as
- * best-effort fallbacks so non-browser hosts (Node with the `ws`
- * package + a self-signed-accepting `WebSocket`) can still reach
- * them.
+ * missing). Re-probed 2026-10-08 with a browser-equivalent client
+ * (Node undici WebSocket, system-CA TLS verification) plus openssl
+ * cert inspection and a real `blockchain.scripthash.get_history`
+ * for `d/testls` @ height 822885 against every entry. Browsers
+ * refuse non-publicly-trusted certs (no `rejectUnauthorized: false`
+ * escape hatch), so the two LE-cert endpoints lead the list; the
+ * others are kept as best-effort fallbacks for non-browser hosts
+ * (Node with the `ws` package + a self-signed-accepting `WebSocket`).
  *
- * Browser TLS status of each entry, with reasoning so the next
- * audit doesn't have to redo the work:
+ * Browser TLS status of each entry (2026-10-08 probe), with
+ * reasoning so the next audit doesn't have to redo the work:
  *
- * - `electrumx2.testls.space:50014` — LE cert, nginx TLS-terminating
- *   proxy in front of ElectrumX 1.16.0. ✅ browser-reachable.
- * - `electrum.nmc.ethicnology.com:50004` — LE cert. ✅ browser-reachable.
- * - `electrumx.testls.space:50004` — self-signed (CN=`electrum.testls.space`,
- *   issuer-self). ❌ `ERR_CERT_AUTHORITY_INVALID` in Chrome.
- * - `relay.testls.bit:443/electrumx` — Namecoin TLS chain. ❌ untrusted by
- *   stock browsers without a Namecoin-aware verifier.
- * - `relay.testls.bit:50004` — self-signed. ❌ `ERR_CERT_AUTHORITY_INVALID`.
+ * - `electrumx2.testls.space:50004` — LE cert (YE1, expires
+ *   2026-11-19), nginx TLS-terminating proxy in front of ElectrumX
+ *   1.16.0, correct Namecoin mainnet data. ✅ browser-reachable.
+ * - `electrumx.testls.space:50004` — LE cert (YE2, issued 2026-10-02,
+ *   expires 2026-12-31); rotated off its old self-signed cert, so
+ *   it is ✅ browser-reachable again. ElectrumX 1.16.0, same data.
+ * - `relay.testls.bit:443/electrumx` — Namecoin TLS chain. ❌
+ *   untrusted by stock browsers without a Namecoin-aware verifier.
+ * - `relay.testls.bit:50015` — self-signed. ❌
+ *   `ERR_CERT_AUTHORITY_INVALID`. Was :50004 until the 2026-10-08
+ *   port swap on that host — :50004 now serves the electrumx2 LE
+ *   cert, so the old entry fails TLS hostname verification for
+ *   everyone.
+ *
+ * Removed 2026-10-08: `electrum.nmc.ethicnology.com:50004` — DNS
+ * NXDOMAIN (confirmed via Cloudflare + Google DoH, status 3); the
+ * fallback chain was starting on a dead server.
+ * `electrumx2.testls.space:50014` is intentionally absent: still
+ * live, but an alias of the same :50004 nginx backend, so it adds
+ * no fallback resilience.
  *
  * The Amethyst / quartz list additionally carries `nmc2.bitcoins.sk`,
  * `46.229.238.187`, and `23.158.233.10` for JVM TLS paths that pin
@@ -78,22 +91,23 @@ export type ElectrumXServer = {
  * failure on the third), so they are intentionally omitted entirely.
  */
 export const DEFAULT_ELECTRUMX_SERVERS: ElectrumXServer[] = [
-  // ElectrumX 1.16.0 behind nginx with a public Let's Encrypt cert.
-  // Added 2026-08-22; browser-reachable, kept first so the fallback
-  // chain succeeds on the first hop.
-  { host: "electrumx2.testls.space", port: 50014 },
-  // ElectrumX 1.19.0, public Let's Encrypt cert.
-  { host: "electrum.nmc.ethicnology.com", port: 50004 },
-  // ElectrumX 1.16.0, self-signed cert. Best-effort fallback for non-
-  // browser callers that inject a `WebSocket` impl which accepts the
-  // pin (see {@link useWebSocketImplementation}).
+  // ElectrumX 1.16.0 behind nginx with a public Let's Encrypt cert
+  // (YE1, expires 2026-11-19). Moved from :50014 to the conventional
+  // WSS port; browser-reachable, kept first so the fallback chain
+  // succeeds on the first hop.
+  { host: "electrumx2.testls.space", port: 50004 },
+  // ElectrumX 1.16.0. Rotated from self-signed to a public Let's
+  // Encrypt cert (YE2, issued 2026-10-02, expires 2026-12-31) —
+  // browser-reachable as of 2026-10-08.
   { host: "electrumx.testls.space", port: 50004 },
   // ElectrumX 1.16.0 on port 443 (TLS-multiplexed alongside the relay).
   // The non-`/electrumx` paths on :443 route to the Nostr relay; only
   // `/electrumx` returns ElectrumX JSON-RPC. Namecoin TLS chain.
   { host: "relay.testls.bit", port: 443, path: "/electrumx" },
-  // Same backend on the conventional ElectrumX WSS port; self-signed.
-  { host: "relay.testls.bit", port: 50004 },
+  // Same backend; self-signed. Was :50004 until the 2026-10-08 port
+  // swap on that host — :50004 now serves the electrumx2 LE cert and
+  // fails hostname verification under `relay.testls.bit`.
+  { host: "relay.testls.bit", port: 50015 },
 ];
 
 /** Blocks until a Namecoin name expires (~250 days at ~10 min/block). */
