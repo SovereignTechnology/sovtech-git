@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Delete software releases you published, optionally including their asset events; the deletion request goes to your outbox, the repository relays, and Zapstore for Android releases.
+
 ### Fixed
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.

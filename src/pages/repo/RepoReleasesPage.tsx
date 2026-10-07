@@ -42,6 +42,7 @@ import { EventCardActions } from "@/components/EventCardActions";
 import { ImageGallery } from "@/components/ImageGallery";
 import { RepoBadge } from "@/components/RepoBadge";
 import { CreateReleaseDialog } from "@/components/releases/CreateReleaseDialog";
+import { DeleteReleaseButton } from "@/components/releases/DeleteReleaseButton";
 import { CreateSoftwareApplicationDialog } from "@/components/releases/CreateSoftwareApplicationDialog";
 import { LinkSoftwareApplicationDialog } from "@/components/releases/LinkSoftwareApplicationDialog";
 import { UserLink } from "@/components/UserAvatar";
@@ -548,6 +549,7 @@ function ReleaseCard({
   basePath,
   gitTags,
   gitTagsSettled,
+  onDeleted,
 }: {
   release: SoftwareRelease;
   application: SoftwareApplication | undefined;
@@ -561,8 +563,10 @@ function ReleaseCard({
   basePath: string;
   gitTags: GitTagRef[];
   gitTagsSettled: boolean;
+  onDeleted?: () => void;
 }) {
   const location = useLocation();
+  const { resolved } = useRepoContext();
   const relativeDate = safeFormatDistanceToNow(release.event.created_at, {
     addSuffix: true,
   });
@@ -624,10 +628,16 @@ function ReleaseCard({
                 {release.channel}
               </Badge>
             )}
-            <EventCardActions
-              event={release.event}
-              className="ml-auto shrink-0"
-            />
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              <DeleteReleaseButton
+                release={release}
+                application={application}
+                assetsById={assetsById}
+                repoCoords={resolved?.repo.confirmedMaintainerCoordinates ?? []}
+                onDeleted={onDeleted}
+              />
+              <EventCardActions event={release.event} />
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
             <UserLink pubkey={release.pubkey} avatarSize="xs" />
@@ -1597,6 +1607,7 @@ export default function RepoReleasesPage({
           basePath={basePath}
           gitTags={gitTags}
           gitTagsSettled={gitTagsAvailable}
+          onDeleted={() => navigate(`${basePath}/releases`)}
           applicationPath={
             releaseApplication
               ? `${basePath}/releases/apps/${eventIdToNevent(
