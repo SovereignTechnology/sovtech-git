@@ -112,7 +112,7 @@ export function StatusDropdownBadge({
           className={cn(
             badgeVariants({ variant: "outline" }),
             "gap-1 font-medium cursor-pointer",
-            config.className,
+            override?.className ?? config.className,
             isPending && "opacity-70",
             className,
           )}
@@ -132,9 +132,10 @@ export function StatusDropdownBadge({
           const optOverride =
             variant === "pr" ? prStatusOverrides[opt.value] : undefined;
           const OptIcon = optOverride?.icon ?? optConfig.icon;
-          const optColour = optConfig.className
+          const optColour = (optOverride?.className ?? optConfig.className)
             .split(" ")
-            .find((c) => c.startsWith("text-"));
+            .filter((c) => c.startsWith("text-") || c.startsWith("dark:text-"))
+            .join(" ");
           return (
             <DropdownMenuItem
               key={opt.value}

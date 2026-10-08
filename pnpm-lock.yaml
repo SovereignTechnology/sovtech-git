@@ -51,6 +51,9 @@ importers:
       "@noble/hashes":
         specifier: ^2.0.1
         version: 2.0.1
+      "@primer/octicons-react":
+        specifier: ^19.40.0
+        version: 19.40.0(react@18.3.1)
       "@radix-ui/react-accordion":
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1219,6 +1222,14 @@ packages:
       {
         integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==,
       }
+
+  "@primer/octicons-react@19.40.0":
+    resolution:
+      {
+        integrity: sha512-z1yyW2WaZxf9t+295e1Ajqj0KXWAg3ZaNk5Q7jMYYsz2e1Pzbya4bkpip+pd1ndmlaYh4kInlmCOAgyDFU+ncw==,
+      }
+    peerDependencies:
+      react: ">=16.3"
 
   "@radix-ui/number@1.1.1":
     resolution:
@@ -7809,6 +7820,10 @@ snapshots:
       fastq: 1.20.1
 
   "@pinojs/redact@0.4.0": {}
+
+  "@primer/octicons-react@19.40.0(react@18.3.1)":
+    dependencies:
+      react: 18.3.1
 
   "@radix-ui/number@1.1.1": {}
 

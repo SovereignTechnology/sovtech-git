@@ -6,6 +6,10 @@
 
 - Delete software releases you published, optionally including their asset events; the deletion request goes to your outbox, the repository relays, and Zapstore for Android releases.
 
+### Changed
+
+- Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
+
 ### Fixed
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.

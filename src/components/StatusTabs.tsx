@@ -1,15 +1,17 @@
 import { cn } from "@/lib/utils";
 import type { IssueStatus } from "@/lib/nip34";
+import { Check, AlertTriangle } from "lucide-react";
 import {
-  CircleDot,
-  CheckCircle2,
-  XCircle,
-  FileEdit,
-  Trash2,
-  GitMerge,
-  Check,
-  AlertTriangle,
-} from "lucide-react";
+  IssueOpenedIcon,
+  IssueClosedIcon,
+  IssueDraftIcon,
+  SkipIcon,
+  TrashIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestDraftIcon,
+} from "@primer/octicons-react";
 
 interface StatusTabConfig {
   label: string;
@@ -19,10 +21,18 @@ interface StatusTabConfig {
   activeCountClass: string;
 }
 
+const slateTab = {
+  activeClass: "text-slate-600 dark:text-slate-400",
+  activeBgClass:
+    "bg-slate-50 dark:bg-slate-950/30 border-slate-400 dark:border-slate-600",
+  activeCountClass:
+    "bg-slate-100 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400",
+};
+
 const issueStatusConfig: Record<IssueStatus, StatusTabConfig> = {
   open: {
     label: "Open",
-    icon: CircleDot,
+    icon: IssueOpenedIcon,
     activeClass: "text-emerald-600 dark:text-emerald-400",
     activeBgClass:
       "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-400 dark:border-emerald-600",
@@ -31,34 +41,26 @@ const issueStatusConfig: Record<IssueStatus, StatusTabConfig> = {
   },
   draft: {
     label: "Draft",
-    icon: FileEdit,
-    activeClass: "text-amber-600 dark:text-amber-400",
-    activeBgClass:
-      "bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600",
-    activeCountClass:
-      "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400",
+    icon: IssueDraftIcon,
+    ...slateTab,
   },
   resolved: {
     label: "Resolved",
-    icon: CheckCircle2,
-    activeClass: "text-pink-600 dark:text-pink-400",
+    icon: IssueClosedIcon,
+    activeClass: "text-purple-600 dark:text-purple-400",
     activeBgClass:
-      "bg-pink-50 dark:bg-pink-950/30 border-pink-400 dark:border-pink-600",
+      "bg-purple-50 dark:bg-purple-950/30 border-purple-400 dark:border-purple-600",
     activeCountClass:
-      "bg-pink-100 dark:bg-pink-900/50 text-pink-700 dark:text-pink-400",
+      "bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-400",
   },
   closed: {
     label: "Closed",
-    icon: XCircle,
-    activeClass: "text-red-600 dark:text-red-400",
-    activeBgClass:
-      "bg-red-50 dark:bg-red-950/30 border-red-400 dark:border-red-600",
-    activeCountClass:
-      "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400",
+    icon: SkipIcon,
+    ...slateTab,
   },
   deleted: {
     label: "Deleted",
-    icon: Trash2,
+    icon: TrashIcon,
     activeClass: "text-foreground",
     activeBgClass: "bg-accent border-border",
     activeCountClass: "bg-muted text-muted-foreground",
@@ -66,11 +68,25 @@ const issueStatusConfig: Record<IssueStatus, StatusTabConfig> = {
 };
 
 const prStatusOverrides: Partial<
-  Record<IssueStatus, { label: string; icon: React.ElementType }>
+  Record<IssueStatus, Partial<StatusTabConfig>>
 > = {
+  open: {
+    icon: GitPullRequestIcon,
+  },
+  draft: {
+    icon: GitPullRequestDraftIcon,
+  },
   resolved: {
     label: "Merged",
-    icon: GitMerge,
+    icon: GitMergeIcon,
+  },
+  closed: {
+    icon: GitPullRequestClosedIcon,
+    activeClass: "text-red-600 dark:text-red-400",
+    activeBgClass:
+      "bg-red-50 dark:bg-red-950/30 border-red-400 dark:border-red-600",
+    activeCountClass:
+      "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400",
   },
 };
 
@@ -123,11 +139,12 @@ export function StatusTabs({
       aria-label="Filter by status"
     >
       {statuses.map((status) => {
-        const config = issueStatusConfig[status];
-        const override =
-          variant === "pr" ? prStatusOverrides[status] : undefined;
-        const Icon = override?.icon ?? config.icon;
-        const label = override?.label ?? config.label;
+        const config = {
+          ...issueStatusConfig[status],
+          ...(variant === "pr" ? prStatusOverrides[status] : undefined),
+        };
+        const Icon = config.icon;
+        const label = config.label;
         const isActive = selected.includes(status);
         const count = counts[status];
         const secondaryCount = secondaryCounts?.[status] ?? 0;
