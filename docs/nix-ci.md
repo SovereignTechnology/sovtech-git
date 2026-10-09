@@ -39,7 +39,9 @@ validating Gradle dependencies, not silently enabling network in a derivation.
 Android apps explicitly put JVM, Gradle and Android user homes under the
 provider's writable job `HOME`. Java otherwise derives its home from passwd,
 which points to `/root` on the provider's immutable guest filesystem. The JVM
-override also reaches Gradle daemons and other Java subprocesses.
+override also reaches Gradle daemons and other Java subprocesses. JVM temporary
+files use the provider's `TMPDIR` (or `HOME` locally when `TMPDIR` is unset); Java
+otherwise defaults to `/tmp` without consulting `TMPDIR`.
 
 ## Secrets and artifacts
 
