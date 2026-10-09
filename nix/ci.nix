@@ -51,7 +51,7 @@ let
       makeWrapper "$out/lib/gradle/bin/gradle" "$out/bin/gradle" --set JAVA_HOME ${pkgs.jdk21}
     '';
   };
-  netlify = pkgs.netlify-cli.overrideAttrs (final: _: {
+  netlify = pkgs.netlify-cli.overrideAttrs (final: previous: {
     version = "26.2.0";
     src = pkgs.fetchFromGitHub {
       owner = "netlify";
@@ -59,9 +59,18 @@ let
       tag = "v26.2.0";
       sha256 = "1jkzmw801bq1hnj7rl1grmrcaqiqn33ld0rgn765ipdgh1711c22";
     };
+    # Upstream's lock omits download metadata for some exact-version entries.
+    # Restore them before both cache fetching and offline installation. The
+    # vendored metadata and cache hash pin all bytes without resolving versions.
+    postPatch = (previous.postPatch or "") + ''
+      ${pkgs.python3}/bin/python ${./ci/repair-netlify-lock.py} ${./ci/netlify-lock-metadata.json}
+    '';
+    # overrideAttrs must also update the format expected by npmConfigHook.
+    env = (previous.env or { }) // { NIX_NPM_FETCHER_VERSION = 2; };
     npmDeps = pkgs.fetchNpmDeps {
-      inherit (final) src;
-      hash = "sha256-hHtd8JXeWA/MbXny2omyXJGKv+L2EuKXOs7/WuSep9k=";
+      inherit (final) src postPatch;
+      fetcherVersion = 2;
+      hash = "sha256-pZuZvYGANJ5S9BQLomTz9DKrGkahw2mzj8rrWFsn45c=";
     };
   });
   commonTools = with pkgs; [ bash coreutils findutils gnugrep gnused git cacert curl ];

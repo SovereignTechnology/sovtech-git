@@ -5,6 +5,12 @@ apps and pins Node 24, pnpm 9.15.9, Gradle 8.14.3, JDK 21, Android SDK/build
 tools, ngit-grasp, ngit 3.0.3 and Netlify CLI 26.2.0. GitHub mirror workflows
 are independent. The former `.ngit/act/workflows/ci.yml` is removed.
 
+Netlify 26.2.0's upstream lockfile omits download URLs and integrity hashes for
+some packages. `nix/ci/netlify-lock-metadata.json` pins that missing registry
+metadata by exact package name/version; `repair-netlify-lock.py` restores only
+missing fields before dependency fetching and offline installation. Regenerate
+this metadata and the Nix dependency-cache hash together when updating Netlify.
+
 | Workflow                 | Automatic trigger                   | Behavior after both test gates                       |
 | ------------------------ | ----------------------------------- | ---------------------------------------------------- |
 | `ci.yaml`                | Other branches and non-release tags | Checks only                                          |
