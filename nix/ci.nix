@@ -80,6 +80,11 @@ let
       '';
     }; in { type = "app"; program = "${app}/bin/gitworkshop-${name}"; };
   androidEnvironment = ''
+    # Java uses the passwd home, not HOME; providers keep that root read-only.
+    # Keep every JVM (including Gradle daemons) and Android cache in job scratch.
+    export JAVA_TOOL_OPTIONS="-Duser.home=\"$HOME\""
+    export GRADLE_USER_HOME="$HOME/.gradle"
+    export ANDROID_USER_HOME="$HOME/.android"
     export JAVA_HOME=${pkgs.jdk21}
     export ANDROID_HOME=${android-sdk.androidsdk}/libexec/android-sdk
     export ANDROID_SDK_ROOT="$ANDROID_HOME"

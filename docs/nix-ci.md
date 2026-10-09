@@ -36,6 +36,11 @@ execution, dependency downloads and test results are not cached as derivation
 outputs. Moving these builds to pure derivations requires first capturing and
 validating Gradle dependencies, not silently enabling network in a derivation.
 
+Android apps explicitly put JVM, Gradle and Android user homes under the
+provider's writable job `HOME`. Java otherwise derives its home from passwd,
+which points to `/root` on the provider's immutable guest filesystem. The JVM
+override also reaches Gradle daemons and other Java subprocesses.
+
 ## Secrets and artifacts
 
 Grant the same existing secrets to trusted Nix providers:
