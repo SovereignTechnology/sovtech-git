@@ -1,3 +1,7 @@
+import {
+  badgeBackground,
+  type BadgeBackgroundVariant,
+} from "@/components/ui/badge-background";
 import { Link } from "react-router-dom";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -303,6 +307,8 @@ export function UserName({
 }
 
 export interface UserLinkProps {
+  /** Opt into a badge background; omitted preserves the plain user link. */
+  backgroundVariant?: BadgeBackgroundVariant;
   pubkey: string;
   className?: string;
   avatarSize?: "xs" | "sm" | "md" | "lg" | "xl";
@@ -328,6 +334,7 @@ export function UserLink({
   avatarSize = "sm",
   nameClassName,
   variant = "default",
+  backgroundVariant,
   noLink = false,
   profilePath,
 }: UserLinkProps) {
@@ -335,6 +342,12 @@ export function UserLink({
   const userPath = useUserPath(pubkey);
   const destination = profilePath ?? userPath;
   const inline = variant === "inline";
+  const backgroundClasses =
+    backgroundVariant &&
+    cn(
+      "rounded-full px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2",
+      badgeBackground({ backgroundVariant }),
+    );
 
   const inner = (
     <>
@@ -367,6 +380,7 @@ export function UserLink({
             inline
               ? "inline-flex items-center gap-1 align-middle leading-none"
               : "flex items-center gap-1.5",
+            backgroundClasses,
             className,
           )}
         >
@@ -385,7 +399,10 @@ export function UserLink({
           inline
             ? "inline-flex items-center gap-1 align-middle leading-none"
             : "flex items-center gap-1.5",
-          "hover:opacity-80 transition-opacity",
+          backgroundVariant
+            ? "transition-colors"
+            : "hover:opacity-80 transition-opacity",
+          backgroundClasses,
           className,
         )}
       >
