@@ -63,3 +63,5 @@ Android builds and the branding-regeneration script are documented in [docs/andr
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). No GitHub PRs — contributions go over Nostr only.
+
+Nostr CI and deployment workflows are documented in [Native Nix CI](docs/nix-ci.md).

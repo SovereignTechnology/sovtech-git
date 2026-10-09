@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
+
 - Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
 
 ### Fixed

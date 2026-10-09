@@ -1,0 +1,23 @@
+version: 1
+name: Main checks and deployments
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    run: apps.x86_64-linux.ci-test
+    artifacts:
+      web-dist:
+        path: dist
+        storage: archive
+  android-lint:
+    run: apps.x86_64-linux.ci-android-lint
+  netlify:
+    needs: [test, android-lint]
+    run: apps.x86_64-linux.ci-netlify
+    secrets: [NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID]
+  nsite:
+    needs: [test, android-lint]
+    run: apps.x86_64-linux.ci-nsite
+    secrets: [NGIT_PUBLISHER_NBUNKSEC]

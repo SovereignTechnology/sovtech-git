@@ -27,6 +27,9 @@ if (appVersionCode > 2_100_000_000) {
     throw new GradleException("APP_VERSION produces an Android versionCode above 2100000000")
 }
 
+// CI builds unsigned packages before a separate, secret-bearing signing job.
+def unsignedCiRelease = providers.gradleProperty('unsignedCiRelease').orNull == 'true'
+
 def requiredReleaseSigningProperties = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
 def missingReleaseSigningProperties = requiredReleaseSigningProperties.findAll {
     !releaseSigningProperties.getProperty(it)?.trim()
@@ -60,7 +63,9 @@ android {
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            if (!unsignedCiRelease) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -69,7 +74,7 @@ android {
 
 gradle.taskGraph.whenReady { taskGraph ->
     def buildsRelease = taskGraph.allTasks.any { it.name.toLowerCase().contains('release') }
-    if (buildsRelease && !missingReleaseSigningProperties.empty) {
+    if (buildsRelease && !unsignedCiRelease && !missingReleaseSigningProperties.empty) {
         def source = releaseSigningPropertiesFile.exists()
             ? "missing fields: ${missingReleaseSigningProperties.join(', ')}"
             : "file not found"
