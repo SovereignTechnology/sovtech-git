@@ -37,19 +37,11 @@ let
     '';
     meta.platforms = [ "x86_64-linux" ];
   };
-  gradle = pkgs.stdenvNoCC.mkDerivation {
-    pname = "gradle";
+  # Nixpkgs patches the native libraries embedded in Gradle's JARs.
+  gradle = pkgs.gradle-packages.mkGradle {
     version = "8.14.3";
-    src = pkgs.fetchurl {
-      url = "https://services.gradle.org/distributions/gradle-8.14.3-bin.zip";
-      sha256 = "0c9mbwngm85wj4mydl49pn6iamzfpr3djaf2dsan0c292ci10wdx";
-    };
-    nativeBuildInputs = [ pkgs.unzip pkgs.makeWrapper ];
-    installPhase = ''
-      mkdir -p "$out/lib/gradle" "$out/bin"
-      cp -r bin lib "$out/lib/gradle/"
-      makeWrapper "$out/lib/gradle/bin/gradle" "$out/bin/gradle" --set JAVA_HOME ${pkgs.jdk21}
-    '';
+    hash = "sha256-vXEQIhNJMGCVbsIp2Ua+7lcVjb2J0OYrkbyg+ixfNTE=";
+    defaultJava = pkgs.jdk21;
   };
   netlify = pkgs.netlify-cli.overrideAttrs (final: previous: {
     version = "26.2.0";
