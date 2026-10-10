@@ -43,7 +43,12 @@
           # cannot install its default version at build time.
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
         };
+        ci = import ./nix/ci.nix {
+          inherit pkgs system android-sdk ngit-grasp-pkg;
+        };
       in rec {
+        inherit (ci) apps;
+        packages = ci.packages;
         devShell = pkgs.mkShell {
           buildInputs = [
             pkgs.nodejs

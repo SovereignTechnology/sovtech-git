@@ -1,0 +1,33 @@
+version: 1
+name: Android release rehearsal
+on: [workflow_dispatch]
+
+jobs:
+  test:
+    run: apps.x86_64-linux.ci-test
+    artifacts:
+      web-dist:
+        path: dist
+        storage: archive
+  android-lint:
+    run: apps.x86_64-linux.ci-android-lint
+  android-unsigned:
+    needs: [test, android-lint]
+    run: apps.x86_64-linux.ci-android-unsigned
+    artifacts:
+      unsigned:
+        path: unsigned
+        storage: archive
+  android-sign:
+    needs: [android-unsigned]
+    run: apps.x86_64-linux.ci-android-sign
+    secrets:
+      - ANDROID_KEYSTORE_BASE64
+      - ANDROID_KEYSTORE_PASSWORD
+      - ANDROID_KEY_ALIAS
+    artifacts:
+      signed:
+        path: release-artifacts
+        storage: archive
+    public-outputs:
+      version: version.txt
