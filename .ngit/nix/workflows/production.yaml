@@ -16,8 +16,14 @@ jobs:
   netlify:
     needs: [test, android-lint]
     run: apps.x86_64-linux.ci-netlify
+    concurrency:
+      group: production-netlify
+      cancel-in-progress: false
     secrets: [NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID]
   nsite:
     needs: [test, android-lint]
     run: apps.x86_64-linux.ci-nsite
+    concurrency:
+      group: production-nsite
+      cancel-in-progress: false
     secrets: [NGIT_PUBLISHER_NBUNKSEC]
