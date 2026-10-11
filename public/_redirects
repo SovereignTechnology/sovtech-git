@@ -1,2 +1,4 @@
+# Temporary certificate validation during the hosting migration; remove after cutover.
+/.well-known/acme-challenge/* https://ngit.dev/.well-known/acme-challenge/:splat 302!
 /assets/*   /assets/:splat   200
 /*          /index.html      200
