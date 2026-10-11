@@ -18,6 +18,7 @@ import {
 } from "@/lib/nip34";
 import { repoToPath } from "@/lib/routeUtils";
 import { cn } from "@/lib/utils";
+import type { BadgeBackgroundVariant } from "@/components/ui/badge-background";
 
 type RepoItemLabel =
   | "issue"
@@ -85,10 +86,14 @@ function AlternateRepositoryControls({
   repo,
   groups,
   pageSuffix,
+  backgroundVariant,
+  size,
 }: {
   repo: ResolvedRepo;
   groups: RequestedRepositoryGroup[];
   pageSuffix: string;
+  backgroundVariant?: BadgeBackgroundVariant;
+  size?: "compact" | "inherit";
 }) {
   return (
     <span className="ml-1 align-middle">
@@ -100,6 +105,8 @@ function AlternateRepositoryControls({
         >
           {index > 0 && (index === groups.length - 1 ? " and " : ", ")}
           <RepoGroupBadge
+            backgroundVariant={backgroundVariant}
+            size={size}
             maintainers={group.members.map((pubkey) => ({
               pubkey,
               to: repositoryPagePath(repo, pubkey, pageSuffix),
@@ -116,7 +123,7 @@ function AlternateRepositoryControls({
 
 function UserReferenceList({ pubkeys }: { pubkeys: string[] }) {
   return (
-    <span className="inline align-middle">
+    <span className="inline">
       {pubkeys.map((pubkey, index) => (
         <span key={pubkey}>
           {index > 0 && (index === pubkeys.length - 1 ? " and " : ", ")}
@@ -124,7 +131,8 @@ function UserReferenceList({ pubkeys }: { pubkeys: string[] }) {
             pubkey={pubkey}
             avatarSize="xs"
             variant="inline"
-            nameClassName="text-xs"
+            backgroundVariant="amber"
+            className="items-baseline align-baseline [&>span:first-child]:self-center"
           />
         </span>
       ))}
@@ -313,6 +321,8 @@ export function RepoMaintainerRequestBanner({
             <AlternateRepositoryControls
               repo={repo}
               groups={requestedGroups}
+              backgroundVariant="amber"
+              size="inherit"
               pageSuffix={pageSuffix}
             />
             .
