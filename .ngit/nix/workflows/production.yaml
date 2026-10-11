@@ -13,6 +13,8 @@ jobs:
         storage: archive
   android-lint:
     run: apps.x86_64-linux.ci-android-lint
+  # Keep publishing for DNS rollback through at least 2026-10-21 13:30 UTC.
+  # Retire this job and its secrets only after maintainer review; keep nsite.
   netlify:
     needs: [test, android-lint]
     run: apps.x86_64-linux.ci-netlify
