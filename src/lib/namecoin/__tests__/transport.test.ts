@@ -262,12 +262,12 @@ const S = (host: string, port = 50004): ElectrumXServer => ({ host, port });
 
 describe("DEFAULT_ELECTRUMX_SERVERS", () => {
   it("only contains wss-usable endpoints (probe-verified)", () => {
-    // Sanity: every server is one of the browser-verified hosts.
+    // Sanity: every server is one of the probe-verified hosts
+    // (re-probed 2026-10-08).
     const allowed = new Set([
       "electrumx2.testls.space",
       "electrumx.testls.space",
       "relay.testls.bit",
-      "electrum.nmc.ethicnology.com",
     ]);
     for (const s of DEFAULT_ELECTRUMX_SERVERS) {
       expect(allowed.has(s.host)).toBe(true);
