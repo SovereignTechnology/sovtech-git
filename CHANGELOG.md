@@ -16,6 +16,8 @@
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.
 
+- Show long inferred PR stacks in top-to-bottom columns on wider screens so every title stays readable instead of truncating to fit one row.
+
 ## [4.2.1] - 2026-10-01
 
 **Reliable notification sync & recovery**
