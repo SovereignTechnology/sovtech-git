@@ -1,16 +1,35 @@
 version: 1
+system: x86_64-linux
 name: CI
-on:
-  push:
-    branches-ignore: [main]
-    tags-ignore: ["v*"]
+on: [push, pull_request]
 
 jobs:
+  workflow-tools:
+    build: packages.x86_64-linux.workflow-tools
   test:
-    run: apps.x86_64-linux.ci-test
+    steps:
+      - npm-lock
+      - install
+      - format
+      - check
+      - lint
+      - unit
+      - build
+      - e2e
+      - publication-policy
+      - package
     artifacts:
       web-dist:
         path: dist
         storage: archive
   android-lint:
-    run: apps.x86_64-linux.ci-android-lint
+    steps:
+      - install
+      - sync
+      - lint
+      - signing
+      - package
+    artifacts:
+      android-web-dist:
+        path: dist
+        storage: archive
