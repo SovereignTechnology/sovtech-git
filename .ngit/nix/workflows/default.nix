@@ -88,7 +88,7 @@ in rec {
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-    ci-entrypoints = pkgs.linkFarmFromDrvs "gitworkshop-ci-commands"
+    workflow-tools = pkgs.linkFarmFromDrvs "gitworkshop-ci-commands"
       (pkgs.lib.collect pkgs.lib.isDerivation commands);
     ci-dependencies = dependencies;
   };

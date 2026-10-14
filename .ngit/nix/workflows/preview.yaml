@@ -1,15 +1,13 @@
 version: 1
 system: x86_64-linux
 reuse: never
-name: PR checks and preview
+name: PR preview
 on: [pull_request]
 
 needs-workflows:
   ci: ci.yaml
 
 jobs:
-  ci-entrypoints:
-    build: packages.x86_64-linux.ci-entrypoints
   preview:
     needs: [ci.test]
     public-outputs:

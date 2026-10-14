@@ -4,6 +4,8 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  workflow-tools:
+    build: packages.x86_64-linux.workflow-tools
   test:
     steps:
       - npm-lock

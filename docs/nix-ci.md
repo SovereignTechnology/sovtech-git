@@ -15,7 +15,10 @@ release steps explicitly, for example `run: android-release.android-unsigned.com
 Run individual commands locally with, for example,
 `nix run .#ngit-ci.commands.x86_64-linux.ci.test.format`.
 
-`ci.yaml` owns the checks: npm fallback-lockfile validation, formatting,
+`ci.yaml` owns the checks. Its pure `workflow-tools` build validates every
+command's Nix closure, including release tooling, without executing publishers.
+The `test` and `android-lint` jobs run independently alongside it:
+npm fallback-lockfile validation, formatting,
 TypeScript, ESLint, unit tests, web compilation, mandatory GRASP integration
 tests, publication guards, Android lint and synthetic signing. Each operation is a native step with its own status;
 no shell script reports hidden steps. Steps share the checkout and writable
@@ -27,10 +30,18 @@ The `ci-dependencies` Nix package caches the pnpm store using only
 `package.json`, `pnpm-lock.yaml`, and `patches/`. Its fixed hash verifies the
 downloaded dependency contents, including the prepared JavaScript for the
 pinned Git signer plugin. Source-only changes reuse that package from
-the provider's Nix cache. Each job restores it and runs
+the provider's Nix cache when populated. Each job restores it and runs
 `pnpm install --offline --frozen-lockfile`; a missing dependency fails instead
 of silently accessing the registry. Checks and application builds still run
 against the allocated checkout.
+
+On a confirmed-maintainer push, the successful pure `workflow-tools` job can
+populate the provider's shared cache when publication is enabled. It includes
+the pnpm store, compiled GRASP test server and other command dependencies.
+Ordinary PR jobs can read that cache but cannot publish to it; execution steps
+cannot publish Nix outputs either. A cold PR can therefore repeat preparation
+between isolated jobs. A trusted build warms the cache for subsequent runs;
+merging does not turn the test steps themselves into cache publishers.
 
 After changing dependencies, set the hash in `tools.nix` to
 `pkgs.lib.fakeHash`, run `nix build .#ci-dependencies`, and replace it with the
@@ -95,8 +106,9 @@ gateway availability before reporting the signed preview URL.
 
 ## Local validation
 
-`nix build .#ci-entrypoints` realizes all command closures, including publisher
-tools, without executing them; PRs also run this check. Do not run publishing
+`nix build .#workflow-tools` realizes all command closures, including publisher
+tools, without executing them; CI also runs this check. Preview only publishes
+the tested website artifact. Do not run publishing
 or signing commands merely to validate their definitions.
 `bash .ngit/nix/workflows/test-policy.sh` exercises publication guards with
 stub tools. `nix develop --command bash .ngit/nix/workflows/test-signing.sh`
