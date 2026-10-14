@@ -1,20 +1,16 @@
 version: 1
+system: x86_64-linux
+reuse: never
 name: PR checks and preview
 on: [pull_request]
+
+needs-workflows:
+  ci: ci.yaml
 
 jobs:
   ci-entrypoints:
     build: packages.x86_64-linux.ci-entrypoints
-  test:
-    run: apps.x86_64-linux.ci-test
-    artifacts:
-      web-dist:
-        path: dist
-        storage: archive
-  android-lint:
-    run: apps.x86_64-linux.ci-android-lint
   preview:
-    needs: [test, android-lint]
-    run: apps.x86_64-linux.ci-preview
+    needs: [ci.test]
     public-outputs:
       nsite_preview: nsite-preview.txt

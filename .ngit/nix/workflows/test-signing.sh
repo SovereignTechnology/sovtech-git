@@ -11,12 +11,12 @@ base64 "$fixture/key.jks" > "$fixture/secrets/ANDROID_KEYSTORE_BASE64"
 printf '%s\n' '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.gitworkshop.fixture" android:versionCode="1" android:versionName="0.0.1"><uses-sdk android:minSdkVersion="24"/><application android:label="Fixture"/></manifest>' > "$fixture/AndroidManifest.xml"
 "$ANDROID_HOME/build-tools/35.0.0/aapt2" link -I "$ANDROID_HOME/platforms/android-36/android.jar" --manifest "$fixture/AndroidManifest.xml" -o "$fixture/inputs/android-unsigned/artifacts/unsigned/gitworkshop.apk"
 cp "$fixture/inputs/android-unsigned/artifacts/unsigned/gitworkshop.apk" "$fixture/inputs/android-unsigned/artifacts/unsigned/gitworkshop.aab"
-unset NGIT_CI_REF_TYPE NGIT_CI_REF_NAME NGIT_CI_STEP
+unset NGIT_CI_REF_TYPE NGIT_CI_REF_NAME
 export NGIT_CI_TRIGGER=manual NGIT_CI_INPUTS="$fixture/inputs" NGIT_CI_SECRETS_DIR="$fixture/secrets" NGIT_CI_OUTPUT_DIR="$fixture/output"
-export SIGN_ANDROID_SOURCE="$PWD/nix/ci/SignAndroid.java"
+export SIGN_ANDROID_SOURCE="$PWD/.ngit/nix/workflows/SignAndroid.java"
 (
-  source nix/ci/common.sh
-  source nix/ci/android-sign.sh
+  source .ngit/nix/workflows/common.sh
+  source .ngit/nix/workflows/android-sign.sh
 )
 test "$(find "$fixture/output" -type f | wc -l)" -eq 3
 printf '%s\n' 'Synthetic APK and AAB signing passed.'

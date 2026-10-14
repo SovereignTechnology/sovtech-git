@@ -5,7 +5,7 @@
   };
 
   outputs = { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let perSystem = flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -43,11 +43,11 @@
           # cannot install its default version at build time.
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
         };
-        ci = import ./nix/ci.nix {
+        ci = import ./.ngit/nix/workflows {
           inherit pkgs system android-sdk ngit-grasp-pkg;
         };
       in rec {
-        inherit (ci) apps;
+        ciCommands = ci.commands;
         packages = ci.packages;
         devShell = pkgs.mkShell {
           buildInputs = [
@@ -168,4 +168,7 @@ EOF
           };
         };
       });
+    in (builtins.removeAttrs perSystem [ "ciCommands" ]) // {
+      ngit-ci.commands = perSystem.ciCommands;
+    };
 }
