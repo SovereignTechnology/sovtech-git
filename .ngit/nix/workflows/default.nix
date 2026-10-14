@@ -46,7 +46,7 @@ in rec {
           test -x "$NGIT_GRASP_BIN"
           pnpm test:e2e
         '';
-        publication-policy = command "publication-policy" []
+        publication-policy = command "publication-policy" [ pkgs.diffutils ]
           "bash ${./.}/test-policy.sh";
         package = command "package-web" [] ''
           cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
