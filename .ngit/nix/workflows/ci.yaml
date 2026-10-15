@@ -4,10 +4,10 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  workflow-tools:
-    build: packages.x86_64-linux.workflow-tools
   test:
     steps:
+      - dependencies: { build: packages.x86_64-linux.ci-dependencies }
+      - tools: { build: packages.x86_64-linux.workflow-tools }
       - npm-lock
       - install
       - format
@@ -23,6 +23,7 @@ jobs:
         path: dist
         storage: archive
   android-lint:
+    needs: [test#tools]
     steps:
       - install
       - sync

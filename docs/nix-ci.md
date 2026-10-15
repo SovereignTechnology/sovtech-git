@@ -15,9 +15,10 @@ release steps explicitly, for example `run: android-release.android-unsigned.com
 Run individual commands locally with, for example,
 `nix run .#ngit-ci.commands.x86_64-linux.ci.test.format`.
 
-`ci.yaml` owns the checks. Its pure `workflow-tools` build validates every
+`ci.yaml` owns the checks. The test job first caches `dependencies`, then its pure `tools` build step validates every
 command's Nix closure, including release tooling, without executing publishers.
-The `test` and `android-lint` jobs run independently alongside it:
+Once that step succeeds and its cache publication attempt finishes,
+`android-lint` starts through `needs: [test#tools]` while `test` continues:
 npm fallback-lockfile validation, formatting,
 TypeScript, ESLint, unit tests, web compilation, mandatory GRASP integration
 tests, publication guards, Android lint and synthetic signing. Each operation is a native step with its own status;
@@ -35,13 +36,18 @@ the provider's Nix cache when populated. Each job restores it and runs
 of silently accessing the registry. Checks and application builds still run
 against the allocated checkout.
 
-On a confirmed-maintainer push, the successful pure `workflow-tools` job can
-populate the provider's shared cache when publication is enabled. It includes
-the pnpm store, compiled GRASP test server and other command dependencies.
-Ordinary PR jobs can read that cache but cannot publish to it; execution steps
-cannot publish Nix outputs either. A cold PR can therefore repeat preparation
-between isolated jobs. A trusted build warms the cache for subsequent runs;
-merging does not turn the test steps themselves into cache publishers.
+On a confirmed-maintainer push, the successful `tools` build step can populate
+the provider's trusted cache before the remaining tests finish. The dependency store is exported separately first, so it can fit even when the
+complete tool closure exceeds a provider's admission limit. The tools closure
+also includes the compiled GRASP test server and command dependencies.
+The Android job waits for this boundary, then reuses those outputs. This avoids
+a separate tooling VM and lets both test suites run concurrently after preparation.
+
+Ordinary PR jobs read the trusted cache and, when enabled by the provider, a
+separate one-hour cache for the same PR revision. They cannot write to the trusted
+cache. Publication is best effort: a cache miss rebuilds, and a later test failure
+does not invalidate already completed pure builds. Preview and release workflows
+still require the whole CI workflow to succeed, not merely the `tools` step.
 
 After changing dependencies, set the hash in `tools.nix` to
 `pkgs.lib.fakeHash`, run `nix build .#ci-dependencies`, and replace it with the
