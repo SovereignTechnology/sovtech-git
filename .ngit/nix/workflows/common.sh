@@ -18,7 +18,7 @@ release_version() {
   fi
 }
 
-copy_tested_site() {
+copy_site() {
   cp -R "${NGIT_CI_INPUTS:?}/${1:-ci.test}/artifacts/${2:-web-dist}" dist
   chmod -R u+w dist
   test -f dist/index.html

@@ -55,7 +55,7 @@ reject preview manual
 mkdir -p "$NGIT_CI_INPUTS/ci.test/artifacts/web-dist"
 printf 'tested bytes' > "$NGIT_CI_INPUTS/ci.test/artifacts/web-dist/index.html"
 printf 'redirects' > "$NGIT_CI_INPUTS/ci.test/artifacts/web-dist/_redirects"
-(cd "$fixture/checkout"; source "$scripts/common.sh"; copy_tested_site)
+(cd "$fixture/checkout"; source "$scripts/common.sh"; copy_site)
 cmp "$fixture/checkout/dist/index.html" "$NGIT_CI_INPUTS/ci.test/artifacts/web-dist/index.html"
 test -f "$fixture/checkout/dist/_redirects"
 

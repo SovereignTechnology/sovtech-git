@@ -5,10 +5,11 @@ name: PR preview
 on: [pull_request]
 
 needs-workflows:
-  ci: ci.yaml
+  ci: { file: ci.yaml, wait: referenced }
 
 jobs:
   preview:
-    needs: [ci.test]
+    # Publish the uploaded build output; later CI checks run independently.
+    needs: [ci.test#build]
     public-outputs:
       nsite_preview: nsite-preview.txt

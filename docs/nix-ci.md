@@ -19,8 +19,9 @@ Run individual commands locally with, for example,
 build that publishes the pnpm dependency store. Android lint can start as soon
 as that step's publication attempt finishes, through
 `needs: [test#dependencies]`. Meanwhile, the test job builds and caches its
-GRASP `e2e-server`, then runs npm lockfile validation, formatting, TypeScript,
-ESLint, unit tests, web compilation, GRASP integration tests and publication
+GRASP `e2e-server`, then validates the npm lockfile, installs dependencies and
+builds the website. The build step snapshots `web-dist`; its upload overlaps
+formatting, TypeScript, ESLint, unit tests, GRASP integration tests and publication
 guards. The Android job runs lint and synthetic signing checks. Each operation
 is a native step with its own status; no shell script reports hidden steps. Steps share the checkout and writable
 job state, while each command establishes its own process environment.
@@ -47,8 +48,15 @@ Ordinary PR jobs read the trusted cache and, when enabled by the provider, an
 isolated cache for the same PR revision. PR data normally expires after one hour
 and may be evicted sooner under pressure. Publication is best effort: a cache
 miss rebuilds, and a later test failure does not invalidate completed pure
-builds. Preview and release still wait for their complete prerequisite jobs
-and consume their artifacts.
+builds. Artifact publication is required for consumers: preview waits for the
+website build and its upload; production and release wait for all CI checks.
+
+A cold run can spend most of its time in the leading dependency and GRASP
+server builds. Offline npm installation does not mean those Nix outputs were
+already cached. Use the step timings and provider cache-publication messages
+to distinguish compilation from installation or checks. Low disk headroom may
+skip cache publication even when the build succeeds; artifact-upload failure
+instead fails the producer and skips consumers of that artifact.
 
 After changing dependencies, set the hash in `tools.nix` to
 `pkgs.lib.fakeHash`, run `nix build .#ci-dependencies`, and replace it with the
@@ -63,12 +71,30 @@ scratch, including Java's explicit home/tmp overrides.
 
 ## Check once, publish the resulting artifacts
 
-Preview, production, release and rehearsal workflows declare
-`needs-workflows: {ci: ci.yaml}`. Successful CI can be reused at the same
-peeled commit; failed prerequisites prevent publication. Publisher jobs use
-`needs` to receive the exact prerequisite artifacts.
+Production, release and rehearsal declare `needs-workflows: {ci: ci.yaml}`
+to wait for all CI checks. Preview uses a narrower dependency:
 
-| Workflow                 | Trigger              | Result after CI passes                  |
+```yaml
+needs-workflows:
+  ci: { file: ci.yaml, wait: referenced }
+jobs:
+  preview:
+    needs: [ci.test#build]
+    public-outputs:
+      nsite_preview: nsite-preview.txt
+```
+
+The `build` step declares `web-dist` under its own `artifacts` mapping.
+Preview starts once that step succeeds and its artifact upload completes,
+while the test job continues. Its `copy_site` helper reads
+`$NGIT_CI_INPUTS/ci.test/artifacts/web-dist`; `#build` selects the producing
+step without changing the input directory. Production receives the same
+immutable artifact through `needs: [ci.test]`, after all checks pass.
+An upload failure prevents preview; a later test failure fails CI but does
+not retract an already published preview. Successful CI can be reused at the
+same peeled commit.
+
+| Workflow                 | Trigger              | Result                                  |
 | ------------------------ | -------------------- | --------------------------------------- |
 | `ci.yaml`                | Push or pull request | Checks and web artifacts                |
 | `preview.yaml`           | Pull request         | Disposable nsite preview                |

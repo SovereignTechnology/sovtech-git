@@ -40,7 +40,10 @@ in {
         check = web "check" "pnpm exec tsc --noEmit";
         lint = web "lint" "pnpm exec eslint";
         unit = web "unit" "pnpm exec vitest run --reporter=dot --silent";
-        build = web "build" "pnpm build";
+        build = web "build" ''
+          pnpm build
+          cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
+        '';
         e2e = web "e2e" ''
           export NGIT_GRASP_BIN=${ngit-grasp-pkg}/bin/ngit-grasp
           test -x "$NGIT_GRASP_BIN"
@@ -48,9 +51,6 @@ in {
         '';
         publication-policy = command "publication-policy" [ pkgs.diffutils ]
           "bash ${./.}/test-policy.sh";
-        package = command "package-web" [] ''
-          cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
-        '';
       };
       android-lint = {
         sync = android "android-sync" "pnpm android:sync";
@@ -70,7 +70,7 @@ in {
       android-unsigned = {
         sync = android "android-sync-tested" ''
           release_version
-          copy_tested_site ci.android-lint android-web-dist
+          copy_site ci.android-lint android-web-dist
           pnpm exec cap sync android
         '';
         compile = android "android-compile" ''

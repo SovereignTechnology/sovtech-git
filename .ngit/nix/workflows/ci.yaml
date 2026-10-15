@@ -10,18 +10,15 @@ jobs:
       - e2e-server: { build: packages.x86_64-linux.e2e-server }
       - npm-lock
       - install
+      - build:
+          artifacts:
+            web-dist: { path: dist, storage: archive }
       - format
       - check
       - lint
       - unit
-      - build
       - e2e
       - publication-policy
-      - package
-    artifacts:
-      web-dist:
-        path: dist
-        storage: archive
   android-lint:
     needs: [test#dependencies]
     steps:
