@@ -7,7 +7,7 @@ jobs:
   test:
     steps:
       - dependencies: { build: packages.x86_64-linux.ci-dependencies }
-      - tools: { build: packages.x86_64-linux.workflow-tools }
+      - e2e-server: { build: packages.x86_64-linux.e2e-server }
       - npm-lock
       - install
       - format
@@ -23,7 +23,7 @@ jobs:
         path: dist
         storage: archive
   android-lint:
-    needs: [test#tools]
+    needs: [test#dependencies]
     steps:
       - install
       - sync

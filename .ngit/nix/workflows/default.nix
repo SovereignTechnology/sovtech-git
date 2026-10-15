@@ -23,7 +23,7 @@ let
     export GRADLE_OPTS="-Dorg.gradle.project.android.aapt2FromMavenOverride=$ANDROID_HOME/build-tools/35.0.0/aapt2"
     ${script}
   '';
-in rec {
+in {
   commands = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
     install = command "install" [ node pnpm pkgs.gnutar pkgs.zstd ] ''
       store="''${TMPDIR:-$HOME}/pnpm-store"
@@ -88,8 +88,7 @@ in rec {
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-    workflow-tools = pkgs.linkFarmFromDrvs "gitworkshop-ci-commands"
-      (pkgs.lib.collect pkgs.lib.isDerivation commands);
+    e2e-server = ngit-grasp-pkg;
     ci-dependencies = dependencies;
   };
 }
