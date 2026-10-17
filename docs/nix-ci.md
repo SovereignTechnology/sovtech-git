@@ -10,8 +10,7 @@ GitHub mirror workflows are independent.
 Commands follow **workflow → job → step**. For example, `ci.yaml`'s `test`
 job lists `format`, which resolves to `ci.test.format`. Its `install` step
 uses the shared top-level command. A single-command job such as
-`production.nsite` needs no `run:` field. The Android rehearsal borrows
-release steps explicitly, for example `run: android-release.android-unsigned.compile`.
+`production.nsite` needs no `run:` field.
 Run individual commands locally with, for example,
 `nix run .#ngit-ci.commands.x86_64-linux.ci.test.format`.
 
@@ -71,7 +70,7 @@ scratch, including Java's explicit home/tmp overrides.
 
 ## Check once, publish the resulting artifacts
 
-Production, release and rehearsal declare `needs-workflows: {ci: ci.yaml}`
+Production and release declare `needs-workflows: {ci: ci.yaml}`
 to wait for all CI checks. Preview uses a narrower dependency:
 
 ```yaml
@@ -94,13 +93,12 @@ An upload failure prevents preview; a later test failure fails CI but does
 not retract an already published preview. Successful CI can be reused at the
 same peeled commit.
 
-| Workflow                 | Trigger              | Result                                  |
-| ------------------------ | -------------------- | --------------------------------------- |
-| `ci.yaml`                | Push or pull request | Checks and web artifacts                |
-| `preview.yaml`           | Pull request         | Disposable nsite preview                |
-| `production.yaml`        | Push to `main`       | Netlify and production nsite            |
-| `android-release.yaml`   | Tag `v*`             | Unsigned build, signing, NIP-82 release |
-| `android-rehearsal.yaml` | Manual               | Build and sign without publishing       |
+| Workflow               | Trigger              | Result                                  |
+| ---------------------- | -------------------- | --------------------------------------- |
+| `ci.yaml`              | Push or pull request | Checks and web artifacts                |
+| `preview.yaml`         | Pull request         | Disposable nsite preview                |
+| `production.yaml`      | Push to `main`       | Netlify and production nsite            |
+| `android-release.yaml` | Tag `v*`             | Unsigned build, signing, NIP-82 release |
 
 The test job produces the ordinary website. Android lint builds the versioned
 website and emits a separate artifact; Android compilation consumes those
@@ -133,7 +131,8 @@ signed APK is published using `.ngit/release.yaml` and its Zapstore settings.
 Production commands require a signed push to `main`. Release requires a tag
 matching `version.properties`, fetches that tag with a bounded timeout, and
 checks its peeled commit against the allocation. Manual release replay skips
-publication; use the rehearsal workflow to avoid requesting publisher secrets.
+publication. Routine CI validates signing with synthetic credentials, without
+requiring a separate workflow that uses the production keystore.
 PR previews use a disposable identity and no repository secrets, then verify
 gateway availability before reporting the signed preview URL.
 
