@@ -12,7 +12,7 @@ jobs:
       - install
       - build:
           artifacts:
-            web-dist: { path: dist, storage: archive }
+            web-dist: { path: dist, storage: individual }
       - format
       - check
       - lint
