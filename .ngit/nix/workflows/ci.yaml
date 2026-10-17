@@ -22,6 +22,7 @@ jobs:
   android-lint:
     needs: [test#dependencies]
     steps:
+      - dependencies: { build: packages.x86_64-linux.android-dependencies }
       - install
       - sync
       - lint

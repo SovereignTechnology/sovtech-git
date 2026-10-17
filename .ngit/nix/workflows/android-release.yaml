@@ -34,6 +34,9 @@ jobs:
     public-outputs:
       version: version.txt
   release:
+    steps:
+      - tools: { build: packages.x86_64-linux.ngit }
+      - publish
     cancellation: { grace: 10m }
     needs: [android-sign]
     secrets: [NGIT_PUBLISHER_NBUNKSEC]

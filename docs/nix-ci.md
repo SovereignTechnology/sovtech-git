@@ -9,25 +9,26 @@ GitHub mirror workflows are independent.
 
 Commands follow **workflow → job → step**. For example, `ci.yaml`'s `test`
 job lists `format`, which resolves to `ci.test.format`. Its `install` step
-uses the shared top-level command. A single-command job such as
-`production.nsite` needs no `run:` field.
+uses the shared top-level command. Publishers use the same nesting:
+`production.nsite.publish` runs the `publish` step in the `nsite` job.
 Run individual commands locally with, for example,
 `nix run .#ngit-ci.commands.x86_64-linux.ci.test.format`.
 
 `ci.yaml` owns the checks. The test job starts with a pure `dependencies`
-build that publishes the pnpm dependency store. Android lint can start as soon
+build that publishes Node, pnpm and the pnpm dependency store. Android lint can start as soon
 as that step's publication attempt finishes, through
 `needs: [test#dependencies]`. Meanwhile, the test job builds and caches its
 GRASP `e2e-server`, then validates the npm lockfile, installs dependencies and
 builds the website. The build step snapshots `web-dist`; its upload overlaps
 formatting, TypeScript, ESLint, unit tests, GRASP integration tests and publication
-guards. The Android job runs lint and synthetic signing checks. Each operation
+guards. The Android job builds its cached Maven dependencies and toolchain,
+then runs offline lint and synthetic signing checks. Each operation
 is a native step with its own status; no shell script reports hidden steps. Steps share the checkout and writable
 job state, while each command establishes its own process environment.
 
 ## Cache dependencies, check the current source
 
-The `ci-dependencies` Nix package caches the pnpm store using only
+The `ci-dependencies` Nix package includes Node and pnpm alongside a store using only
 `package.json`, `pnpm-lock.yaml`, and `patches/`. Its fixed hash verifies the
 downloaded dependency contents, including the prepared JavaScript for the
 pinned Git signer plugin. Source-only changes reuse that package from
@@ -62,11 +63,18 @@ After changing dependencies, set the hash in `tools.nix` to
 reported hash. Keep both npm and pnpm lockfiles current as described in
 `AGENTS.md`.
 
-Pinned Node, pnpm, Java, Gradle, Android SDK, ngit and publisher tools also
-come from Nix closures. Gradle dependencies still resolve at runtime: Android
-builds are not hermetic until their transitive dependencies are locked and
-verified. JVM, Gradle and Android homes and temporary files use writable job
-scratch, including Java's explicit home/tmp overrides.
+`android-dependencies` caches Java, Gradle, the Android SDK and a hash-pinned
+Maven repository. Its first build exercises lint and unsigned release compilation
+to fetch their dependencies, retaining only Maven artifacts. Later lint and release
+commands use that repository with `--offline`, including in fresh guests. When
+Android dependencies change, update `android-dependencies.nix`'s hash using
+`pkgs.lib.fakeHash` and `nix build .#android-dependencies`. A missing dependency
+fails instead of silently consulting Google Maven or Maven Central.
+
+Publisher jobs begin with a `tools` build of their pinned ngit or Netlify package,
+so those runtime closures can also be cached. No publisher credentials are exposed
+during these builds. JVM, Gradle and Android homes and temporary files use writable
+job scratch, including Java's explicit home/tmp overrides.
 
 ## Check once, publish the resulting artifacts
 
@@ -103,7 +111,8 @@ same peeled commit.
 The test job produces the ordinary website. Android lint builds the versioned
 website and emits a separate artifact; Android compilation consumes those
 exact files before building the APK/AAB. Site publishers consume the ordinary
-website without rebuilding it. Directory artifacts use archive transport;
+website without rebuilding it. Website artifacts upload individual reusable blobs;
+Android packages use archive transport. The
 provider artifact limits must accommodate the site and APK/AAB files.
 
 Publishing workflows use `reuse: never`, so rollback pushes publish again.
@@ -139,7 +148,7 @@ gateway availability before reporting the signed preview URL.
 ## Local validation
 
 Build an individual command without executing it, for example
-`nix build .#ngit-ci.commands.x86_64-linux.production.netlify`.
+`nix build .#ngit-ci.commands.x86_64-linux.production.netlify.publish`.
 Use `nix build .#ci-dependencies .#e2e-server` for the test job's pure
 build steps. Do not run publishing or signing commands merely to validate
 their definitions.
@@ -147,7 +156,8 @@ their definitions.
 stub tools. `nix develop --command bash .ngit/nix/workflows/test-signing.sh`
 checks real APK/AAB signing using synthetic credentials. The pre-commit hook
 validates the application; CI runs both script checks as explicit steps.
-Android execution additionally needs Maven access.
+Only the initial Maven dependency fetch needs Maven access; ordinary Android
+commands use the pinned local repository.
 
 Netlify's upstream lock omits some registry metadata. The pinned
 `netlify-lock-metadata.json` and `repair-netlify-lock.cjs` restore missing fields
