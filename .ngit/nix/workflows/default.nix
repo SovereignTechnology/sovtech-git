@@ -23,7 +23,7 @@ let
     export GRADLE_OPTS="-Dorg.gradle.project.android.aapt2FromMavenOverride=$ANDROID_HOME/build-tools/35.0.0/aapt2"
     ${script}
   '';
-in rec {
+in {
   commands = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
     install = command "install" [ node pnpm pkgs.gnutar pkgs.zstd ] ''
       store="''${TMPDIR:-$HOME}/pnpm-store"
@@ -40,7 +40,10 @@ in rec {
         check = web "check" "pnpm exec tsc --noEmit";
         lint = web "lint" "pnpm exec eslint";
         unit = web "unit" "pnpm exec vitest run --reporter=dot --silent";
-        build = web "build" "pnpm build";
+        build = web "build" ''
+          pnpm build
+          cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
+        '';
         e2e = web "e2e" ''
           export NGIT_GRASP_BIN=${ngit-grasp-pkg}/bin/ngit-grasp
           test -x "$NGIT_GRASP_BIN"
@@ -48,9 +51,6 @@ in rec {
         '';
         publication-policy = command "publication-policy" [ pkgs.diffutils ]
           "bash ${./.}/test-policy.sh";
-        package = command "package-web" [] ''
-          cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
-        '';
       };
       android-lint = {
         sync = android "android-sync" "pnpm android:sync";
@@ -70,7 +70,7 @@ in rec {
       android-unsigned = {
         sync = android "android-sync-tested" ''
           release_version
-          copy_tested_site ci.android-lint android-web-dist
+          copy_site ci.android-lint android-web-dist
           pnpm exec cap sync android
         '';
         compile = android "android-compile" ''
@@ -88,8 +88,7 @@ in rec {
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-    workflow-tools = pkgs.linkFarmFromDrvs "gitworkshop-ci-commands"
-      (pkgs.lib.collect pkgs.lib.isDerivation commands);
+    e2e-server = ngit-grasp-pkg;
     ci-dependencies = dependencies;
   };
 }
