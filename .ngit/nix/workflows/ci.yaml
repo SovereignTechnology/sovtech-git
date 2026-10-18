@@ -8,6 +8,9 @@ on: [push, pull_request]
 
 jobs:
   test:
+    requirements:
+      resources:
+        scratch-mib: { gte: 8192 }
     steps:
       - dependencies: { build: packages.x86_64-linux.ci-dependencies }
       - e2e-server: { build: packages.x86_64-linux.e2e-server }
@@ -23,6 +26,9 @@ jobs:
       - e2e
       - publication-policy
   android-lint:
+    requirements:
+      resources:
+        scratch-mib: { gte: 12288 }
     needs: [test#dependencies]
     steps:
       - dependencies: { build: packages.x86_64-linux.android-dependencies }
