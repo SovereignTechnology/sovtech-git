@@ -1,5 +1,8 @@
 version: 1
 system: x86_64-linux
+requirements:
+  resources:
+    memory-mib: { gte: 2048 }
 reuse: never
 name: Main checks and deployments
 on:
