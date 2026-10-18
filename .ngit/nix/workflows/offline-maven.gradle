@@ -1,0 +1,12 @@
+// Keep CI dependency resolution inside the hash-pinned Nix Maven repository.
+gradle.beforeProject { project ->
+    def usePinnedRepository = { repositories ->
+        repositories.all { repository ->
+            if (repository instanceof MavenArtifactRepository) {
+                repository.url = new File(System.getenv('NGIT_CI_MAVEN_REPOSITORY')).toURI()
+            }
+        }
+    }
+    usePinnedRepository(project.buildscript.repositories)
+    usePinnedRepository(project.repositories)
+}

@@ -11,5 +11,8 @@ jobs:
   preview:
     # Publish the uploaded build output; later CI checks run independently.
     needs: [ci.test#build]
+    steps:
+      - tools: { build: packages.x86_64-linux.ngit }
+      - publish
     public-outputs:
       nsite_preview: nsite-preview.txt

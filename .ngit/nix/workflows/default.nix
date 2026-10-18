@@ -1,6 +1,9 @@
 { pkgs, system, android-sdk, ngit-grasp-pkg }:
 let
   inherit (import ./tools.nix { inherit pkgs; }) node pnpm ngit gradle netlify dependencies;
+  android-dependencies = import ./android-dependencies.nix {
+    inherit pkgs node pnpm gradle dependencies android-sdk;
+  };
   command = name: tools: script: pkgs.writeShellApplication {
     name = "gitworkshop-${name}";
     runtimeInputs = (with pkgs; [ bash coreutils findutils gnugrep gnused git cacert curl ]) ++ tools;
@@ -54,17 +57,21 @@ in {
       };
       android-lint = {
         sync = android "android-sync" "pnpm android:sync";
-        lint = android "android-lint" "cd android; gradle --no-daemon --stacktrace lintDebug";
+        lint = android "android-lint" ''
+          export NGIT_CI_MAVEN_REPOSITORY=${android-dependencies}
+          cd android
+          gradle --offline --init-script ${./offline-maven.gradle} --no-daemon --console=plain --stacktrace lintDebug
+        '';
         signing = android "signing-test" "bash ${./.}/test-signing.sh";
         package = command "package-android-web" [] ''
           cp -R dist "''${NGIT_CI_OUTPUT_DIR:?}/dist"
         '';
       };
     };
-    preview.preview = command "preview" [ ngit ] (builtins.readFile ./preview.sh);
+    preview.preview.publish = command "preview" [ ngit ] (builtins.readFile ./preview.sh);
     production = {
-      netlify = command "netlify" [ netlify ] (builtins.readFile ./netlify.sh);
-      nsite = command "nsite" [ ngit ] (builtins.readFile ./nsite.sh);
+      netlify.publish = command "netlify" [ netlify ] (builtins.readFile ./netlify.sh);
+      nsite.publish = command "nsite" [ ngit ] (builtins.readFile ./nsite.sh);
     };
     android-release = {
       android-unsigned = {
@@ -75,8 +82,9 @@ in {
         '';
         compile = android "android-compile" ''
           release_version
+          export NGIT_CI_MAVEN_REPOSITORY=${android-dependencies}
           cd android
-          gradle --no-daemon --stacktrace -PunsignedCiRelease=true assembleRelease bundleRelease
+          gradle --offline --init-script ${./offline-maven.gradle} --no-daemon --console=plain --stacktrace -PunsignedCiRelease=true assembleRelease bundleRelease
         '';
         package = command "package-android" [] (builtins.readFile ./package-android.sh);
       };
@@ -84,11 +92,22 @@ in {
         export SIGN_ANDROID_SOURCE=${./SignAndroid.java}
         ${builtins.readFile ./android-sign.sh}
       '';
-      release = command "release" [ ngit ] (builtins.readFile ./release.sh);
+      release.publish = command "release" [ ngit ] (builtins.readFile ./release.sh);
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+    inherit ngit netlify;
     e2e-server = ngit-grasp-pkg;
-    ci-dependencies = dependencies;
+    ci-dependencies = pkgs.linkFarm "gitworkshop-web-dependencies" [
+      { name = "pnpm-store"; path = dependencies; }
+      { name = "node"; path = node; }
+      { name = "pnpm"; path = pnpm; }
+    ];
+    android-dependencies = pkgs.linkFarm "gitworkshop-android-toolchain" [
+      { name = "maven"; path = android-dependencies; }
+      { name = "gradle"; path = gradle; }
+      { name = "sdk"; path = android-sdk.androidsdk; }
+      { name = "jdk"; path = pkgs.jdk21; }
+    ];
   };
 }
