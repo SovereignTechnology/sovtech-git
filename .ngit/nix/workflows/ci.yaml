@@ -1,16 +1,43 @@
 version: 1
+system: x86_64-linux
+requirements:
+  resources:
+    memory-mib: { gte: 4096 }
 name: CI
-on:
-  push:
-    branches-ignore: [main]
-    tags-ignore: ["v*"]
+on: [push, pull_request]
 
 jobs:
   test:
-    run: apps.x86_64-linux.ci-test
+    requirements:
+      resources:
+        scratch-mib: { gte: 8192 }
+    steps:
+      - dependencies: { build: packages.x86_64-linux.ci-dependencies }
+      - e2e-server: { build: packages.x86_64-linux.e2e-server }
+      - npm-lock
+      - install
+      - build:
+          artifacts:
+            web-dist: { path: dist, storage: individual }
+      - format
+      - check
+      - lint
+      - unit
+      - e2e
+      - publication-policy
+  android-lint:
+    requirements:
+      resources:
+        scratch-mib: { gte: 12288 }
+    needs: [test#dependencies]
+    steps:
+      - dependencies: { build: packages.x86_64-linux.android-dependencies }
+      - install
+      - sync
+      - lint
+      - signing
+      - package
     artifacts:
-      web-dist:
+      android-web-dist:
         path: dist
         storage: archive
-  android-lint:
-    run: apps.x86_64-linux.ci-android-lint

@@ -1,30 +1,36 @@
 version: 1
+system: x86_64-linux
+requirements:
+  resources:
+    memory-mib: { gte: 2048 }
+reuse: never
 name: Main checks and deployments
 on:
   push:
     branches: [main]
 
+needs-workflows:
+  ci: ci.yaml
+
 jobs:
-  test:
-    run: apps.x86_64-linux.ci-test
-    artifacts:
-      web-dist:
-        path: dist
-        storage: archive
-  android-lint:
-    run: apps.x86_64-linux.ci-android-lint
   # Keep publishing for DNS rollback through at least 2026-10-21 13:30 UTC.
   # Retire this job and its secrets only after maintainer review; keep nsite.
   netlify:
-    needs: [test, android-lint]
-    run: apps.x86_64-linux.ci-netlify
+    steps:
+      - tools: { build: packages.x86_64-linux.netlify }
+      - publish
+    cancellation: { grace: 10m }
+    needs: [ci.test]
     concurrency:
       group: production-netlify
       cancel-in-progress: false
     secrets: [NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID]
   nsite:
-    needs: [test, android-lint]
-    run: apps.x86_64-linux.ci-nsite
+    steps:
+      - tools: { build: packages.x86_64-linux.ngit }
+      - publish
+    cancellation: { grace: 10m }
+    needs: [ci.test]
     concurrency:
       group: production-nsite
       cancel-in-progress: false

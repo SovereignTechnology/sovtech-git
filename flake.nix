@@ -1,11 +1,12 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { nixpkgs, ... }:
+    let
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      perSystem = forAllSystems (system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -43,11 +44,11 @@
           # cannot install its default version at build time.
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
         };
-        ci = import ./nix/ci.nix {
+        ci = import ./.ngit/nix/workflows {
           inherit pkgs system android-sdk ngit-grasp-pkg;
         };
       in rec {
-        inherit (ci) apps;
+        ciCommands = ci.commands;
         packages = ci.packages;
         devShell = pkgs.mkShell {
           buildInputs = [
@@ -168,4 +169,10 @@ EOF
           };
         };
       });
+    in {
+      packages = forAllSystems (system: perSystem.${system}.packages);
+      devShell = forAllSystems (system: perSystem.${system}.devShell);
+      devShells = forAllSystems (system: perSystem.${system}.devShells);
+      ngit-ci.commands = forAllSystems (system: perSystem.${system}.ciCommands);
+    };
 }

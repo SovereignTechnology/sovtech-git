@@ -1,5 +1,5 @@
 test "${NGIT_CI_TRIGGER:-}" = pull_request
-copy_tested_site
+copy_site
 rm dist/_redirects
 ngit account create --name 'GitWorkshop PR preview' --offline --local --secret-storage file --json
 preview_npub=$(git config --local --get nostr.npub)

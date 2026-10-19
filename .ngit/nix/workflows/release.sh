@@ -28,7 +28,7 @@ if [ "${APP_VERSION#*-}" != "$APP_VERSION" ]; then
 else
   channel=main
 fi
-ngit release publish "$APP_VERSION" --manifest .ngit/release.yaml \
+finish_publication ngit release publish "$APP_VERSION" --manifest .ngit/release.yaml \
   --channel "$channel" --tag "$NGIT_CI_REF_NAME" --commit "${NGIT_CI_COMMIT_SHA:?}" \
   --nbunksec-file "${NGIT_CI_SECRETS_DIR:?}/NGIT_PUBLISHER_NBUNKSEC" \
   --defaults --json
