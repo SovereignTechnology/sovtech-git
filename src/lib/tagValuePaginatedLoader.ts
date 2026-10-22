@@ -3,15 +3,14 @@
  * Automatic mode uses v7 finite-window coverage, including relay caps below
  * the requested page size. Only successful coverage is cached as exhausted;
  * cancellation, failed requests and saturated timestamps stay incomplete.
- * Manual mode retains the legacy incremental cursor pending its bounded-work
- * migration. UI settlement is not evidence of historical completeness.
+ * Manual mode uses explicit batches over v7 point windows. UI settlement is not evidence of historical completeness.
  */
 
 import { filterDuplicateEvents, mapEventsToStore } from "applesauce-core";
 import { mergeRelaySets } from "applesauce-core/helpers/relays";
 import type { Filter } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
-import { loadBlocksFromRelay } from "./legacyTimelineLoader";
+import { batchHistory } from "./batchHistory";
 import { historyWindow } from "./historyWindow";
 import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TagValuePointer } from "applesauce-loaders/loaders";
@@ -25,10 +24,9 @@ import {
   Observable,
   Subject,
   bufferTime,
-  catchError,
   filter,
-  finalize,
   merge,
+  map,
   share,
   switchMap,
   take,
@@ -36,7 +34,6 @@ import {
 import { makeSettleSignal, DEFAULT_SETTLE_TIME } from "./settleSignal";
 import type { SettleSignal, SettleSignalOptions } from "./settleSignal";
 import {
-  resilientSingleRelayRequest,
   resilientHistoryRequest,
   isHistoryTerminalError,
   HistoryAdmissionError,
@@ -177,16 +174,11 @@ function processRelayStream(
   }
 
   return new Observable<NostrEvent>((subscriber) => {
-    let countBeforeEose = 0;
     let oldestSeen: number | undefined;
     let eoseSeen = false;
     let liveEnded = false;
     let historyDone = false;
     let paginateSub: { unsubscribe(): void } | undefined;
-    let manualSub: { unsubscribe(): void } | undefined;
-
-    // Legacy manual trigger; automatic history owns a finite v7 window.
-    let window$: Subject<{ since?: number; until?: number }> | undefined;
 
     const startPagination = () => {
       if (!manualPaginate$) {
@@ -226,53 +218,35 @@ function processRelayStream(
         });
         return;
       }
-      // loadBlocksFromRelay is used here purely as a pagination cursor state
-      // machine: it tracks the backward cursor, prevents parallel page loads,
-      // and detects exhaustion (zero events returned). It does NOT perform the
-      // actual relay request — that is handled by extendingPool below, which
-      // replaces applesauce's internal request with resilientSingleRelayRequest
-      // so every page gets our own exponential backoff and rate-limit handling
-      // instead of applesauce's built-in retry logic.
-      //
-      // extendingPool also calls signal.extend() on every page request (not
-      // just the first) to keep the signal alive while pagination is in flight.
-      // The relay is fixed in the outer scope so _relays is always [relay] and
-      // can be ignored.
-      const extendingPool = (_relays: string[], filters: Filter[]) => {
-        signal.extend(relay);
-        return resilientSingleRelayRequest(pool, relay, filters, {
-          retryCount,
-        });
-      };
-
-      const manualWindow$ = new Subject<{ since?: number; until?: number }>();
-      window$ = manualWindow$;
-      manualSub = manualPaginate$.subscribe(() => {
-        if (!exhausted.has(key))
-          manualWindow$.next({ since: -Infinity, until: oldestSeen });
-      });
-
-      paginateSub = window$
+      if (paginateSub) return;
+      paginateSub = manualPaginate$
         .pipe(
-          loadBlocksFromRelay(extendingPool, relay, [paginationFilter], {
-            limit,
-          }),
-          // Manual mode retains its existing error isolation and settle policy.
-          catchError(() => EMPTY),
-          finalize(() => signal.settle(relay)),
+          map(() => ({ limit, until: oldestSeen })),
+          batchHistory(
+            (_relays, filters) => {
+              signal.extend(relay);
+              return resilientHistoryRequest(pool, relay, filters);
+            },
+            relay,
+            [paginationFilter],
+            {
+              onStatus: onHistoryStatus,
+              retryCount,
+              isTerminalError: isHistoryTerminalError,
+              isAdmissionError: (error) =>
+                error instanceof HistoryAdmissionError,
+              onBatchComplete: (result) => {
+                if (result.exhausted) exhausted.add(key);
+                if (result.incomplete) signal.error(relay);
+                else signal.settle(relay);
+              },
+            },
+          ),
         )
-        .subscribe({
-          next: (event) => {
-            // Track oldest seen across all blocks for manual cursor
-            if (oldestSeen === undefined || event.created_at < oldestSeen) {
-              oldestSeen = event.created_at;
-            }
-            subscriber.next(event);
-          },
-          // Completing does not complete the outer observable —
-          // the live subscription keeps it alive
-        });
+        .subscribe({ next: (event) => subscriber.next(event) });
     };
+
+    if (manualPaginate$) startPagination();
 
     // Delegate reconnect, backoff, rate-limit handling, and foreground gap-fill
     // to resilientSubscription. settle: false — we manage the outer signal
@@ -295,8 +269,8 @@ function processRelayStream(
         eoseSeen = true;
         if (manualPaginate$) {
           signal.settle(relay);
-          if (countBeforeEose >= limit) startPagination();
-          else exhausted.add(key);
+          // A short live response may reflect a relay cap, not exhaustion.
+          startPagination();
         } else {
           // Short pages can be relay caps. Reconnect EOSE must not restart us.
           startPagination();
@@ -306,7 +280,6 @@ function processRelayStream(
       next: (msg) => {
         if (msg === "EOSE") return;
         if (!eoseSeen) {
-          countBeforeEose++;
           if (oldestSeen === undefined || msg.created_at < oldestSeen)
             oldestSeen = msg.created_at;
         }
@@ -322,7 +295,6 @@ function processRelayStream(
     return () => {
       liveSub.unsubscribe();
       paginateSub?.unsubscribe();
-      manualSub?.unsubscribe();
     };
   });
 }

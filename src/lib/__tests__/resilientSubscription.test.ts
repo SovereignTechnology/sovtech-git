@@ -141,7 +141,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await WS.clean();
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -1250,4 +1250,51 @@ describe("graceful relay close (CLOSED without error prefix)", () => {
 
     spy.unsubscribe();
   });
+});
+
+it("delivers manual v7 batch outcomes before live EOSE without draining history", async () => {
+  const trigger = new Subject<void>();
+  const batches = vi.fn();
+  const spy = subscribeSpyTo(
+    resilientSubscription(pool, [RELAY_URL], [{ kinds: [1] }], {
+      manualPaginate$: trigger,
+      limit: 20,
+      settle: false,
+      gapFill: false,
+      onHistoryBatch: batches,
+    }),
+  );
+  try {
+    await expectReq(server);
+    trigger.next();
+    const history = await expectReq(server, { kinds: [1], limit: 20 });
+    server.send(["EVENT", history, mockEvent2]);
+    server.send(["EVENT", history, mockEvent]);
+    server.send(["EOSE", history]);
+    await vi.waitFor(() => expect(batches).toHaveBeenCalledOnce(), {
+      timeout: 2000,
+    });
+    expect(batches).toHaveBeenCalledWith(
+      RELAY_URL,
+      expect.objectContaining({ exhausted: false, incomplete: false }),
+    );
+    expect(
+      server.messages.filter((m) => (m as string[])[0] === "REQ"),
+    ).toHaveLength(2);
+    trigger.next();
+    await vi.waitFor(
+      () =>
+        expect(
+          server.messages.filter((m) => (m as string[])[0] === "REQ"),
+        ).toHaveLength(3),
+      { timeout: 3000 },
+    );
+    const reqs = server.messages.filter(
+      (m) => (m as string[])[0] === "REQ",
+    ) as [string, string, { until: number }][];
+    expect(reqs[2][2].until).toBe(mockEvent.created_at);
+  } finally {
+    spy.unsubscribe();
+    trigger.complete();
+  }
 });

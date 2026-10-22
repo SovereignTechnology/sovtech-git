@@ -41,7 +41,7 @@ import {
   RelayClosedError,
 } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
-import { loadBackwardBlocks } from "./legacyTimelineLoader";
+import { batchHistory, type HistoryBatchResult } from "./batchHistory";
 import { historyWindow } from "./historyWindow";
 import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TimelessFilter } from "applesauce-loaders";
@@ -56,6 +56,7 @@ import {
   filter,
   finalize,
   identity,
+  map,
   merge,
   repeat,
   retry,
@@ -104,6 +105,7 @@ export class TransportError extends Error {
 export interface ResilientSubscriptionOptions {
   /** Historical range evidence, distinct from UI settlement or write preflight. */
   onHistoryStatus?: (status: TimelineStatus) => void;
+  onHistoryBatch?: (relay: string, result: HistoryBatchResult) => void;
   /** Enable smart reconnect with since: lastReceivedAt. Default: true */
   reconnect?: boolean;
   /** Enable gap-fill on foreground resume. Default: true */
@@ -348,6 +350,7 @@ function processRelay(
     >
   > & {
     onHistoryStatus?: (status: TimelineStatus) => void;
+    onHistoryBatch?: (relay: string, result: HistoryBatchResult) => void;
     manualPaginate$: Observable<void> | undefined;
     onRelaySettle: ((relay: string) => void) | undefined;
     onRelayEose: ((relay: string) => void) | undefined;
@@ -436,7 +439,6 @@ function processRelay(
     let automaticHistoryStarted = false;
     let automaticHistoryDone = false;
     let paginateSub: { unsubscribe(): void } | undefined;
-    let manualSub: { unsubscribe(): void } | undefined;
     let gapFillSub: { unsubscribe(): void } | undefined;
     let latestLifecycleGeneration: number | undefined;
     let livePipelineCompleted = false;
@@ -487,9 +489,6 @@ function processRelay(
       return Math.min(lastReceivedAt, now) - opts.gapFillBuffer;
     };
 
-    // Legacy manual pagination trigger. Automatic history owns a v7 window.
-    let window$: Subject<{ since?: number; until?: number }> | undefined;
-
     const startPagination = () => {
       if (!opts.manualPaginate$) {
         if (automaticHistoryStarted) return;
@@ -537,62 +536,48 @@ function processRelay(
         });
         return;
       }
-      // loadBackwardBlocks is used here as a backward-only pagination cursor
-      // state machine: it tracks the backward cursor, prevents parallel page
-      // loads, and detects exhaustion (zero events returned). Using
-      // loadBackwardBlocks (rather than loadBlocksFromRelay / loadBlocksForTimelineWindow)
-      // avoids the bug where loadForwardBlocks also fires on the first window
-      // emission (when its cursor is undefined), sending a spurious REQ without
-      // an `until` filter that re-fetches the most-recent events.
-      //
-      // signal.extend() is called on every page request to keep the settle
-      // signal alive while pagination is in flight.
-      const backwardRequest = (until: number | undefined) => {
-        signal.extend(relay);
-        // Build filters: start from paginationFilters (already stripped of
-        // since/until/limit), restore scalar extras (e.g. search) that
-        // mergeFilters would drop, then apply limit and until.
-        const restoredFilters: Filter[] = paginationFilters.map((f, i) => ({
-          ...(scalarExtras[i] ?? {}),
-          ...f,
-          limit,
-          ...(until !== undefined ? { until } : {}),
-        }));
-        return resilientSingleRelayRequest(pool, relay, restoredFilters, {
-          retryCount: opts.retryCount,
-          retryDelay: opts.retryDelay,
-        });
-      };
-
-      const manualWindow$ = new Subject<{ since?: number; until?: number }>();
-      window$ = manualWindow$;
-      manualSub = opts.manualPaginate$.subscribe(() => {
-        manualWindow$.next({ since: -Infinity, until: oldestSeen });
-      });
-
-      paginateSub = window$
+      // Keep one manual owner across reconnect EOSEs. Each filter starts at
+      // the snapshot horizon; the oldest event across mixed live filters is
+      // not a safe cursor for every filter.
+      if (paginateSub) return;
+      paginateSub = opts.manualPaginate$
         .pipe(
-          loadBackwardBlocks(backwardRequest, { limit }),
-          // Pagination errors are non-fatal — finalize still runs and settles
-          // the relay. The merge of all per-relay streams continues.
-          catchError(() => EMPTY),
-          finalize(() => {
-            signal.settle(relay);
-            opts.onRelaySettle?.(relay);
-            // autoClose: pagination is the last work for this relay — complete
-            // the per-relay stream so the merged stream can finish naturally.
-            if (opts.autoClose) subscriber.complete();
-          }),
+          map(() => ({ limit })),
+          batchHistory(
+            (_relays, filters) => {
+              signal.extend(relay);
+              return resilientHistoryRequest(pool, relay, filters);
+            },
+            relay,
+            paginationFilters.map((f, i) => ({
+              ...(scalarExtras[i] ?? {}),
+              ...f,
+            })),
+            {
+              onStatus: opts.onHistoryStatus,
+              retryCount: opts.retryCount,
+              isTerminalError: isHistoryTerminalError,
+              isAdmissionError: (error) =>
+                error instanceof HistoryAdmissionError,
+              onBatchComplete: (result) => {
+                opts.onHistoryBatch?.(relay, result);
+                if (result.incomplete) {
+                  signal.error(relay);
+                  opts.onRelayError?.(relay);
+                } else {
+                  signal.settle(relay);
+                  opts.onRelaySettle?.(relay);
+                }
+                if (opts.autoClose && result.exhausted) subscriber.complete();
+              },
+            },
+          ),
         )
-        .subscribe({
-          next: (event) => {
-            if (oldestSeen === undefined || event.created_at < oldestSeen) {
-              oldestSeen = event.created_at;
-            }
-            subscriber.next(event);
-          },
-        });
+        .subscribe({ next: (event) => subscriber.next(event) });
     };
+
+    // Manual triggers must remain usable even when the live relay never EOSEs.
+    if (opts.manualPaginate$) startPagination();
 
     // Build the live subscription factory. defer() re-executes on each retry
     // (error) and repeat (graceful close) so lastReceivedAt is read fresh on
@@ -1047,7 +1032,6 @@ function processRelay(
     return () => {
       liveSub.unsubscribe();
       paginateSub?.unsubscribe();
-      manualSub?.unsubscribe();
       gapFillSub?.unsubscribe();
       gapFillResumeSub.unsubscribe();
       liveRestart$.complete();
@@ -1130,6 +1114,7 @@ function resilientSubscriptionStatic(
   const manualPaginate$ = opts.manualPaginate$;
   const onRelaySettle = opts.onRelaySettle;
   const onHistoryStatus = opts.onHistoryStatus;
+  const onHistoryBatch = opts.onHistoryBatch;
   const onRelayEose = opts.onRelayEose;
   const onRelayError = opts.onRelayError;
   const onRelayLifecycle = opts.onRelayLifecycle;
@@ -1150,6 +1135,7 @@ function resilientSubscriptionStatic(
     onRelaySettle,
     onRelayEose,
     onHistoryStatus,
+    onHistoryBatch,
     onRelayError,
     onRelayLifecycle,
     nextLifecycleGeneration,
@@ -1218,6 +1204,7 @@ function resilientSubscriptionReactive(
   const manualPaginate$ = opts.manualPaginate$;
   const onRelaySettle = opts.onRelaySettle;
   const onHistoryStatus = opts.onHistoryStatus;
+  const onHistoryBatch = opts.onHistoryBatch;
   const onRelayEose = opts.onRelayEose;
   const onRelayError = opts.onRelayError;
   const onRelayLifecycle = opts.onRelayLifecycle;
@@ -1236,6 +1223,7 @@ function resilientSubscriptionReactive(
     onRelaySettle,
     onRelayEose,
     onHistoryStatus,
+    onHistoryBatch,
     onRelayError,
     onRelayLifecycle,
     nextLifecycleGeneration,

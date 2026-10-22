@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and manual pagination compatibility.
+- Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and explicit batch-triggered search and notification history using v7 coverage.
 
 - Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
 
