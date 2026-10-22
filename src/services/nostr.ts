@@ -1,3 +1,4 @@
+import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
 import { fakeVerifyEvent, persistEventsToCache } from "applesauce-core/helpers";
 import type { Filter } from "applesauce-core/helpers";
@@ -133,6 +134,8 @@ eventStore.verifyEvent = fakeVerifyEvent;
 
 // Persist events to the local nostrdb
 persistEventsToCache(eventStore, saveEvents);
+
+if (import.meta.env.VITE_PROFILE === "1") instrumentEventStore(eventStore);
 
 /**
  * Resolves after durable deletion state has been restored. main.tsx waits for

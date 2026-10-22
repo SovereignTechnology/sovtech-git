@@ -1,3 +1,6 @@
+// FIRST: profiler probes wrapping WebSocket/timers/the React DevTools hook in
+// `pnpm build:profile` builds; must load before react-dom and any socket.
+import "@/lib/perfRuntimeInstall";
 import { createRoot } from "react-dom/client";
 import { Capacitor } from "@capacitor/core";
 import { ErrorBoundary } from "@/components/ErrorBoundary";

@@ -115,3 +115,35 @@ exact version of `pkgs.playwright-driver` in `flake.nix` so the browser
 revisions match — bump them together.
 
 The benchmark is never part of pre-commit, `pnpm test`, or CI.
+
+## Application profiling
+
+Build with `pnpm build:profile`, then serve using
+`pnpm exec vite preview --outDir dist-perf`. Normal builds do not install these
+probes. In the coding-agent VM use an isolated `browser-session` lease and close
+it afterward. The browser console exposes:
+
+```js
+window.__gwPerf.json(); // Export the report as JSON.
+window.__gwPerf.reset(); // Reset aggregate counters, not the page-lifetime waterfall.
+window.__gwPerf.renders(true); // Optional React attribution.
+```
+
+For the React profiling bundle use `VITE_PROFILE_REACT=1 pnpm build:profile`.
+Keep probe settings identical across comparisons and confirm behavior in a
+normal production build. Save raw captures under ignored `perf-reports/`.
+Record the built commit plus dirty diff, browser/device, URL, cache state,
+probe settings and observable readiness condition. Rebuild after source changes.
+
+Use a fresh context for cold runs (clearing cookies does not clear IndexedDB).
+Use the same context for warm runs. Compare controlled equal-data fixtures for
+application cost, and repeated alternating-order live runs for external relay
+behavior. Record missing data, refusals and timeouts as incomplete/failed runs;
+a quiet DOM or EOSE alone is not global historical completeness. Fixed-duration
+windows measure continuing work; navigation checks need bounded readiness waits.
+
+Long frames are not CPU utilization; React base durations are estimates;
+overlapping cache-query times are not serial elapsed time; text lengths are
+characters rather than compressed bytes. Relay response times include network,
+server and browser delays. Heap snapshots without controlled GC do not prove
+retained-memory equivalence. NIP-77 negotiation is not currently attributed.

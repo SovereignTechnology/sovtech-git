@@ -1,5 +1,6 @@
 import type { Filter, NostrEvent } from "applesauce-core/helpers";
 import "window.nostrdb.js";
+import { instrumentCacheQuery } from "@/lib/perfRuntime";
 import {
   isPrivateRepositoryEvent,
   isPrivateRepositoryEventId,
@@ -13,10 +14,16 @@ const DELETION_PERSIST_POLL_MS = 25;
  * Used by event loaders to check cache before querying relays.
  * Returns empty array if cache is not available.
  */
-export async function cacheRequest(filters: Filter[]) {
+async function queryCache(filters: Filter[]): Promise<NostrEvent[]> {
   const events = await window.nostrdb.filters(filters);
   return events.filter((event) => !isPrivateRepositoryEventId(event.id));
 }
+
+export const cacheRequest =
+  // Profiling builds only: per-shape timings in `__gwPerf.report()`.
+  import.meta.env.VITE_PROFILE === "1"
+    ? instrumentCacheQuery(queryCache)
+    : queryCache;
 
 /** Save events to the cache */
 export async function saveEvents(events: NostrEvent[]) {

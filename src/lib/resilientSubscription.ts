@@ -588,7 +588,7 @@ function processRelay(
       }));
 
       // Use the single-relay API so the stream still emits NostrEvent | "EOSE"
-      // — the group-level pool.subscription() strips EOSE in v6, but we need it
+      // — the group-level pool.subscription() strips EOSE, but we need it
       // here to drive the settle signal.
       //
       // CRITICAL: The Relay class swallows WebSocket errors in its watchTower

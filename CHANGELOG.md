@@ -4,6 +4,8 @@
 
 ### Added
 
+- Add an opt-in profiling build with relay waterfalls, long-frame observations, and cache timings for isolated performance investigations.
+
 - Delete software releases you published, optionally including their asset events; the deletion request goes to your outbox, the repository relays, and Zapstore for Android releases.
 
 ### Changed
