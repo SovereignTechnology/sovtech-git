@@ -860,6 +860,59 @@ describe("EOSE settle signal", () => {
 // ---------------------------------------------------------------------------
 
 describe("resilientRequest (autoClose)", () => {
+  it("waits for v7 history coverage after a short initial page", async () => {
+    const statuses: string[] = [];
+    const spy = subscribeSpyTo(
+      resilientRequest(pool, [RELAY_URL], [{ kinds: [1], limit: 5 }], {
+        paginate: true,
+        limit: 5,
+        settleTime: 1,
+        onHistoryStatus: (status) => statuses.push(status.state),
+      }),
+    );
+    const initial = await expectReq(server);
+    const events = [110, 100, 90].map((time, index) => ({
+      ...mockEvent,
+      id: (index + 1).toString(16).padStart(64, "0"),
+      created_at: time,
+    }));
+    events
+      .slice(0, 2)
+      .forEach((event) => server.send(["EVENT", initial, event]));
+    server.send(["EOSE", initial]);
+    expect(spy.receivedComplete()).toBe(false);
+    // Inspect observed request frames; bounded waits tolerate paced requests.
+    for (let page = 1; page <= 2; page++) {
+      const frame = await vi.waitFor(
+        () => {
+          const requests = server.messages.filter(
+            (message) => Array.isArray(message) && message[0] === "REQ",
+          ) as Array<[string, string, { until: number }]>;
+          expect(requests.length).toBeGreaterThan(page);
+          return requests[page];
+        },
+        { timeout: 2500 },
+      );
+      events
+        .filter((event) => event.created_at <= frame[2].until)
+        .slice(0, 2)
+        .forEach((event) => server.send(["EVENT", frame[1], event]));
+      server.send(["EOSE", frame[1]]);
+    }
+    await vi.waitFor(() => expect(spy.receivedComplete()).toBe(true), {
+      timeout: 1000,
+    });
+    expect(statuses.at(-1)).toBe("covered");
+    expect(
+      new Set(
+        spy
+          .getValues()
+          .filter((value) => value !== "EOSE")
+          .map((value) => value.id),
+      ),
+    ).toEqual(new Set(events.map((event) => event.id)));
+  }, 10_000);
+
   it("completes the stream after EOSE with no pagination", async () => {
     const spy = subscribeSpyTo(
       resilientRequest(pool, [RELAY_URL], [{ kinds: [1] }], {

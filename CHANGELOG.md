@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Upgrade to Applesauce v7 while retaining the existing repository fetch ownership, verification policy, and count-based pagination through a licensed v6 compatibility module.
+- Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and manual pagination compatibility.
 
 - Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
 
@@ -19,6 +19,8 @@
 ### Fixed
 
 - Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
+
+- Load automatic history beyond relay result caps without treating failed or cancelled pages as exhausted; report saturated timestamp boundaries as incomplete.
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.
 

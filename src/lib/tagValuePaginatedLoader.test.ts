@@ -87,4 +87,63 @@ describe("createPaginatedTagValueLoader batching", () => {
     first.unsubscribe();
     second.unsubscribe();
   });
+  it("loads beyond a short relay page and keeps the original live subscription", async () => {
+    const statuses: string[] = [];
+    const loader = createPaginatedTagValueLoader(pool, "e", {
+      bufferTime: 1,
+      limit: 5,
+      settleTime: 1,
+      onHistoryStatus: (status) => statuses.push(status.state),
+    });
+    const observed = subscribeSpyTo(
+      loader({ value: "thread", relays: [RELAY_URL] }),
+    );
+    const events = [110, 100, 90].map((time, index) => ({
+      ...taggedEvent((index + 1).toString(16).padStart(64, "0"), "thread"),
+      created_at: time,
+    }));
+    const initial = (await server.nextMessage) as [
+      string,
+      string,
+      Record<string, unknown>,
+    ];
+    events
+      .slice(0, 2)
+      .forEach((event) => server.send(["EVENT", initial[1], event]));
+    server.send(["EOSE", initial[1]]);
+    // Serve actual v7 REQs. CLOSE frames can arrive between pages.
+    let pages = 0;
+    while (pages < 2) {
+      const frame = (await server.nextMessage) as [
+        string,
+        string,
+        { until: number },
+      ];
+      if (frame[0] !== "REQ") continue;
+      pages++;
+      events
+        .filter((event) => event.created_at <= frame[2].until)
+        .slice(0, 2)
+        .forEach((event) => server.send(["EVENT", frame[1], event]));
+      server.send(["EOSE", frame[1]]);
+    }
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe("covered"), {
+      timeout: 1000,
+    });
+    const live = { ...taggedEvent("ff".repeat(32), "thread"), created_at: 130 };
+    server.send(["EVENT", initial[1], live]);
+    await vi.waitFor(
+      () =>
+        expect(
+          new Set(
+            observed
+              .getValues()
+              .filter((event) => typeof event !== "string")
+              .map((event) => event.id),
+          ),
+        ).toEqual(new Set([...events, live].map((event) => event.id))),
+      { timeout: 1000 },
+    );
+    observed.unsubscribe();
+  }, 10_000);
 });
