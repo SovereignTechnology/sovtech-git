@@ -1,6 +1,6 @@
 import type { ISigner } from "applesauce-signers";
 import { AuthRequiredError, Relay } from "applesauce-relay";
-import { filter, firstValueFrom, take, timeout } from "rxjs";
+import { firstValueFrom, take, timeout } from "rxjs";
 
 import {
   canonicalGitRepositoryUrl,
@@ -133,15 +133,11 @@ export async function verifyPrivateGraspRelay(
     try {
       await firstValueFrom(
         relay
-          .req(
+          .subscription(
             { kinds: [30_617], limit: 1 },
             { waitForAuth: false, reconnect: false },
           )
-          .pipe(
-            filter((message) => message.type !== "OPEN"),
-            take(1),
-            timeout(RELAY_PREFLIGHT_TIMEOUT_MS),
-          ),
+          .pipe(take(1), timeout(RELAY_PREFLIGHT_TIMEOUT_MS)),
       );
     } catch (error) {
       rejectedAnonymously =
@@ -163,17 +159,11 @@ export async function verifyPrivateGraspRelay(
     }
     await firstValueFrom(
       relay
-        .req(
+        .subscription(
           { kinds: [30_617], limit: 1 },
           { waitForAuth: false, reconnect: false },
         )
-        .pipe(
-          filter(
-            (message) => message.type === "EVENT" || message.type === "EOSE",
-          ),
-          take(1),
-          timeout(RELAY_PREFLIGHT_TIMEOUT_MS),
-        ),
+        .pipe(take(1), timeout(RELAY_PREFLIGHT_TIMEOUT_MS)),
     );
   } finally {
     signal?.removeEventListener("abort", onAbort);

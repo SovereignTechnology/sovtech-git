@@ -192,9 +192,8 @@ liveness.connectToPool(pool);
 // While a caller is subscribed, capping at 30min gives auto-revival probes
 // for relays that have come back without manual intervention.
 //
-// Requires patches/applesauce-relay@6.2.1.patch: count failures when arming
-// recovery, including WebSocket errors without a close event. Otherwise
-// attempts can stay at zero and every retry uses the first 1s delay.
+// Applesauce v7 includes our recovery-attempt fix: count failures when
+// arming recovery, including WebSocket errors without a close event.
 const RECONNECT_PHASES_MS: number[] = [
   // Phase 1 — burst (attempts 1-3)
   1_000,

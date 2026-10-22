@@ -7,7 +7,7 @@ pkgs.stdenvNoCC.mkDerivation {
     root = ../../..;
     fileset = pkgs.lib.fileset.unions [
       ../../../android ../../../package.json ../../../pnpm-lock.yaml
-      ../../../patches ../../../capacitor.config.ts ../../../version.properties
+      ../../../capacitor.config.ts ../../../version.properties
     ];
   };
   nativeBuildInputs = [ node pnpm gradle pkgs.jdk21 pkgs.zstd pkgs.cacert ];

@@ -63,17 +63,18 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@unhead/addons": "^2.1.12",
     "@unhead/react": "^2.1.12",
-    "applesauce-accounts": "^6.2.0",
-    "applesauce-actions": "^6.2.0",
-    "applesauce-common": "^6.2.0",
-    "applesauce-content": "^6.2.0",
-    "applesauce-core": "^6.2.0",
-    "applesauce-loaders": "^6.2.0",
-    "applesauce-react": "^6.0.0",
-    "applesauce-relay": "^6.2.1",
-    "applesauce-signers": "^6.2.2",
-    "applesauce-wallet-connect": "^6.2.0",
+    "applesauce-accounts": "^7.0.2",
+    "applesauce-actions": "^7.0.0",
+    "applesauce-common": "^7.0.0",
+    "applesauce-content": "^7.0.0",
+    "applesauce-core": "^7.0.1",
+    "applesauce-loaders": "^7.0.0",
+    "applesauce-react": "^7.0.0",
+    "applesauce-relay": "^7.0.0",
+    "applesauce-signers": "^7.0.1",
+    "applesauce-wallet-connect": "^7.0.0",
     "blurhash": "^2.0.5",
+    "capacitor-plugin-nostr-signer": "^0.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -86,8 +87,7 @@
     "highlight.js": "^11.11.1",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",
-    "nostr-signer-capacitor-plugin": "https://codeload.github.com/chebizarro/nostr-signer-capacitor-plugin/tar.gz/68e3a285d3108025163d1125d50af74edc6a0da8",
-    "nostr-tools": "^2.23.3",
+    "nostr-tools": "^2.25.2",
     "parse-diff": "^0.11.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
@@ -145,19 +145,5 @@
     "vite": "^6.4.1",
     "vitest": "^3.2.4",
     "vitest-websocket-mock": "0.5.0"
-  },
-  "overrides": {
-    "nostr-signer-capacitor-plugin": "$nostr-signer-capacitor-plugin"
-  },
-  "pnpm": {
-    "overrides": {
-      "nostr-signer-capacitor-plugin": "https://codeload.github.com/chebizarro/nostr-signer-capacitor-plugin/tar.gz/68e3a285d3108025163d1125d50af74edc6a0da8"
-    },
-    "patchedDependencies": {
-      "applesauce-accounts@6.2.0": "patches/applesauce-accounts@6.2.0.patch",
-      "applesauce-signers@6.2.2": "patches/applesauce-signers@6.2.2.patch",
-      "applesauce-core@6.2.0": "patches/applesauce-core@6.2.0.patch",
-      "applesauce-relay@6.2.1": "patches/applesauce-relay@6.2.1.patch"
-    }
   }
 }

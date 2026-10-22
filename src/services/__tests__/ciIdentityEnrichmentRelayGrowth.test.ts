@@ -48,7 +48,7 @@ let querySub: Subscription | undefined;
 
 beforeEach(() => {
   vi.spyOn(Relay, "fetchInformationDocument").mockImplementation(() =>
-    of(null),
+    Promise.resolve(null),
   );
   serverA = new WS(RELAY_A, { jsonProtocol: true });
   serverB = new WS(RELAY_B, { jsonProtocol: true });

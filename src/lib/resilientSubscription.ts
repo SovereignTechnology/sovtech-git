@@ -41,7 +41,7 @@ import {
   RelayClosedError,
 } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
-import { loadBackwardBlocks } from "applesauce-loaders/loaders";
+import { loadBackwardBlocks } from "./legacyTimelineLoader";
 import type { TimelessFilter } from "applesauce-loaders";
 import type { NostrEvent } from "nostr-tools";
 import {
@@ -554,15 +554,8 @@ function processRelay(
     // every reconnect attempt. A bounded cursor is injected only after a full
     // declared-filter EOSE established the relay owner's baseline.
     //
-    // Note on applesauce's `reconnect` / `resubscribe` options: in
-    // applesauce-relay@6.0.0 the `reconnect` option on subscription() /
-    // request() is plumbed through but never read by req() — only publish()
-    // consumes it (see relay.js:758). The `resubscribe` option (which maps
-    // to a repeat() operator) IS read but defaults to undefined → identity,
-    // i.e. no internal repeat. So we don't need to pass either; applesauce
-    // does no internal REQ-level retry/repeat for subscriptions. The only
-    // applesauce retry layer is the auth-only retry inside req() (line 546)
-    // which only handles AuthRequiredError.
+    // V7 high-level methods retry internally by default. This wrapper owns
+    // reconnect and repeat, so disable those policies on each live request.
     //
     // Socket-level reconnect cadence is governed entirely by
     // relay.reconnectTimer (replaced with a 3-phase curve in nostr.ts).
@@ -616,7 +609,10 @@ function processRelay(
       // that forwards subscription notifications and listens to error$ for
       // the lifetime of the inner subscription only.
       const relayObj = pool.relay(relay);
-      const inner$ = relayObj.subscription(filtersWithSince);
+      const inner$ = relayObj.subscription(filtersWithSince, {
+        reconnect: false,
+        resubscribe: false,
+      });
       const sub$ = new Observable<NostrEvent | "EOSE">((s) => {
         lifecycleGeneration = beginLifecycle("initial");
         liveCycleOpen = true;
@@ -1854,7 +1850,7 @@ export function resilientSingleRelayRequest(
     // is torn down when the request completes naturally — merge would hang
     // because error$ never completes on its own.
     const relayObj = pool.relay(relay);
-    const inner$ = relayObj.request(filters);
+    const inner$ = relayObj.request(filters, { reconnect: false });
     const req$ = new Observable<NostrEvent>((s) => {
       const errSub = relayObj.error$.subscribe((err) => {
         if (err !== null) s.error(new TransportError(relay));

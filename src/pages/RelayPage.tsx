@@ -3,7 +3,6 @@ import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Filter } from "applesauce-core/helpers";
-import type { RelayCountResponse as CountResponse } from "applesauce-relay";
 import { nip19 } from "nostr-tools";
 import { combineLatest, of, type Observable } from "rxjs";
 import { catchError, map } from "rxjs/operators";
@@ -89,12 +88,16 @@ function relayCount(
   relayUrl: string,
   filter: Filter,
 ): Observable<number | null> {
-  return (
-    pool.count([relayUrl], filter) as Observable<Record<string, CountResponse>>
-  ).pipe(
-    map((record) =>
-      Object.values(record).reduce((sum, response) => sum + response.count, 0),
-    ),
+  return pool.count([relayUrl], filter).pipe(
+    map((record) => {
+      const outcomes = Object.values(record);
+      if (outcomes.length === 0 || outcomes.some((outcome) => !outcome.ok))
+        return null;
+      return outcomes.reduce(
+        (sum, outcome) => sum + (outcome.ok ? outcome.value.count : 0),
+        0,
+      );
+    }),
     catchError(() => of(null)),
   );
 }
