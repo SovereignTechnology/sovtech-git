@@ -59,6 +59,7 @@ import {
   repeat,
   retry,
   share,
+  skip,
   switchMap,
   take,
   takeUntil,
@@ -1805,6 +1806,131 @@ export function resilientRequest(
   return resilientSubscription(pool, relays, filters, {
     ...opts,
     autoClose: true,
+  });
+}
+
+/**
+ * A local admission refusal, never successful empty history. The loader retains
+ * the pending range and retries with its own backoff; retryAt is an earliest
+ * admission hint, not a timer the loader necessarily follows. Repeated local
+ * attempts during cooldown send no REQ and can delay recovery after expiry.
+ */
+export class HistoryAdmissionError extends Error {
+  constructor(readonly retryAt: number) {
+    super("History request is waiting for relay admission");
+    this.name = "HistoryAdmissionError";
+  }
+}
+
+type HistoryAdmission = {
+  nextStart: number;
+  active: number;
+  refusals: number;
+  resetAfter: number;
+};
+const historyAdmissions = new WeakMap<
+  RelayPool,
+  Map<string, HistoryAdmission>
+>();
+
+/** Structural refusals cannot be fixed by waiting and repeating the same filter. */
+export function isHistoryTerminalError(error: unknown): boolean {
+  return (
+    isPermanentError(error) ||
+    error instanceof AuthRequiredError ||
+    (error instanceof Error && /^(Auth|RelayAuth)/.test(error.name)) ||
+    (error instanceof RelayClosedError &&
+      /max filter count|too many filters|subscriptions exceed max size/i.test(
+        error.reason,
+      ))
+  );
+}
+
+/**
+ * One admitted history page. The v7 window loader owns retries; this method
+ * never converts failure into empty completion or sleeps through a cooldown.
+ * Background starts share 1s pacing and five active requests per pool/relay.
+ * Live subscriptions retain priority and continue using their existing owner.
+ */
+export function resilientHistoryRequest(
+  pool: RelayPool,
+  relay: string,
+  filters: Filter[],
+): Observable<NostrEvent> {
+  return defer(() => {
+    let admissions = historyAdmissions.get(pool);
+    if (!admissions) historyAdmissions.set(pool, (admissions = new Map()));
+    let admission = admissions.get(relay);
+    if (!admission) {
+      admission = { nextStart: 0, active: 0, refusals: 0, resetAfter: 0 };
+      admissions.set(relay, admission);
+    }
+    const state = admission;
+    const now = Date.now();
+    const cooldown = getRateLimitCooldownRemaining(relay);
+    const start = Math.max(now, state.nextStart);
+    // Bound queued reservations. Refused work remains incomplete in the loader.
+    if (cooldown > 0 || state.active >= 5 || start - now > 5_000)
+      throw new HistoryAdmissionError(
+        Math.max(now + cooldown, start, now + 1_000),
+      );
+    state.nextStart = start + 1_000;
+
+    return timer(start - now).pipe(
+      switchMap(() =>
+        defer(() => {
+          // A sibling may have received CLOSED while this page was paced.
+          const remaining = getRateLimitCooldownRemaining(relay);
+          if (remaining > 0 || state.active >= 5)
+            throw new HistoryAdmissionError(
+              Date.now() + Math.max(remaining, 1_000),
+            );
+          const relayObject = pool.relay(relay);
+          state.active++;
+          return new Observable<NostrEvent>((subscriber) => {
+            // Ignore a stale transport error: opening this request must be allowed
+            // to restart the socket. New failures still terminate this attempt.
+            const errors = relayObject.error$
+              .pipe(skip(1))
+              .subscribe((error) => {
+                if (error !== null) subscriber.error(new TransportError(relay));
+              });
+            subscriber.add(errors);
+            if (subscriber.closed) return;
+            const request = relayObject
+              .request(filters, {
+                reconnect: false,
+                timeout: 120_000,
+                authTimeout: 30_000,
+                authRetries: 1,
+              })
+              .subscribe(subscriber);
+            return () => {
+              request.unsubscribe();
+              errors.unsubscribe();
+            };
+          }).pipe(
+            tap({
+              error: (error: unknown) => {
+                if (!isRateLimited(error) || isHistoryTerminalError(error))
+                  return;
+                // Multiple refusals from an already-running batch are one episode.
+                if (getRateLimitCooldownRemaining(relay) > 0) return;
+                if (Date.now() >= state.resetAfter) state.refusals = 0;
+                const delay = Math.min(
+                  (65_000 + Math.random() * 30_000) * 2 ** state.refusals++,
+                  30 * 60_000,
+                );
+                const until = Date.now() + delay;
+                state.resetAfter = until + 5 * 60_000;
+                markRateLimited(relay, until);
+              },
+            }),
+            finalize(() => state.active--),
+          );
+        }),
+      ),
+    );
   });
 }
 
