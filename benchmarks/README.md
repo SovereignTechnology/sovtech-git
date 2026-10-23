@@ -212,7 +212,9 @@ The store comparison uses ten alternating pairs after two warmups per variant.
 It checks event identities after each sample and measures kind/tag timelines,
 multiple subscribers, duplicate delivery, synchronous reads and replaceable
 updates. Verification is disabled to match the application store policy. The
-100-read scenarios report the entire loop, not one read. Node CPU is not browser
+100-read scenarios repeat a local query to stabilize timing; they do not model
+100 user actions or relay requests. They report the entire loop, not one read.
+Node CPU is not browser
 CPU. Between-sample GC reduces carryover but does not make this a memory benchmark.
 
 The transport comparison uses real local WebSockets and the default request
@@ -234,10 +236,10 @@ fixed observation windows do not establish completion.
 
 ## Fixed public repository replay
 
-Supply a captured public repository snapshot with `BENCH_CORPUS`. Keep its
-verified public events and capture provenance in an external artifact archive,
-including relay failures and bounded-cursor limitations. A fixed snapshot is not
-a complete archive of every relay.
+Supply a captured public repository snapshot with `BENCH_CORPUS`. The gzip JSON
+contains an `events` array; preserve capture provenance, relay failures and
+bounded-cursor limitations with the artifact. A snapshot is not a complete
+archive of every relay. Keep the dataset outside tracked source.
 
 Run the actual issue/PR models and populated-store queries with each checkout's
 own installed dependencies:
@@ -256,8 +258,17 @@ replay ngit-grasp's documented result cap and omitted-limit default; the runner
 otherwise defaults omitted limits to 100. Controlled replay selects repo relay
 mode and mirrors the snapshot across intercepted relays. It measures event-shape
 costs with fixed topology, not the traffic distribution of real outboxes.
-The interaction probe filters and clears the issue list while
-history loads, waiting for the rendered result and paint. Fixed observation
+The interaction timer starts before Playwright fills the issue search input with
+a nonmatching string, waits for the empty-result message, then waits for two
+animation frames. Clearing the input happens after the timed interval. This is
+an automated interaction duration including automation, scheduling and rendering;
+the frame callbacks allow a rendering opportunity but do not prove physical
+presentation. It is not handler CPU, INP, a freeze duration or history completion.
+The action runs after the first issue appears, so versions can be processing
+different event volumes and different stages of loading. A comparison against
+missing-history behavior measures the overall user-visible tradeoff, not an
+isolated dependency regression. More work can explain a slower action, but does
+not establish that the delay is unavoidable. Fixed observation
 windows measure ongoing work; they do not prove exhaustion. The 100-result cap
 also exposes the separate, unchanged root-discovery cap in both versions.
 
