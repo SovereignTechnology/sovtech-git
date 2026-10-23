@@ -19,6 +19,8 @@ export default async function run(controlPage) {
     byKind: {},
     requestLog: [],
     closes: 0,
+    pending: 0,
+    lastDelivery: 0,
   };
   const errors = [];
   const networkFailures = [];
@@ -71,18 +73,29 @@ export default async function run(controlPage) {
         ).replace(/%[A-F0-9]{2}/g, "x").length;
         counters.requestLog.push({ at: Date.now(), url: ws.url(), filters });
         active.add(frame[1]);
+        counters.pending++;
         try {
           await page.waitForTimeout(config.latencyMs ?? 20);
         } catch {
+          counters.pending--;
           return;
         }
         {
+          counters.pending--;
           if (!active.has(frame[1])) return;
           const found = new Map();
           for (const f of filters)
             for (const e of fixture.events
               .filter((e) => matches(e, f))
-              .slice(0, Math.min(f.limit ?? 100, config.cap ?? 100)))
+              .slice(
+                0,
+                config.matchedData
+                  ? fixture.events.length
+                  : Math.min(
+                      f.limit ?? config.defaultLimit ?? 100,
+                      config.cap ?? 100,
+                    ),
+              ))
               found.set(e.id, e);
           for (const e of found.values()) {
             counters.eventFrames++;
@@ -93,6 +106,7 @@ export default async function run(controlPage) {
             counters.byKind[e.kind] = (counters.byKind[e.kind] ?? 0) + 1;
             ws.send(JSON.stringify(["EVENT", frame[1], e]));
           }
+          counters.lastDelivery = Date.now();
           ws.send(JSON.stringify(["EOSE", frame[1]]));
         }
       });
@@ -194,7 +208,7 @@ export default async function run(controlPage) {
   const start = Date.now();
   const milestones = [];
   const capture = async (label) => {
-    const metrics = await page.evaluate(async () => {
+    const metrics = await page.evaluate(async (retainEventIds) => {
       const b = window.__bench;
       const digest = await crypto.subtle.digest(
         "SHA-256",
@@ -210,6 +224,7 @@ export default async function run(controlPage) {
         eventBytes: b?.eventBytes,
         eventFrames: b?.eventFrames,
         unique: b?.events.size,
+        eventIds: retainEventIds ? [...b.events].sort() : undefined,
         eventIdsSha256: [...new Uint8Array(digest)]
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join(""),
@@ -219,7 +234,7 @@ export default async function run(controlPage) {
         timeOrigin: performance.timeOrigin,
         body: document.body.innerText.slice(0, 1800),
       };
-    });
+    }, config.retainEventIds);
     milestones.push({ label, elapsedMs: Date.now() - start, metrics });
   };
   let readyMs = null,
@@ -248,6 +263,18 @@ export default async function run(controlPage) {
         .waitFor({ timeout: 15000 });
     readyMs = Date.now() - start;
     await capture("ready");
+    if (config.matchedData) {
+      if (config.live)
+        throw new Error("Matched data requires controlled replay");
+      // Quiet time is the condition under test, not a substitute for readiness.
+      // Compare event hashes across variants before interpreting these timings.
+      const deadline = Date.now() + 30000;
+      while (counters.pending || Date.now() - counters.lastDelivery < 1000) {
+        if (Date.now() > deadline) throw new Error("Replay did not settle");
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+      }
+      await capture("matched-data-ready");
+    }
     if (config.probeInitialInteraction && config.scenario === "notifications") {
       const interactionStart = Date.now();
       await page.locator('[aria-label="Group notifications by user"]').click();
@@ -279,6 +306,41 @@ export default async function run(controlPage) {
         elapsedMs: Date.now() - start,
         interactionMs: Date.now() - interactionStart,
       });
+    }
+    if (config.probeRepoInteraction && config.scenario === "repo") {
+      const input = page.getByPlaceholder(/^Search issues,/);
+      const began = Date.now();
+      await input.fill("benchmark-no-matching-subject-8b0ff5");
+      await page
+        .getByText("No issues match your filters", { exact: true })
+        .waitFor({ timeout: 5000 });
+      await page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error("Paint deadline")),
+              5000,
+            );
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                clearTimeout(timer);
+                resolve();
+              }),
+            );
+          }),
+      );
+      milestones.push({
+        label: config.matchedData
+          ? "filter-after-matched-data"
+          : "filter-during-history-painted",
+        interactionMs: Date.now() - began,
+        elapsedMs: Date.now() - start,
+      });
+      await input.fill("");
+      await page
+        .locator('a[href*="/issues/"]')
+        .first()
+        .waitFor({ timeout: 5000 });
     }
     // Fixed observation windows measure continuing background work, not readiness.
     await page.waitForTimeout(config.observationMs ?? 20000);
@@ -365,6 +427,7 @@ export default async function run(controlPage) {
     config,
     browser: context.browser().version(),
     fixtureExpected: config.live ? null : fixture.expected,
+    fixtureSha256: config.live ? null : fixture.sha256,
     readyMs,
     failure,
     errors,

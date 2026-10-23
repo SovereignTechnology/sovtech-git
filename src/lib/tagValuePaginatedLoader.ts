@@ -1,72 +1,18 @@
 /**
- * createPaginatedTagValueLoader
- *
- * A drop-in replacement for applesauce's createTagValueLoader that adds
- * per-relay backward pagination, a persistent live subscription, and an
- * idiomatic EOSE settle signal.
- *
- * Batching behaviour is identical to createTagValueLoader:
- *   - Incoming pointers are buffered by time (bufferTime) and size (bufferSize)
- *   - All pointers in a window are merged into one filter per relay URL
- *
- * Per relay, for each batch window:
- *   1. A single pool.subscription() is opened (no limit, reconnect: false +
- *      defer() + retry() for lastReceivedAt-aware reconnect).
- *      This serves as both the live feed and the initial depth probe.
- *   2. Events arriving before EOSE are counted and the oldest timestamp tracked.
- *   3. After EOSE:
- *      - If count < limit: relay has no more history, nothing more to do.
- *      - If count >= limit: relay truncated its response — backward pagination
- *        is kicked off using loadBlocksFromRelay, starting from the oldest
- *        event seen, until the relay returns 0 events.
- *   4. The live subscription stays open throughout and after pagination,
- *      reconnecting automatically via defer() + retry() with exponential
- *      backoff. On reconnect, since: lastReceivedAt avoids replaying full
- *      history; eoseSeen remains true so pagination is not re-triggered.
- *
- * Reconnect behaviour (mirrors resilientSubscription):
- *   - Exponential backoff: 1s × 2^(n-1), capped at 5 minutes.
- *   - Rate-limited CLOSED: prolonged backoff (60–90s × 2^(n-1), capped at
- *     30 minutes) + shared per-relay cooldown registry so other concurrent
- *     subscriptions to the same relay also hold off.
- *   - Permanent CLOSED (restricted/blocked/pow/mute/unsupported/invalid):
- *     fast-fail immediately — no point retrying.
- *   - AuthRequired: fast-fail — handled by the pool-level auth policy.
- *   - Before first EOSE: capped at retryCount (default 3) attempts.
- *   - After first EOSE: unlimited retries (relay was reachable, treat drops
- *     as transient).
- *
- * Pagination modes:
- *   - Auto (default): pagination is triggered automatically after EOSE if the
- *     relay returned >= limit events. Continues until exhausted.
- *   - Manual (manualPaginate$ provided): automatic pagination is disabled.
- *     Each emission of manualPaginate$ requests the next backward block from
- *     all non-exhausted relays. Useful for "load more" buttons.
- *
- * EOSE settle signal:
- *   The returned observable emits NostrEvent | "EOSE". "EOSE" is emitted
- *   200ms after the first relay in the batch finishes its current work:
- *     - Auto mode: first relay whose initial EOSE count < limit (no pagination
- *       needed), or first relay whose backward pagination block completes.
- *     - Manual mode: first relay that returns its block after a manualPaginate$
- *       trigger, or immediately at relay EOSE (no pagination pending).
- *     - The 200ms debounce gives other relays a chance to deliver events
- *       before the consumer considers the load "settled".
- *   Consumers that don't need the signal can pipe through onlyEvents().
- *
- * Exhaustion tracking (in-memory, resets on page reload):
- *   - Once pagination completes (or is skipped) for a relay+batch combo,
- *     the key is added to the exhausted set.
- *   - If the same set of tag values is re-queued in a later buffer window
- *     (e.g. component unmount/remount), the exhausted relay skips pagination
- *     and only opens the live subscription.
+ * Batched tag history with a persistent resilient live subscription.
+ * Automatic mode uses v7 finite-window coverage, including relay caps below
+ * the requested page size. Only successful coverage is cached as exhausted;
+ * cancellation, failed requests and saturated timestamps stay incomplete.
+ * Manual mode uses explicit batches over v7 point windows. UI settlement is not evidence of historical completeness.
  */
 
 import { filterDuplicateEvents, mapEventsToStore } from "applesauce-core";
 import { mergeRelaySets } from "applesauce-core/helpers/relays";
 import type { Filter } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
-import { loadBlocksFromRelay } from "./legacyTimelineLoader";
+import { batchHistory } from "./batchHistory";
+import { historyWindow } from "./historyWindow";
+import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TagValuePointer } from "applesauce-loaders/loaders";
 import type { CacheRequest, TimelessFilter } from "applesauce-loaders";
 import { makeCacheRequest } from "applesauce-loaders/helpers";
@@ -74,15 +20,13 @@ import type { RelayPool } from "applesauce-relay";
 import { onlyEvents } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
 import {
-  BehaviorSubject,
   EMPTY,
   Observable,
   Subject,
   bufferTime,
-  catchError,
   filter,
-  finalize,
   merge,
+  map,
   share,
   switchMap,
   take,
@@ -90,7 +34,9 @@ import {
 import { makeSettleSignal, DEFAULT_SETTLE_TIME } from "./settleSignal";
 import type { SettleSignal, SettleSignalOptions } from "./settleSignal";
 import {
-  resilientSingleRelayRequest,
+  resilientHistoryRequest,
+  isHistoryTerminalError,
+  HistoryAdmissionError,
   resilientSubscription,
 } from "./resilientSubscription";
 
@@ -108,6 +54,8 @@ export type PaginatedTagValueLoaderOptions = {
   kinds?: number[];
   /** Number of events to request per block — also the pagination threshold (default 500) */
   limit?: number;
+  /** Historical coverage is separate from the UI EOSE settle signal. */
+  onHistoryStatus?: (status: TimelineStatus) => void;
   /** EventStore for deduplication and storage */
   eventStore?: EventStore;
   /** Extra relays to always include */
@@ -206,6 +154,7 @@ function processRelayStream(
   exhausted: Set<string>,
   signal: SettleSignal,
   manualPaginate$: Observable<void> | undefined,
+  onHistoryStatus: ((status: TimelineStatus) => void) | undefined,
 ): Observable<NostrEvent> {
   // No limit on the live filter — we want all future events.
   const liveFilter: Filter = { ...relayFilter };
@@ -225,85 +174,96 @@ function processRelayStream(
   }
 
   return new Observable<NostrEvent>((subscriber) => {
-    let countBeforeEose = 0;
     let oldestSeen: number | undefined;
     let eoseSeen = false;
+    let liveEnded = false;
+    let historyDone = false;
     let paginateSub: { unsubscribe(): void } | undefined;
-    let manualSub: { unsubscribe(): void } | undefined;
-
-    // Shared pagination window — driven by auto (BehaviorSubject) or manual.
-    let window$: Subject<{ since?: number; until?: number }> | undefined;
 
     const startPagination = () => {
-      // loadBlocksFromRelay is used here purely as a pagination cursor state
-      // machine: it tracks the backward cursor, prevents parallel page loads,
-      // and detects exhaustion (zero events returned). It does NOT perform the
-      // actual relay request — that is handled by extendingPool below, which
-      // replaces applesauce's internal request with resilientSingleRelayRequest
-      // so every page gets our own exponential backoff and rate-limit handling
-      // instead of applesauce's built-in retry logic.
-      //
-      // extendingPool also calls signal.extend() on every page request (not
-      // just the first) to keep the signal alive while pagination is in flight.
-      // The relay is fixed in the outer scope so _relays is always [relay] and
-      // can be ignored.
-      const extendingPool = (_relays: string[], filters: Filter[]) => {
-        signal.extend(relay);
-        return resilientSingleRelayRequest(pool, relay, filters, {
-          retryCount,
-        });
-      };
-
-      if (manualPaginate$) {
-        // Manual mode: create a plain Subject; each manualPaginate$ emission
-        // pushes a new window value to request the next block.
-        const manualWindow$ = new Subject<{ since?: number; until?: number }>();
-        window$ = manualWindow$;
-
-        manualSub = manualPaginate$.subscribe(() => {
-          if (!exhausted.has(key)) {
-            manualWindow$.next({ since: -Infinity, until: oldestSeen });
-          }
-        });
-      } else {
-        // Auto mode: BehaviorSubject with initial value triggers the first
-        // block immediately; loadBlocksFromRelay drives subsequent blocks
-        // via its internal cursor until the relay returns 0 events.
-        window$ = new BehaviorSubject<{ since?: number; until?: number }>({
-          since: -Infinity,
-          until: oldestSeen,
-        });
-      }
-
-      paginateSub = window$
-        .pipe(
-          loadBlocksFromRelay(extendingPool, relay, [paginationFilter], {
-            limit,
-          }),
-          // Relay errors during backward pagination are non-fatal — finalize
-          // below still runs (on both completion and error) so signal.settle
-          // is called and the relay is marked exhausted in auto mode.
-          catchError(() => EMPTY),
-          finalize(() => {
-            if (!manualPaginate$) {
-              // Auto: fully exhausted when loadBlocksFromRelay completes
-              exhausted.add(key);
-            }
-            signal.settle(relay);
-          }),
-        )
-        .subscribe({
-          next: (event) => {
-            // Track oldest seen across all blocks for manual cursor
-            if (oldestSeen === undefined || event.created_at < oldestSeen) {
-              oldestSeen = event.created_at;
-            }
-            subscriber.next(event);
+      if (!manualPaginate$) {
+        // This path starts only after a real EOSE for the untimed live filter.
+        // Zero events proves an empty snapshot; a non-empty short response may
+        // still be capped by the relay and must go through history coverage.
+        if (oldestSeen === undefined) {
+          const window = { since: 0, until: Math.floor(Date.now() / 1000) };
+          historyDone = true;
+          exhausted.add(key);
+          signal.settle(relay);
+          onHistoryStatus?.({
+            source: relay,
+            filter: paginationFilter,
+            window,
+            buffer: window,
+            state: "covered",
+          });
+          return;
+        }
+        paginateSub = historyWindow(
+          (_relays, filters) => {
+            signal.extend(relay);
+            return resilientHistoryRequest(pool, relay, filters);
           },
-          // Completing does not complete the outer observable —
-          // the live subscription keeps it alive
+          relay,
+          [paginationFilter],
+          {
+            limit,
+            until: oldestSeen,
+            isTerminalError: isHistoryTerminalError,
+            onStatus: (status) => {
+              onHistoryStatus?.(status);
+              if (status.state === "incomplete") {
+                if (status.error instanceof HistoryAdmissionError)
+                  signal.settle(relay);
+                else signal.error(relay);
+              }
+            },
+            onComplete: (covered) => {
+              // Cancellation, failures and boundary saturation are not exhaustion.
+              if (covered) {
+                exhausted.add(key);
+                signal.settle(relay);
+              }
+            },
+          },
+        ).subscribe({
+          next: (event) => subscriber.next(event),
+          complete: () => {
+            historyDone = true;
+            if (liveEnded) subscriber.complete();
+          },
         });
+        return;
+      }
+      if (paginateSub) return;
+      paginateSub = manualPaginate$
+        .pipe(
+          map(() => ({ limit, until: oldestSeen })),
+          batchHistory(
+            (_relays, filters) => {
+              signal.extend(relay);
+              return resilientHistoryRequest(pool, relay, filters);
+            },
+            relay,
+            [paginationFilter],
+            {
+              onStatus: onHistoryStatus,
+              retryCount,
+              isTerminalError: isHistoryTerminalError,
+              isAdmissionError: (error) =>
+                error instanceof HistoryAdmissionError,
+              onBatchComplete: (result) => {
+                if (result.exhausted) exhausted.add(key);
+                if (result.incomplete) signal.error(relay);
+                else signal.settle(relay);
+              },
+            },
+          ),
+        )
+        .subscribe({ next: (event) => subscriber.next(event) });
     };
+
+    if (manualPaginate$) startPagination();
 
     // Delegate reconnect, backoff, rate-limit handling, and foreground gap-fill
     // to resilientSubscription. settle: false — we manage the outer signal
@@ -320,44 +280,38 @@ function processRelayStream(
       gapFillBuffer,
       onRelaySettle: () => signal.settle(relay),
       onRelayError: () => signal.error(relay),
-    }).subscribe({
-      next: (msg) => {
-        if (msg === "EOSE") {
-          eoseSeen = true;
-          if (manualPaginate$) {
-            // Manual mode: signal settled at EOSE regardless of count —
-            // the user decides when to request more
-            signal.settle(relay);
-            // Only start pagination machinery if there may be more history
-            if (countBeforeEose >= limit) startPagination();
-            else exhausted.add(key);
-          } else {
-            // Auto mode: paginate if relay was truncated, otherwise done
-            if (countBeforeEose < limit) {
-              exhausted.add(key);
-              signal.settle(relay);
-            } else {
-              startPagination();
-            }
-          }
+      // settle:false does not emit an EOSE sentinel. Use the wire callback.
+      onRelayEose: () => {
+        if (eoseSeen) return;
+        eoseSeen = true;
+        if (manualPaginate$) {
+          signal.settle(relay);
+          // A short live response may reflect a relay cap, not exhaustion.
+          startPagination();
         } else {
-          const event = msg as NostrEvent;
-          if (!eoseSeen) {
-            countBeforeEose++;
-            if (oldestSeen === undefined || event.created_at < oldestSeen) {
-              oldestSeen = event.created_at;
-            }
-          }
-          subscriber.next(event);
+          // Short pages can be relay caps. Reconnect EOSE must not restart us.
+          startPagination();
         }
       },
-      complete: () => subscriber.complete(),
+    }).subscribe({
+      next: (msg) => {
+        if (msg === "EOSE") return;
+        if (!eoseSeen) {
+          if (oldestSeen === undefined || msg.created_at < oldestSeen)
+            oldestSeen = msg.created_at;
+        }
+        subscriber.next(msg);
+      },
+      complete: () => {
+        liveEnded = true;
+        if (!paginateSub || historyDone || manualPaginate$)
+          subscriber.complete();
+      },
     });
 
     return () => {
       liveSub.unsubscribe();
       paginateSub?.unsubscribe();
-      manualSub?.unsubscribe();
     };
   });
 }
@@ -399,6 +353,7 @@ function processBatch(
       exhausted,
       signal,
       opts.manualPaginate$,
+      opts.onHistoryStatus,
     );
   });
 

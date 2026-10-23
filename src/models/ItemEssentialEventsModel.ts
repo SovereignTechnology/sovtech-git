@@ -1,3 +1,4 @@
+import { coalesceBursts } from "@/lib/coalesceBursts";
 import { of } from "rxjs";
 import { map, switchMap } from "rxjs/operators";
 import type { Model } from "applesauce-core/event-store";
@@ -24,6 +25,8 @@ export function ItemEssentialEventsModel(
         },
       ])
       .pipe(
+        // A burst only needs one deletion timeline for its latest essential IDs.
+        coalesceBursts(),
         switchMap((essentials) => {
           const essentialIds = essentials
             .filter((event) => event.kind !== DELETION_KIND)

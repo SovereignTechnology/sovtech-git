@@ -114,7 +114,8 @@ The default devShell deliberately omits the ~1 GB Chromium bundle; only the
 exact version of `pkgs.playwright-driver` in `flake.nix` so the browser
 revisions match — bump them together.
 
-The benchmark is never part of pre-commit, `pnpm test`, or CI.
+The live relay benchmark is never part of pre-commit, `pnpm test`, or automatic CI.
+The separate controlled UI job below runs on demand.
 
 ## Application profiling
 
@@ -212,7 +213,9 @@ The store comparison uses ten alternating pairs after two warmups per variant.
 It checks event identities after each sample and measures kind/tag timelines,
 multiple subscribers, duplicate delivery, synchronous reads and replaceable
 updates. Verification is disabled to match the application store policy. The
-100-read scenarios report the entire loop, not one read. Node CPU is not browser
+100-read scenarios repeat a local query to stabilize timing; they do not model
+100 user actions or relay requests. They report the entire loop, not one read.
+Node CPU is not browser
 CPU. Between-sample GC reduces carryover but does not make this a memory benchmark.
 
 The transport comparison uses real local WebSockets and the default request
@@ -231,3 +234,114 @@ Captured event-ID hashes permit equal-data checks. Heap readings remain
 GC-sensitive snapshots. Use production builds for primary results and identical
 profiling builds for supporting attribution. Record every config and failure;
 fixed observation windows do not establish completion.
+
+## Fixed public repository replay
+
+Supply a captured public repository snapshot with `BENCH_CORPUS`. The gzip JSON
+contains an `events` array; preserve capture provenance, relay failures and
+bounded-cursor limitations with the artifact. A snapshot is not a complete
+archive of every relay. Keep the dataset outside tracked source.
+
+Run the actual issue/PR models and populated-store queries with each checkout's
+own installed dependencies:
+
+```sh
+export BENCH_CORPUS=/path/to/repository-snapshot.json.gz
+node --expose-gc benchmarks/repository-models.mjs <v6-tree> <unpatched-v7-tree> <patched-v7-tree>
+BENCH_STREAMING=1 node --expose-gc benchmarks/repository-models.mjs <v6-tree> <patched-before-coalescing> <coalesced-tree>
+```
+
+For production browser replay, start the fixture server with
+the same `BENCH_CORPUS` environment variable, then use the
+existing browser runner with `retainEventIds: true` and
+`probeRepoInteraction: true`. Set both `cap` and `defaultLimit` to 500 to
+replay ngit-grasp's documented result cap and omitted-limit default; the runner
+otherwise defaults omitted limits to 100. Controlled replay selects repo relay
+mode and mirrors the snapshot across intercepted relays. It measures event-shape
+costs with fixed topology, not the traffic distribution of real outboxes.
+The interaction timer starts before Playwright fills the issue search input with
+a nonmatching string, waits for the empty-result message, then waits for two
+animation frames. Clearing the input happens after the timed interval. This is
+an automated interaction duration including automation, scheduling and rendering;
+the frame callbacks allow a rendering opportunity but do not prove physical
+presentation. It is not handler CPU, INP, a freeze duration or history completion.
+The action runs after the first issue appears, so versions can be processing
+different event volumes and different stages of loading. A comparison against
+missing-history behavior measures the overall user-visible tradeoff, not an
+isolated dependency regression. More work can explain a slower action, but does
+not establish that the delay is unavoidable. Fixed observation
+windows measure ongoing work; they do not prove exhaustion. The 100-result cap
+also exposes the separate, unchanged root-discovery cap in both versions.
+
+For live query-budget validation in the isolated browser, the same fixture
+server receives reports and the production preview must already be running:
+
+```sh
+node benchmarks/budget-browser-session.mjs <lease> <preview-port> <report-label>
+```
+
+This adapter reuses the scenario functions and comparison limits from
+`bench.mjs`; it substitutes the lease's timer for Node's timer in bounded
+polling. It exits non-zero on scenario errors or budget failures, preserving the report.
+Allow the app's actual public relay/NIP-05 origins when creating the lease.
+
+## On-demand UI benchmark artifacts
+
+`.ngit/nix/workflows/benchmark.yaml` runs only when explicitly requested:
+
+```sh
+ngit --repo origin ci trigger <coordinator-npub> <commit> \
+  --workflow .ngit/nix/workflows/benchmark.yaml --json
+```
+
+The coordinator's manual-run policy requires a confirmed maintainer (or a key
+explicitly accepted by its operator) and a commit reachable from a published
+repository-state ref. Publishing a PR revision alone does not satisfy that ref
+requirement. For PR-only heads, use the local lease driver; request the remote
+run after the commit is published on an eligible branch. A CLI response saying
+`triggered` means the request was published, not that a worker accepted it.
+
+The job builds that exact revision with frozen dependencies and runs one discarded
+warmup followed by five fresh desktop browser contexts. It uses the deterministic
+synthetic repository, blocks external HTTP, intercepts all relay WebSockets, and
+publishes raw reports plus `summary.json` as the signed run's `replay` artifact.
+It does not publish events or require an account. Locally, open a dedicated
+`browser-session` lease and pass its ID to `node benchmarks/ci-replay.mjs <lease>`
+to exercise the same driver against an already-built `dist/`; ports 4173 and 4190
+must be free. Close the lease afterward. Browser binaries use the same
+flake-pinned Playwright bundle as the benchmark shell. This is separate from the
+live relay query-budget benchmark and the ordinary CI checks.
+
+Request runs before and after a performance-sensitive change, on the same worker
+resource configuration. Keep their immutable artifact links in the PR and the
+numerical conclusion in the commit message. A latest-result link is a convenience,
+not a replacement for the referenced evidence. Do not commit downloaded reports
+or automatically overwrite `baseline.json`. Compare downloaded summaries with:
+
+```sh
+node benchmarks/replay-report.mjs before/summary.json after/summary.json \
+  perf-reports/comparison.json
+```
+
+Dataset fingerprints cover unsigned event content because synthetic Schnorr
+signatures contain random auxiliary data. The comparison refuses mismatched
+browser versions, dataset fingerprints, event IDs or
+benchmark harnesses. Carry the same benchmark-only change onto an older revision
+when it lacks the harness, recording both the measured application commit and
+that benchmark commit. Dependency lock hashes may differ intentionally. Match
+worker resources too; scheduling noise remains even on identical workers.
+Timing distributions are evidence for review, not a universal percentage gate.
+Missing data, page failures and inconsistent samples fail the job.
+
+`matchedData: true` in the local browser config returns all events matching each
+filter, disregarding result limits. After requests have drained and no replay
+response has been delivered for one second, it measures filtering the issue list.
+This deliberately removes pagination truncation from the workload. It retains
+filter semantics, but is not a realistic capped relay or a pagination correctness
+test. Reports verify that the received event set does not grow during the action,
+and comparisons require identical sets across versions. The timer includes
+Playwright filling, the empty-result DOM update and two animation frames; it is
+not INP. First-content and startup long-task measurements remain descriptive
+because delivery order can differ. Use the capped replay separately to assess
+history recovery and interactions during loading. The real gitworkshop capture
+can be supplied locally via `BENCH_CORPUS`; CI needs no external dataset download.

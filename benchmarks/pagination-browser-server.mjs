@@ -1,6 +1,8 @@
 // Local, synthetic benchmark fixtures and JSON artifact receiver. Never publishes.
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { resolve } from "node:path";
 import { finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 const out = resolve("perf-reports/pagination-performance");
@@ -67,7 +69,7 @@ for (let i = 0; i < 60; i++) {
     );
 }
 events.sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
-const fixture = {
+let fixture = {
   owner,
   user,
   events,
@@ -75,6 +77,26 @@ const fixture = {
   expected: { roots: 60, comments: 600, repositories: 60 },
   defaultRelays: [relay],
 };
+if (process.env.BENCH_CORPUS) {
+  const corpus = JSON.parse(gunzipSync(readFileSync(process.env.BENCH_CORPUS)));
+  fixture = {
+    owner: corpus.owner,
+    user: corpus.owner,
+    events: corpus.events,
+    repoPath: `/${nip19.npubEncode(corpus.owner)}/gitworkshop/issues`,
+    expected: { snapshotEvents: corpus.events.length },
+    defaultRelays: [relay],
+  };
+}
+// Synthetic Schnorr signatures use random auxiliary data; fingerprint the
+// unsigned event content so equivalent fixtures compare across fresh processes.
+fixture.sha256 = createHash("sha256")
+  .update(
+    JSON.stringify(
+      fixture.events.map(({ sig: _signature, ...event }) => event),
+    ),
+  )
+  .digest("hex");
 writeFileSync(`${out}/fixture.json`, JSON.stringify(fixture));
 createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");

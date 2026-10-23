@@ -1,4 +1,4 @@
-{ pkgs, system, android-sdk, ngit-grasp-pkg }:
+{ pkgs, system, android-sdk, ngit-grasp-pkg, playwright-browsers }:
 let
   inherit (import ./tools.nix { inherit pkgs; }) node pnpm ngit gradle netlify dependencies;
   android-dependencies = import ./android-dependencies.nix {
@@ -68,6 +68,13 @@ in {
         '';
       };
     };
+    benchmark.browser.replay = web "benchmark-replay" ''
+      export PLAYWRIGHT_BROWSERS_PATH=${playwright-browsers}
+      export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+      pnpm build
+      trap 'mkdir -p "$NGIT_CI_OUTPUT_DIR/replay"; cp -R perf-reports/pagination-performance/. "$NGIT_CI_OUTPUT_DIR/replay/"' EXIT
+      node benchmarks/ci-replay.mjs
+    '';
     preview.preview.publish = command "preview" [ ngit ] (builtins.readFile ./preview.sh);
     production = {
       netlify.publish = command "netlify" [ netlify ] (builtins.readFile ./netlify.sh);

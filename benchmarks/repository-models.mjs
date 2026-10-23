@@ -14,7 +14,7 @@ const fixture = resolve(process.env.BENCH_CORPUS);
 const worker = `
 import { EventStore } from 'applesauce-core';
 import { fakeVerifyEvent } from 'applesauce-core/helpers';
-import { firstValueFrom, take, timeout } from 'rxjs';
+import { firstValueFrom, take, timeout, combineLatest, ReplaySubject, filter } from 'rxjs';
 import { IssueListModel } from './src/models/IssueListModel';
 import { PRListModel } from './src/models/PRListModel';
 import { readFileSync } from 'node:fs';
@@ -44,15 +44,35 @@ for(let repeat=0;repeat<12;repeat++) for(const {name,f} of cases){
   rows.push({scenario:name,repeat,ms:performance.now()-start,cpuMs:(cpu.user+cpu.system)/1000,count:result.length,hash:digest(result.map(e=>e.id).sort())});
   if(store.getSyncPairs){ const start=performance.now();let pairs;for(let i=0;i<100;i++)pairs=store.getSyncPairs(f);rows.push({scenario:'sync-'+name,repeat,ms:performance.now()-start,count:pairs.length,hash:digest(pairs.map(e=>e.id).sort())}); }
 }
-store.dispose(); console.log(JSON.stringify({rows,filters:cases}));
+store.dispose();
+if(process.env.BENCH_STREAMING === '1') for(let repeat=0;repeat<12;repeat++) {
+ const live = new EventStore(); live.verifyEvent=fakeVerifyEvent;
+ const seed=e=>[1617,1618,1621,30617].includes(e.kind);
+ for(const event of corpus.events.filter(seed)) live.add(event);
+ const output=new ReplaySubject(1);let emissions=0,last;
+ const project=outputs=>outputs.map(items=>items.map(({id,status,commentCount,currentSubject,lastActivityAt,labels})=>({id,status,commentCount,currentSubject,lastActivityAt,labels})).sort((a,b)=>a.id.localeCompare(b.id)));
+ const sub=combineLatest([IssueListModel(corpus.coordinate),PRListModel(corpus.coordinate)].map(model=>model(live))).subscribe(value=>{emissions++;last=value;output.next(value);});
+ await firstValueFrom(output.pipe(take(1),timeout(5000)));
+ const target=rows.find(r=>r.scenario==='list-models').hash;
+ global.gc?.();const before=process.cpuUsage(),start=performance.now();
+ for(const event of corpus.events.filter(e=>!seed(e)))live.add(event);
+ const insertMs=performance.now()-start;
+ // Validate after ingestion so repeated hashing is not charged as model work.
+ const settled=firstValueFrom(output.pipe(filter(value=>digest(project(value))===target),take(1),timeout(20000)));
+ await settled;const cpu=process.cpuUsage(before);
+ rows.push({scenario:'streaming-models',repeat,ms:performance.now()-start,insertMs,cpuMs:(cpu.user+cpu.system)/1000,emissions,counts:last.map(x=>x.length),hash:digest(project(last))});
+ sub.unsubscribe();output.complete();live.dispose();
+}
+console.log(JSON.stringify({rows,filters:cases}));
 `;
 const report = {
   created: new Date().toISOString(),
+  streaming: process.env.BENCH_STREAMING === "1",
   fixtureSha256: createHash("sha256")
     .update(readFileSync(fixture))
     .digest("hex"),
   limitations:
-    "Fixed public snapshot, not global relay completeness. Node CPU and elapsed time; signatures preverified during capture, verification excluded here. Model elapsed includes its 100ms audit. Twelve repetitions; first included. No browser or network claims.",
+    "Fixed public snapshot, not global relay completeness. Node CPU and elapsed time; signatures preverified during capture, verification excluded here. Model elapsed includes its 100ms audit. Twelve repetitions; first included. Streaming mode seeds roots and measures insertion with live models, then waits for the full resolved snapshot. Final hashing runs after ingestion. Elapsed includes scheduler delays. No browser or network claims.",
   variants: [],
 };
 for (const input of process.argv.slice(2)) {
