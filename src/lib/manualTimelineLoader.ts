@@ -59,7 +59,7 @@ import { BehaviorSubject, Observable, Subject } from "rxjs";
 import { debounceTime, finalize, mergeAll, tap } from "rxjs/operators";
 import { mapEventsToStore } from "applesauce-core";
 import { getSeenRelays } from "applesauce-core/helpers";
-import { loadBlocksFromRelay } from "applesauce-loaders/loaders";
+import { loadBlocksFromRelay } from "./legacyTimelineLoader";
 import { onlyEvents } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
 import type { EventStore } from "applesauce-core";

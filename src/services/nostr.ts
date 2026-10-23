@@ -1,3 +1,4 @@
+import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
 import { fakeVerifyEvent, persistEventsToCache } from "applesauce-core/helpers";
 import type { Filter } from "applesauce-core/helpers";
@@ -134,6 +135,8 @@ eventStore.verifyEvent = fakeVerifyEvent;
 // Persist events to the local nostrdb
 persistEventsToCache(eventStore, saveEvents);
 
+if (import.meta.env.VITE_PROFILE === "1") instrumentEventStore(eventStore);
+
 /**
  * Resolves after durable deletion state has been restored. main.tsx waits for
  * this before rendering so a stale cached original cannot precede its
@@ -189,9 +192,8 @@ liveness.connectToPool(pool);
 // While a caller is subscribed, capping at 30min gives auto-revival probes
 // for relays that have come back without manual intervention.
 //
-// Requires patches/applesauce-relay@6.2.1.patch: count failures when arming
-// recovery, including WebSocket errors without a close event. Otherwise
-// attempts can stay at zero and every retry uses the first 1s delay.
+// Applesauce v7 includes our recovery-attempt fix: count failures when
+// arming recovery, including WebSocket errors without a close event.
 const RECONNECT_PHASES_MS: number[] = [
   // Phase 1 — burst (attempts 1-3)
   1_000,

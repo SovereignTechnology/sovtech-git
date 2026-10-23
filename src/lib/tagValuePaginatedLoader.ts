@@ -66,7 +66,7 @@ import { filterDuplicateEvents, mapEventsToStore } from "applesauce-core";
 import { mergeRelaySets } from "applesauce-core/helpers/relays";
 import type { Filter } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
-import { loadBlocksFromRelay } from "applesauce-loaders/loaders";
+import { loadBlocksFromRelay } from "./legacyTimelineLoader";
 import type { TagValuePointer } from "applesauce-loaders/loaders";
 import type { CacheRequest, TimelessFilter } from "applesauce-loaders";
 import { makeCacheRequest } from "applesauce-loaders/helpers";

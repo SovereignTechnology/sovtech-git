@@ -4,15 +4,21 @@
 
 ### Added
 
+- Add an opt-in profiling build with relay waterfalls, long-frame observations, and cache timings for isolated performance investigations.
+
 - Delete software releases you published, optionally including their asset events; the deletion request goes to your outbox, the repository relays, and Zapstore for Android releases.
 
 ### Changed
+
+- Upgrade to Applesauce v7 while retaining the existing repository fetch ownership, verification policy, and count-based pagination through a licensed v6 compatibility module.
 
 - Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
 
 - Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
 
 ### Fixed
+
+- Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.
 

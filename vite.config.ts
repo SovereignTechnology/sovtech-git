@@ -132,6 +132,20 @@ function manifestPlugin(): Plugin {
   };
 }
 
+/**
+ * `pnpm build:profile`: a production build that can be profiled, into
+ * `dist-perf/`. Function and class names survive minification, so components
+ * and every frame of a CPU profile read as names instead of `Xe`, and
+ * `VITE_PROFILE=1` installs the runtime probes (`src/lib/perfRuntime.ts`).
+ * Never a release build — it is larger and a little slower.
+ *
+ * `VITE_PROFILE_REACT=1` on top swaps in react-dom's profiling build, so each
+ * component carries its render time (selfMs in the report). It inflates CPU,
+ * so it is the wrong build for asking how much a flow costs overall.
+ */
+const PROFILE_BUILD = process.env.VITE_PROFILE === "1";
+const PROFILE_REACT = PROFILE_BUILD && process.env.VITE_PROFILE_REACT === "1";
+
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
   define: {
@@ -145,9 +159,11 @@ export default defineConfig(() => ({
   build: {
     sourcemap: true,
     target: ["es2022"],
+    ...(PROFILE_BUILD ? { outDir: "dist-perf" } : {}),
   },
   esbuild: {
     target: ["es2022"],
+    ...(PROFILE_BUILD ? { keepNames: true } : {}),
   },
   optimizeDeps: {
     esbuildOptions: {
@@ -181,8 +197,13 @@ export default defineConfig(() => ({
     },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      // React 18's react-dom/client re-exports react-dom; profiling is the
+      // same renderer plus fiber timings.
+      ...(PROFILE_REACT
+        ? [{ find: /^react-dom$/, replacement: "react-dom/profiling" }]
+        : []),
+    ],
   },
 }));

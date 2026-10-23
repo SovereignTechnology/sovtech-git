@@ -115,3 +115,119 @@ exact version of `pkgs.playwright-driver` in `flake.nix` so the browser
 revisions match — bump them together.
 
 The benchmark is never part of pre-commit, `pnpm test`, or CI.
+
+## Application profiling
+
+Build with `pnpm build:profile`, then serve using
+`pnpm exec vite preview --outDir dist-perf`. Normal builds do not install these
+probes. In the coding-agent VM use an isolated `browser-session` lease and close
+it afterward. The browser console exposes:
+
+```js
+window.__gwPerf.json(); // Export the report as JSON.
+window.__gwPerf.reset(); // Reset aggregate counters, not the page-lifetime waterfall.
+window.__gwPerf.renders(true); // Optional React attribution.
+```
+
+For the React profiling bundle use `VITE_PROFILE_REACT=1 pnpm build:profile`.
+Keep probe settings identical across comparisons and confirm behavior in a
+normal production build. Save raw captures under ignored `perf-reports/`.
+Record the built commit plus dirty diff, browser/device, URL, cache state,
+probe settings and observable readiness condition. Rebuild after source changes.
+
+Use a fresh context for cold runs (clearing cookies does not clear IndexedDB).
+Use the same context for warm runs. Compare controlled equal-data fixtures for
+application cost, and repeated alternating-order live runs for external relay
+behavior. Record missing data, refusals and timeouts as incomplete/failed runs;
+a quiet DOM or EOSE alone is not global historical completeness. Fixed-duration
+windows measure continuing work; navigation checks need bounded readiness waits.
+
+Long frames are not CPU utilization; React base durations are estimates;
+overlapping cache-query times are not serial elapsed time; text lengths are
+characters rather than compressed bytes. Relay response times include network,
+server and browser delays. Heap snapshots without controlled GC do not prove
+retained-memory equivalence. NIP-77 negotiation is not currently attributed.
+
+## Controlled pagination comparisons
+
+The manual harnesses run separately from pre-commit and the query-budget suite.
+They use synthetic events and never publish. No personal account is needed.
+
+```sh
+node benchmarks/pagination-comparison.mjs <baseline-tree> <comparison-tree> <candidate-tree>
+PAGINATION_SCENARIOS=equal-data PAGINATION_REPORT=equal-data.json \
+  node benchmarks/pagination-comparison.mjs <baseline-tree> <comparison-tree> <candidate-tree>
+PAGINATION_SCENARIOS=notifications,notifications-slow PAGINATION_REPORT=notifications.json \
+  node benchmarks/pagination-comparison.mjs <baseline-tree> <comparison-tree> <candidate-tree>
+```
+
+All trees use the same installed dependencies. The harness bundles actual source
+loaders, exercises the EventStore, and writes to
+`perf-reports/pagination-performance/`. Node CPU includes the fixture matcher;
+it excludes React, IndexedDB, WebSocket decoding and real network transport.
+Observation-window counts do not prove that a history load finished.
+
+For browser replay, build each revision and serve it on its own local port.
+Start `node benchmarks/pagination-browser-server.mjs` from the reporting tree.
+Write `perf-reports/pagination-performance/browser-config.json`, for example:
+
+```json
+{
+  "port": 4173,
+  "revision": "candidate",
+  "scenario": "search",
+  "name": "search-candidate",
+  "live": false,
+  "observationMs": 5000
+}
+```
+
+Allocate a `browser-session` lease, open a local preview through that lease, and
+run `node benchmarks/pagination-browser-run.mjs <lease>`. Close the lease and
+owned preview/fixture servers afterward. Scenarios are `repo`, `notifications`
+and `search`; optional `latencyMs` and `cap` control the synthetic relay.
+`probeInteraction` checks a read-only notification grouping change during load.
+`live:true` uses real relay traffic and needs an appropriately scoped browser
+lease; use fresh contexts and preserve relay/network failures in comparisons.
+
+Keep captured datasets and raw run reports outside tracked source (for example,
+in an external artifact archive or ignored `perf-reports/`). Record the workload,
+high-level results, interpretation and limitations in the relevant commit message.
+Run reports do not replace the maintained baseline for `pnpm bench --compare`.
+
+## Dependency comparisons
+
+Use two clean checkouts with their **own** `pnpm install --frozen-lockfile` and
+production/profile builds. Sharing installed dependencies measures source changes,
+not a dependency upgrade. The comparison refuses tracked modifications and records
+the commit, tree, lockfile hash and installed core/relay versions.
+
+```sh
+node --expose-gc benchmarks/dependency-upgrade.mjs <v6-tree> <v7-tree> store
+node --expose-gc benchmarks/dependency-upgrade.mjs <v6-tree> <v7-tree> transport
+node --expose-gc benchmarks/dependency-upgrade.mjs <v6-tree> <v7-tree> bundles
+```
+
+The store comparison uses ten alternating pairs after two warmups per variant.
+It checks event identities after each sample and measures kind/tag timelines,
+multiple subscribers, duplicate delivery, synchronous reads and replaceable
+updates. Verification is disabled to match the application store policy. The
+100-read scenarios report the entire loop, not one read. Node CPU is not browser
+CPU. Between-sample GC reduces carryover but does not make this a memory benchmark.
+
+The transport comparison uses real local WebSockets and the default request
+deadline, with reconnect disabled. It includes a 35-second stream; its scheduled
+delays are the behavior under test. This checks lifecycle outcomes, not statistical
+network performance, authentication or the application's retry amplification.
+The server uses `ws` from the existing `jsdom` dependency. Bundle totals include
+lazy JS/CSS chunks and therefore are not initial page transfer sizes.
+
+For application comparisons use the browser replay above with each checkout's
+preview port, alternating versions and fresh contexts. `warmReload:true` adds a
+same-context repository reload; `probeInitialInteraction:true` exercises a local
+notification grouping change immediately after readiness. Interaction timings
+include browser automation and two animation frames, not just handler CPU or INP.
+Captured event-ID hashes permit equal-data checks. Heap readings remain
+GC-sensitive snapshots. Use production builds for primary results and identical
+profiling builds for supporting attribution. Record every config and failure;
+fixed observation windows do not establish completion.

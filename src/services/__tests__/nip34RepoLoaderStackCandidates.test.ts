@@ -50,7 +50,7 @@ let loaderSub: Subscription | undefined;
 
 beforeEach(() => {
   vi.spyOn(Relay, "fetchInformationDocument").mockImplementation(() =>
-    of(null),
+    Promise.resolve(null),
   );
   server = new WS(RELAY_URL, { jsonProtocol: true });
 

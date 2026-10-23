@@ -72,20 +72,12 @@ let
     src = pkgs.lib.fileset.toSource {
       root = ../../..;
       fileset = pkgs.lib.fileset.unions [
-        ../../../package.json ../../../pnpm-lock.yaml ../../../patches
+        ../../../package.json ../../../pnpm-lock.yaml
+        ../../../patches ../../../scripts/apply-pnpm-patches.mjs
       ];
     };
     fetcherVersion = 3;
-    # The pinned Git signer plugin must prepare its JavaScript before caching.
-    pnpmInstallFlags = [ "--ignore-scripts=false" ];
-    npm_config_script_shell = pkgs.writeShellScript "npm-script-shell" ''
-      npmScriptPath=$PATH
-      source ${pkgs.stdenvNoCC}/setup
-      export PATH="$npmScriptPath"
-      if [[ -d node_modules ]]; then patchShebangs node_modules; fi
-      exec ${pkgs.bash}/bin/bash "$@"
-    '';
-    hash = "sha256-DVbu1aoT6Dff+39/hicGasu4ZlzB9dMZ3Av7rLpK44c=";
+    hash = "sha256-MN87EhjmVPJjhK8w2Osgg9390mFgomBVg5fANX5t2bQ=";
   };
 in {
   inherit node pnpm ngit gradle netlify dependencies;

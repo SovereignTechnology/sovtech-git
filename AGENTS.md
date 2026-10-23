@@ -1,6 +1,6 @@
 # Project Overview
 
-This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs, repos via NIP-34 + NIP-22 comments, GRASP repo announcements) built with React 18, TailwindCSS 3, Vite, shadcn/ui, and Applesauce v6.
+This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs, repos via NIP-34 + NIP-22 comments, GRASP repo announcements) built with React 18, TailwindCSS 3, Vite, shadcn/ui, and Applesauce v7.
 
 ## Technology Stack
 
@@ -8,7 +8,7 @@ This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs
 - **TailwindCSS 3.x**: utility-first styling
 - **Vite**: dev server + production bundler
 - **shadcn/ui**: 48+ unstyled accessible primitives in `@/components/ui` on Radix UI + Tailwind
-- **Applesauce v6** (`applesauce-core`, `applesauce-relay`, `applesauce-react`, `applesauce-loaders`, `applesauce-actions`, `applesauce-accounts`, `applesauce-signers`, `applesauce-common`, `applesauce-content`): reactive Nostr SDK on RxJS
+- **Applesauce v7** (`applesauce-core`, `applesauce-relay`, `applesauce-react`, `applesauce-loaders`, `applesauce-actions`, `applesauce-accounts`, `applesauce-signers`, `applesauce-common`, `applesauce-content`): reactive Nostr SDK on RxJS
 - **RxJS**: state and reactive data flow via observables (load the `react-rxjs-observables` skill)
 - **React Router**: client-side routing with `BrowserRouter` and automatic scroll-to-top
 - **TypeScript**: type-safe JS. **Never use `any`.**
