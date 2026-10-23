@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
+
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.
 
 - Show long inferred PR stacks in top-to-bottom columns on wider screens so every title stays readable instead of truncating to fit one row.

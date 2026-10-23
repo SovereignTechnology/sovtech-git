@@ -73,6 +73,7 @@ let
       root = ../../..;
       fileset = pkgs.lib.fileset.unions [
         ../../../package.json ../../../pnpm-lock.yaml
+        ../../../patches ../../../scripts/apply-pnpm-patches.mjs
       ];
     };
     fetcherVersion = 3;
