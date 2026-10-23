@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Coalesce CI workflow grouping during event bursts, preserving the first and latest results while reducing repeated work for PR, commit, and repository checks.
+
 - Coalesce issue/PR and essentials list rebuilds during event bursts, preserving initial and latest results while limiting repeated UI derivation work.
 
 - Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and explicit batch-triggered search and notification history using v7 coverage.
