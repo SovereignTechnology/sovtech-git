@@ -447,6 +447,22 @@ export function createPaginatedTagValueLoader(
       next.next(upstream);
     });
 
+  // Each event is offered to every pointer in its batch. Signed event tags
+  // must remain immutable, so share their index across pointers and later batches.
+  // Weak keys let the index go when the event is no longer retained elsewhere.
+  const tagValues = new WeakMap<NostrEvent, Set<string>>();
+  const valuesOf = (event: NostrEvent): Set<string> => {
+    let values = tagValues.get(event);
+    if (!values) {
+      values = new Set();
+      for (const tag of event.tags) {
+        if (tag[0] === tagName && tag[1] !== undefined) values.add(tag[1]);
+      }
+      tagValues.set(event, values);
+    }
+    return values;
+  };
+
   return (pointer: TagValuePointer): Observable<PaginatedTagValueResponse> =>
     new Observable<PaginatedTagValueResponse>((observer) => {
       const sub = next
@@ -458,10 +474,7 @@ export function createPaginatedTagValueLoader(
               // this pointer's tag value
               filter(
                 (msg: PaginatedTagValueResponse) =>
-                  msg === "EOSE" ||
-                  msg.tags.some(
-                    (tag) => tag[0] === tagName && tag[1] === pointer.value,
-                  ),
+                  msg === "EOSE" || valuesOf(msg).has(pointer.value),
               ),
             ),
           ),

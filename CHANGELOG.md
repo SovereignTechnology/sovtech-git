@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Reuse event tag-value indexes when dispatching batched loader results, reducing repeated tag scans across subscribers.
+
 - Build local fuzzy-search indexes only while searching, avoiding indexing work when browsing repositories, issues, and PRs.
 
 - Coalesce CI workflow grouping during event bursts, preserving the first and latest results while reducing repeated work for PR, commit, and repository checks.
