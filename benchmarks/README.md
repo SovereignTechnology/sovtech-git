@@ -647,3 +647,49 @@ signed out. They do not validate real diff readiness, outbox/private behaviour,
 partial relay overlap, long sessions or live updates after the return has
 settled. Use targeted checks when a change threatens those paths rather than
 interpreting these results as comprehensive coverage.
+
+### Compare application revisions
+
+`direct-entry-revision-suite.mjs` runs the same scenarios against two separately
+built application revisions, alternating order and preserving failed runs. Use
+the same current `direct-entry-*` harness files in both checkouts and keep each
+preview server on its own port. Dependency versions must match, or dependency
+changes must be treated explicitly as part of the comparison.
+
+Provide the ordinary `defaults`, `scenarios` and `rounds` fields, replacing
+`strategies` with:
+
+```json
+{
+  "variants": [
+    {
+      "name": "older",
+      "port": 4193,
+      "metadataPath": "/absolute/older/checkout/perf-reports/direct-entry/build-meta.json"
+    },
+    {
+      "name": "current",
+      "port": 4192,
+      "metadataPath": "perf-reports/direct-entry/build-meta.json"
+    }
+  ]
+}
+```
+
+Run `node benchmarks/direct-entry-revision-suite.mjs "$lease" /path/to/suite.json`.
+The runner checks matching instrumentation hashes, selects the appropriate
+build metadata for each report, and restores the fixture server's original
+metadata afterward. Run only one suite against that server at a time. Results
+and individual failures remain in ignored `perf-reports/direct-entry/`; the
+latest comparison is `latest-revision-suite.json`. Use explicit journey
+expectations for correctness, and check received identity sets and unfinished
+work before interpreting resource totals as equivalent workloads.
+
+Under heavy replay, browser automation can itself queue behind WebSocket
+delivery. In the cold journey, `scheduledAt` is the intended departure time,
+`actualAt` is a pre-action observation, and `start` is sampled before the click
+command. None measures the actual DOM click dispatch. Inspect these gaps and
+phase boundaries before interpreting a navigation timeout as an equivalent
+length UI freeze or a zero-offset list convergence as instant navigation.
+Pair navigation runs with uninterrupted detail observations when necessary;
+recorded long tasks and exact final membership provide separate evidence.
