@@ -778,6 +778,10 @@ export const nip34EssentialDeletionsLoader = createPaginatedTagValueLoader(
   pool,
   "e",
   {
+    // Startup hydration can fail, and cached deletions can arrive afterward.
+    // Keep this targeted read to recover withdrawals missing from memory,
+    // including when relays are unavailable. Root-item queries do not cover
+    // deletions whose #e tag names a label or status event instead of the root.
     cacheRequest,
     eventStore,
     kinds: [5],
