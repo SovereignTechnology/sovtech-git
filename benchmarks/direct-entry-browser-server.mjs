@@ -4,12 +4,11 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { nip19 } from "nostr-tools";
-if (!process.env.BENCH_CORPUS)
-  throw new Error(
-    "Set BENCH_CORPUS to a captured public repository JSON.gz fixture",
-  );
+import { createJourneyFixture } from "./direct-entry-fixture.mjs";
 mkdirSync("perf-reports/direct-entry", { recursive: true });
-const c = JSON.parse(gunzipSync(readFileSync(process.env.BENCH_CORPUS)));
+const c = process.env.BENCH_CORPUS
+  ? JSON.parse(gunzipSync(readFileSync(process.env.BENCH_CORPUS)))
+  : createJourneyFixture();
 c.events.sort(
   (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
 );
@@ -19,7 +18,7 @@ const references = (event, id, tags) =>
   event.tags.some((t) => tags.includes(t[0]) && t[1] === id);
 const fixture = {
   corpusHash: createHash("sha256")
-    .update(JSON.stringify(c.events))
+    .update(JSON.stringify(c.events.map(({ sig: _sig, ...event }) => event)))
     .digest("hex"),
   repositoryComments: c.events
     .filter(

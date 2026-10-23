@@ -569,3 +569,81 @@ missing/slow relays, and interaction latency while events arrive require separat
 scenarios; these cold-entry results alone do not validate those paths. Keep the
 repository gate fixed across strategy comparisons: releasing it on first comment
 would otherwise couple the policy to the outcome being measured.
+
+### Bounded UX journeys
+
+The same build, fixture server, runner and suite also support two journeys with
+independently authored expected states. With `BENCH_CORPUS` unset, the server
+generates a small public-key fixture: twelve issues, twelve PRs, discussion,
+a re-title, a PR revision, a cover note and a withdrawn status. No external
+data or account is required. Production scheduling remains unchanged.
+
+```sh
+node benchmarks/direct-entry-browser-build.mjs
+# Separate terminals, as for captured replay:
+env -u BENCH_CORPUS node benchmarks/direct-entry-browser-server.mjs
+pnpm exec vite preview --host 127.0.0.1 --port 4192 --strictPort --outDir perf-reports/direct-entry/dist
+# Use an existing browser-session lease, then close it and owned servers afterward:
+node benchmarks/direct-entry-browser-suite.mjs "$lease" benchmarks/direct-entry-journey-suite.json
+```
+
+The checked-in configuration runs one smoke sample per journey with the shared
+production query strategy. For comparisons, copy the config to ignored
+`perf-reports/`, increase `rounds`, and select the strategies being investigated.
+The suite alternates strategy order. Rebuild each application revision with the
+same harness; preserve the reports, build metadata and worker configuration.
+Reports include browser version, unsigned-corpus fingerprint and the build's
+harness hash. One sample validates the harness, not a performance conclusion.
+
+- **Cold detail → list during loading → detail:** navigation is scheduled at
+  `navigateAtMs` from document start, independently of comment/count readiness.
+  Record the actual action time and state at departure; a busy main thread or
+  unavailable nav can delay the action. Filter the PR list while loading, clear
+  the filter, then observe convergence and return to detail. The early detail
+  checkpoint is deliberately censored on departure: unfinished essentials are
+  reported, not treated as a failed final state. Later checkpoints must converge.
+- **Return with activity:** first require initial repository/detail convergence,
+  leave for About, make withheld events available, then revisit PRs, Issues and
+  detail in the same browser context. One PR closes and another reopens, keeping
+  the open-PR count unchanged; a new issue also arrives. Exact membership must
+  change correctly. This exercises warm in-memory reuse and catch-up queries,
+  not a browser reload or proof of persistent-cache durability.
+
+`phaseMs` is a bounded observation window, not a latency acceptance threshold or
+proof of completeness. Each checkpoint compares exact identities, titles and
+statuses against the fixture manifest, including zero open items if specified.
+The benchmark bundle records React-effect snapshots of the state consumed by
+the layout/detail pages and marks their unmounts. These are **committed state**
+observations, not pixel presentation. Detail essentials compare title, status
+and tip separately and together; cover-note identity is separate. Existing
+body/cover/comment DOM milestones remain rendering-opportunity proxies.
+
+List observations read actual DOM title text and status-icon labels, with
+benchmark-only row IDs. Reports include first nonempty rows, newest-issue DOM
+arrival, and additions/removals/relative-order changes among retained rows.
+Deliberate filtering is excluded from the churn window. Churn counts are not
+layout-shift or viewport-visibility measurements. Repository open membership is
+derived from the committed model state; the existing positive badge probe stays
+separate and does not establish zero-versus-loading UI semantics.
+
+Each outcome records first match, the final uninterrupted matching period within
+the window, final state and explicit incompleteness. Suite summaries retain
+individual timings and completion counts beside medians. Incorrect final
+checkpoints or browser errors fail the suite while retaining raw reports and
+the summary. Filtering durations include automation, DOM updates and two
+animation frames; they are not INP. Per-phase requests, active subscriptions and
+long tasks provide supporting diagnostics, not a resource-leak proof.
+
+Captured corpora still work for existing experiments. To run these journeys on
+one, supply a `journey` manifest matching `direct-entry-fixture.mjs`: selected
+`itemId`, withheld `updateIds`, `newestId`, and explicit `initial`/`updated`
+repository and detail expectations. The ordinary receipt-coverage fields in a
+journey cover the initial selected events; the updated checkpoints validate
+subsequent state separately. Do not derive all expectations from the same
+production model under measurement.
+
+These bounded journeys still mirror data across relays, stub Git HTTP and run
+signed out. They do not validate real diff readiness, outbox/private behaviour,
+partial relay overlap, long sessions or live updates after the return has
+settled. Use targeted checks when a change threatens those paths rather than
+interpreting these results as comprehensive coverage.

@@ -3,7 +3,7 @@
 import { build, loadConfigFromFile } from "vite";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 mkdirSync("perf-reports/direct-entry", { recursive: true });
 writeFileSync(
@@ -17,6 +17,23 @@ writeFileSync(
         .update(execFileSync("git", ["diff", "HEAD"]))
         .digest("hex"),
       createdAt: new Date().toISOString(),
+      harnessHash: createHash("sha256")
+        .update(
+          ["build", "run", "server", "suite"]
+            .map((name) =>
+              readFileSync(
+                `benchmarks/direct-entry-browser-${name}.mjs`,
+                "utf8",
+              ),
+            )
+            .concat(
+              ["journeys", "fixture"].map((name) =>
+                readFileSync(`benchmarks/direct-entry-${name}.mjs`, "utf8"),
+              ),
+            )
+            .join("\n"),
+        )
+        .digest("hex"),
     },
     null,
     2,
@@ -26,6 +43,14 @@ const loaded = await loadConfigFromFile(
   { command: "build", mode: "production" },
   path.resolve("vite.config.ts"),
 );
+const record = `(globalThis as unknown as { __detailBench?: {
+  record?: (name: string, value: unknown) => void
+} }).__detailBench?.record`;
+function replaceOnce(code, target, replacement) {
+  if (code.split(target).length !== 2)
+    throw Error(`Expected one instrumentation target: ${target}`);
+  return code.replace(target, replacement);
+}
 const injected = `
 import { resilientRequest as benchRequest } from "@/lib/resilientSubscription";
 import { takeUntil as benchTakeUntil, timer as benchTimer } from "rxjs";
@@ -99,6 +124,63 @@ await build({
       name: "direct-entry-experiment",
       enforce: "pre",
       transform(code, id) {
+        if (id.endsWith("/src/pages/repo/RepoLayout.tsx")) {
+          return replaceOnce(
+            code,
+            "  // Settings and maintainer-only controls",
+            `
+  useEffect(() => () => { ${record}?.("repository", null); }, []);
+  useEffect(() => {
+    const summarise = (items: typeof issues | typeof prs) => !items || !repo ? null :
+      items.filter(item => hasAcceptedRepositoryReference(item.repoCoords, repo))
+        .map(item => ({ id: item.id, title: item.currentSubject, status: item.status }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+    ${record}?.("repository", { issues: summarise(issues), prs: summarise(prs) });
+  }, [issues, prs, repo]);
+  // Settings and maintainer-only controls`,
+          );
+        }
+        for (const [file, item] of [
+          ["PRPage", "pr"],
+          ["IssuePage", "issue"],
+        ]) {
+          if (id.endsWith(`/src/pages/${file}.tsx`))
+            return replaceOnce(
+              code,
+              "  const mentionedItems =",
+              `
+  useEffect(() => () => { ${record}?.("detail", null); }, []);
+  useEffect(() => {
+    ${record}?.("detail", ${item} ? {
+      id: ${item}.id, title: ${item}.currentSubject, status: ${item}.status,
+      tip: ${item === "pr" ? "pr.tip.commitId ?? null" : "null"},
+      cover: ${item}.coverNote?.id ?? null,
+      body: ${item}.body, coverText: ${item}.coverNote?.content ?? null,
+    } : null);
+  }, [${item}]);
+  const mentionedItems =`,
+            );
+        }
+        for (const [file, item, kind] of [
+          ["RepoPRsPage", "pr", "prs"],
+          ["RepoIssuesPage", "issue", "issues"],
+        ]) {
+          if (id.endsWith(`/src/pages/repo/${file}.tsx`)) {
+            const row =
+              kind === "prs"
+                ? '<li className="group flex items-start'
+                : '<li className="group flex items-stretch';
+            return replaceOnce(
+              replaceOnce(
+                code,
+                row,
+                `<li data-bench-id={${item}.id} data-bench-title={${item}.currentSubject} data-bench-status={${item}.status} className="group flex ${kind === "prs" ? "items-start" : "items-stretch"}`,
+              ),
+              '<div className="rounded-lg border border-border overflow-hidden">',
+              `<div data-bench-list="${kind}" className="rounded-lg border border-border overflow-hidden">`,
+            );
+          }
+        }
         if (id.endsWith("/src/hooks/useNip34Loaders.ts")) {
           if (!code.includes("  nip34ListLoader,"))
             throw Error("detail import missing");

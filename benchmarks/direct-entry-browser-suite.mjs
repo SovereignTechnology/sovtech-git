@@ -1,7 +1,7 @@
 // Sequential, fresh-context comparisons. Raw reports remain outside Git.
 // Usage: node benchmarks/direct-entry-browser-suite.mjs <lease> <suite.json>
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 const [lease, file] = process.argv.slice(2);
 if (!lease || !file)
   throw Error("Supply a browser-session lease and suite JSON");
@@ -21,22 +21,30 @@ function run(config) {
     JSON.stringify(config),
   );
   rmSync(`perf-reports/direct-entry/${config.label}.json`, { force: true });
-  execFileSync(
+  const child = spawnSync(
     process.execPath,
     ["benchmarks/direct-entry-browser-run.mjs", lease],
-    { stdio: "pipe", timeout: (config.observationMs ?? 12000) + 60000 },
+    {
+      stdio: "pipe",
+      timeout: config.journey
+        ? 6 * (config.phaseMs ?? 6000) + 90000
+        : (config.observationMs ?? 12000) + 60000,
+    },
   );
   const result = JSON.parse(
     readFileSync(`perf-reports/direct-entry/${config.label}.json`),
   );
-  if (result.report.failure || result.errors.length)
-    throw Error(`Invalid run: ${config.label}`);
+  result.runFailed =
+    child.status !== 0 ||
+    !!result.report.failure ||
+    !!result.report.journey?.failure ||
+    result.errors.length > 0;
   console.log(
     config.label,
     JSON.stringify({
       marks: result.report.marks,
       coverage: Object.fromEntries(
-        Object.entries(result.report.coverage).map(([k, v]) => [
+        Object.entries(result.report.coverage ?? {}).map(([k, v]) => [
           k,
           { missing: v.missing.length, completeAt: v.completeAt },
         ]),
@@ -53,12 +61,26 @@ for (const scenario of suite.scenarios) {
     ...suite.defaults,
     ...scenario,
   };
+  if (common.journey) {
+    for (let round = 0; round < (suite.rounds ?? 3); round++)
+      for (const strategy of round % 2 ? [...strategies].reverse() : strategies)
+        reports.push(
+          run({
+            ...common,
+            strategy,
+            fullSnapshotReference: false,
+            label: `${scenario.name}-${strategy}-${round}`,
+          }),
+        );
+    continue;
+  }
   const reference = run({
     ...common,
     strategy: "shared",
     fullSnapshotReference: true,
     label: `${scenario.name}-reference`,
   });
+  if (reference.runFailed) throw Error(`Invalid reference: ${scenario.name}`);
   const expectedOpenPRCount = reference.report.openPRCounts.at(-1)?.count;
   if (expectedOpenPRCount === undefined)
     throw Error("Full-snapshot PR badge missing");
@@ -92,6 +114,60 @@ for (const scenario of suite.scenarios)
     const group = reports.filter(
       (r) => r.config.name === scenario.name && r.config.strategy === strategy,
     );
+    if (scenario.journey ?? suite.defaults?.journey) {
+      const phaseNames = [
+        ...new Set(
+          group.flatMap(
+            (r) => r.report.journey?.phases.map((p) => p.name) ?? [],
+          ),
+        ),
+      ];
+      summary.push({
+        scenario: scenario.name,
+        strategy,
+        runs: group.length,
+        failedRuns: group.filter((r) => r.runFailed).length,
+        phases: phaseNames.map((name) => {
+          const samples = group.flatMap(
+            (r) =>
+              r.report.journey?.phases.filter((p) => p.name === name) ?? [],
+          );
+          return {
+            name,
+            samples: samples.length,
+            outcomes: Object.fromEntries(
+              ["repository", "openMembership", "detail", "cover", "list"].map(
+                (key) => {
+                  const applicable = samples.filter((s) => s[key]);
+                  return [
+                    key,
+                    {
+                      applicable: applicable.length,
+                      complete: applicable.filter(
+                        (s) => s[key].status === "complete",
+                      ).length,
+                      // Preserve individual timings and censored samples beside the median.
+                      correctThroughEndMs: applicable.map(
+                        (s) => s[key].correctThroughEndMs,
+                      ),
+                      medianMs: median(
+                        applicable.map((s) => s[key].correctThroughEndMs),
+                      ),
+                    },
+                  ];
+                },
+              ),
+            ),
+            churn: samples.map((s) => s.churn),
+          };
+        }),
+        interactions: group.map((r) => ({
+          label: r.config.label,
+          actions: r.report.journey?.interactions ?? [],
+        })),
+      });
+      continue;
+    }
     summary.push({
       scenario: scenario.name,
       strategy,
@@ -113,7 +189,7 @@ for (const scenario of suite.scenarios)
         group.map((r) => r.report.coverage.repositoryComments.completeAt),
       ),
       correctPRCount: median(
-        group.map((r) => r.report.openPRCountReference.correctThroughEndFrom),
+        group.map((r) => r.report.openPRCountReference?.correctThroughEndFrom),
       ),
       correctPRCountRuns: group.filter(
         (r) => r.report.openPRCountReference.correctThroughEndFrom !== null,
@@ -138,3 +214,4 @@ writeFileSync(
   ),
 );
 console.log(JSON.stringify(summary, null, 2));
+if (reports.some((r) => r.runFailed)) process.exitCode = 1;

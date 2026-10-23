@@ -1,14 +1,41 @@
 // Uses only a browser-session-owned browser, with a fresh context for every run.
 // Call: node benchmarks/direct-entry-browser-run.mjs <lease>
 import { spawnSync } from "node:child_process";
+import { runJourney } from "./direct-entry-journeys.mjs";
 async function run(control) {
   const api = control.request,
     fixture = await (await api.get("http://127.0.0.1:4190/fixture")).json(),
     config = await (await api.get("http://127.0.0.1:4190/config")).json();
-  const selected = config.itemId
-    ? fixture.cases.find((item) => item.id === config.itemId)
+  const itemId =
+    config.itemId ?? (config.journey ? fixture.journey?.itemId : undefined);
+  const selected = itemId
+    ? fixture.cases.find((item) => item.id === itemId)
     : fixture.cases[config.case ?? 0];
   if (!selected) throw new Error("Selected item is absent from fixture");
+  if (
+    config.journey &&
+    (!["cold", "return"].includes(config.journey) || !fixture.journey)
+  )
+    throw Error(
+      "Journeys require cold/return and a fixture with journey expectations",
+    );
+  if (config.journey && selected.id !== fixture.journey.itemId)
+    throw Error(
+      "Journey item must match the fixture's independently specified expectations",
+    );
+  for (const key of [
+    "phaseMs",
+    "navigateAtMs",
+    "observationMs",
+    "latencyMs",
+    "commentLatencyMs",
+    "cap",
+  ])
+    if (
+      config[key] !== undefined &&
+      (!Number.isFinite(config[key]) || config[key] < 0 || config[key] > 120000)
+    )
+      throw Error(`Invalid ${key}`);
   if (!["baseline", "priority"].includes(config.mode))
     throw new Error("Mode must be baseline or priority");
   if (!/^[a-zA-Z0-9_-]+$/.test(config.label ?? ""))
@@ -28,6 +55,13 @@ async function run(control) {
     requests = [],
     deliveries = [];
   let pending = 0;
+  let updatesReleased = !config.journey;
+  const heldIds = new Set(fixture.journey?.updateIds ?? []);
+  if (config.journey) {
+    for (const key of ["comments", "updates", "essentials"])
+      selected[key] = selected[key].filter((id) => !heldIds.has(id));
+  }
+  const sockets = new Set();
   const matches = (e, f) =>
     !(
       (f.ids && !f.ids.includes(e.id)) ||
@@ -47,8 +81,13 @@ async function run(control) {
       : r.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
   );
   await context.routeWebSocket(/.*/, (ws) => {
-    const active = new Set();
-    ws.onClose(() => active.clear());
+    const active = new Map();
+    const socket = { ws, active };
+    sockets.add(socket);
+    ws.onClose(() => {
+      active.clear();
+      sockets.delete(socket);
+    });
     ws.onMessage(async (data) => {
       const m = JSON.parse(String(data));
       if (m[0] === "CLOSE") {
@@ -56,17 +95,22 @@ async function run(control) {
         return;
       }
       if (m[0] !== "REQ") return;
-      active.add(m[1]);
+      active.set(m[1], m.slice(2));
       requests.push({ at: Date.now(), url: ws.url(), filters: m.slice(2) });
       pending++;
       // This delay models transport latency; it is not a readiness wait.
-      await page.waitForTimeout(config.latencyMs ?? 20).catch(() => {});
+      const delay = m.slice(2).some((f) => f["#E"])
+        ? (config.commentLatencyMs ?? config.latencyMs ?? 20)
+        : (config.latencyMs ?? 20);
+      await page.waitForTimeout(delay).catch(() => {});
       pending--;
       if (!active.has(m[1])) return;
       const found = new Map();
       for (const f of m.slice(2))
         for (const e of fixture.events
-          .filter((e) => matches(e, f))
+          .filter(
+            (e) => (updatesReleased || !heldIds.has(e.id)) && matches(e, f),
+          )
           .slice(0, Math.min(f.limit ?? config.cap ?? 100, config.cap ?? 100)))
           found.set(e.id, e);
       for (const e of found.values())
@@ -75,6 +119,14 @@ async function run(control) {
       deliveries.push({ at: Date.now(), count: found.size });
     });
   });
+  const releaseUpdates = () => {
+    updatesReleased = true;
+    for (const { ws, active } of sockets)
+      for (const [id, filters] of active)
+        for (const event of fixture.events)
+          if (heldIds.has(event.id) && filters.some((f) => matches(event, f)))
+            ws.send(JSON.stringify(["EVENT", id, event]));
+  };
   await context.addInitScript(
     ({ selected, config, repositoryComments, oracleEvents }) => {
       for (const key of ["extraRelays", "lookupRelays", "gitIndexRelays"])
@@ -112,7 +164,17 @@ async function run(control) {
         eventBytes: 0,
         requests: [],
         gate: false,
+        transitions: { repository: [], detail: [], list: [] },
       });
+      b.record = (name, value) => {
+        const rows = b.transitions[name];
+        if (
+          rows.at(-1)?.path !== location.pathname ||
+          JSON.stringify(rows.at(-1)?.value) !== JSON.stringify(value)
+        )
+          rows.push({ at: performance.now(), path: location.pathname, value });
+        if (name === "detail") queueMicrotask(() => b.scan?.());
+      };
       const mark = (name) => {
         if (b.marks[name] !== undefined) return;
         b.marks[name] = performance.now();
@@ -138,6 +200,52 @@ async function run(control) {
       };
       requestAnimationFrame(frame);
       const scan = () => {
+        if (config.journey) {
+          const list = document.querySelector("[data-bench-list]");
+          b.record(
+            "list",
+            list
+              ? {
+                  kind: list.dataset.benchList,
+                  rows: [...list.querySelectorAll("[data-bench-id]")].map(
+                    (row) => ({
+                      id: row.dataset.benchId,
+                      title:
+                        row
+                          .querySelector(".font-medium")
+                          ?.textContent?.trim() ?? null,
+                      status:
+                        {
+                          Open: "open",
+                          Draft: "draft",
+                          Closed: "closed",
+                          Resolved: "resolved",
+                          Merged: "resolved",
+                          Deleted: "deleted",
+                        }[
+                          row
+                            .querySelector("svg[aria-label]")
+                            ?.getAttribute("aria-label")
+                        ] ?? null,
+                    }),
+                  ),
+                }
+              : null,
+          );
+          const detail = b.transitions.detail.at(-1)?.value;
+          if (
+            detail &&
+            [...document.querySelectorAll("h1,h2")].some((el) =>
+              el.textContent?.includes(detail.title),
+            )
+          ) {
+            mark("detailHeading");
+            const body = document.body.innerText;
+            if (detail.body && body.includes(detail.body)) mark("bodyDOM");
+            if (detail.coverText && body.includes(detail.coverText))
+              mark("coverDOM");
+          }
+        }
         if (
           selected.title &&
           [...document.querySelectorAll("h1,h2")].some((e) =>
@@ -164,6 +272,7 @@ async function run(control) {
         )
           mark("allComments");
       };
+      b.scan = scan;
       new MutationObserver(scan).observe(document, {
         subtree: true,
         childList: true,
@@ -219,17 +328,35 @@ async function run(control) {
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
   let report;
+  let journey;
   try {
     await page.goto(
       "http://127.0.0.1:" + config.port + fixture.basePath + selected.suffix,
       { waitUntil: "domcontentloaded", timeout: 30000 },
     );
+    if (config.journey)
+      journey = await runJourney({
+        page,
+        config,
+        fixture,
+        selected,
+        releaseUpdates,
+        transportState: () => ({
+          pending,
+          connections: sockets.size,
+          subscriptions: [...sockets].reduce(
+            (sum, socket) => sum + socket.active.size,
+            0,
+          ),
+        }),
+      });
     // A fixed startup observation window is the measured workload, not a sleep used as evidence of readiness.
-    await page.waitForFunction(
-      (target) => performance.now() >= target,
-      config.observationMs ?? 12000,
-      { timeout: (config.observationMs ?? 12000) + 10000 },
-    );
+    else
+      await page.waitForFunction(
+        (target) => performance.now() >= target,
+        config.observationMs ?? 12000,
+        { timeout: (config.observationMs ?? 12000) + 10000 },
+      );
     report = await page.evaluate(() => {
       const b = window.__detailBench;
       return {
@@ -265,8 +392,10 @@ async function run(control) {
         anchors: b.comments.filter((id) =>
           document.getElementById(id.slice(0, 15)),
         ),
+        transitions: b.transitions,
       };
     });
+    if (journey) report.journey = journey;
     if (config.expectedOpenPRCount !== undefined) {
       const counts = report.openPRCounts;
       const lastWrong = counts.findLastIndex(
@@ -283,7 +412,7 @@ async function run(control) {
     }
     if (config.snapshot)
       await page.screenshot({ path: config.snapshot, fullPage: false });
-    if (config.navigate) {
+    if (config.navigate && !config.journey) {
       const rootCount = () =>
         page.evaluate(
           () =>
@@ -327,6 +456,7 @@ async function run(control) {
           build,
           selected,
           corpusHash: fixture.corpusHash,
+          browserVersion: context.browser().version(),
           report,
           errors,
           requestCount: requests.length,
@@ -337,7 +467,8 @@ async function run(control) {
       await context.close();
     }
   }
-  if (report?.failure) throw new Error(report.failure);
+  if (report?.failure || journey?.failure)
+    throw new Error(report?.failure ?? journey.failure);
   return {
     label: config.label,
     marks: report?.marks,
@@ -350,7 +481,15 @@ async function run(control) {
 }
 const child = spawnSync(
   "browser-session",
-  ["playwright", process.argv[2], "run-code", run.toString()],
+  [
+    "playwright",
+    process.argv[2],
+    "run-code",
+    `async (control) => {
+    const runJourney = ${runJourney.toString()};
+    return (${run.toString()})(control);
+  }`,
+  ],
   { encoding: "utf8", maxBuffer: 1e7 },
 );
 console.log(child.stdout);
