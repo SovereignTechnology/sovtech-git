@@ -7,7 +7,9 @@ import { resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 if (!process.env.BENCH_CORPUS)
-  throw new Error("Set BENCH_CORPUS to a captured repository snapshot (.json.gz)");
+  throw new Error(
+    "Set BENCH_CORPUS to a captured repository snapshot (.json.gz)",
+  );
 const fixture = resolve(process.env.BENCH_CORPUS);
 const worker = `
 import { EventStore } from 'applesauce-core';
