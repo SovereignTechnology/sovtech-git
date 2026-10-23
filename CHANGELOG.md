@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Build local fuzzy-search indexes only while searching, avoiding indexing work when browsing repositories, issues, and PRs.
+
 - Coalesce CI workflow grouping during event bursts, preserving the first and latest results while reducing repeated work for PR, commit, and repository checks.
 
 - Coalesce issue/PR and essentials list rebuilds during event bursts, preserving initial and latest results while limiting repeated UI derivation work.
