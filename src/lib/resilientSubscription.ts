@@ -1409,6 +1409,16 @@ export interface ResilientAdditiveSubscriptionOptions extends Omit<
   ResilientSubscriptionOptions,
   "autoClose" | "paginate" | "manualPaginate$" | "onRelayLifecycle"
 > {
+  /** Backfill each immutable, delta-safe chunk after a live EOSE. Default: false.
+   * Live settlement still describes only the initial response, not history.
+   */
+  history?: boolean;
+  /** Finite snapshot outcome; cancellation emits no completion. Not preflight coverage. */
+  onHistoryComplete?: (
+    relay: string,
+    chunkKey: string,
+    covered: boolean,
+  ) => void;
   /**
    * Buffer window in ms coalescing chunk additions into one delta REQ per
    * relay. Default: 25
@@ -1541,8 +1551,12 @@ const noopSettleSignal: SettleSignal = {
  * Settlement is monotonic and reuses the standard settle semantics: the
  * "EOSE" sentinel fires once when the initial plan reaches EOSE on every
  * relay (or errors/caps out), and later chunk additions never unsettle it.
- * Delta streams never drive the settle signal. There is no per-chunk
- * completion signal and no chunk retraction.
+ * Delta streams never drive the settle signal. There is no chunk retraction.
+ * Optional history separately backfills each immutable chunk once per relay
+ * membership, including late chunks. Live EOSE is not historical completion;
+ * onHistoryComplete reports the finite snapshot, including incomplete boundaries.
+ * History survives live reconnect consolidation, but ends on relay removal or
+ * owner teardown. It never grants replaceable-write preflight coverage.
  *
  * Duplicate events across overlapping REQs are expected and harmless —
  * EventStore deduplication handles them downstream.
@@ -1612,6 +1626,8 @@ export function resilientAdditiveSubscription(
       main: Subscription | undefined;
       /** Container for this relay's delta streams; replaced when closed. */
       deltas: Subscription;
+      history: Subscription;
+      historyKeys: Set<string>;
     }
     const relayStates = new Map<string, RelayStreams>();
     const root = new Subscription();
@@ -1640,6 +1656,7 @@ export function resilientAdditiveSubscription(
       for (const state of relayStates.values()) {
         state.main?.unsubscribe();
         state.deltas.unsubscribe();
+        state.history.unsubscribe();
       }
       relayStates.clear();
     });
@@ -1661,6 +1678,38 @@ export function resilientAdditiveSubscription(
         },
       });
 
+    const startHistory = (relay: string, state: RelayStreams) => {
+      if (
+        !opts.history ||
+        subscriber.closed ||
+        relayStates.get(relay) !== state
+      )
+        return;
+      for (const [key, chunk] of chunks) {
+        if (state.historyKeys.has(key)) continue;
+        state.historyKeys.add(key);
+        // These cloned clauses never change. A reconnect can consolidate live
+        // deltas without cancelling/restarting an already-owned history range.
+        // A short initial response cannot prove exhaustion under a relay cap.
+        state.history.add(
+          subscribeStream(
+            historyWindow(
+              (_relays, filters) =>
+                resilientHistoryRequest(pool, relay, filters),
+              relay,
+              chunk.filters,
+              {
+                limit,
+                isTerminalError: isHistoryTerminalError,
+                onComplete: (covered) =>
+                  opts.onHistoryComplete?.(relay, key, covered),
+              },
+            ),
+          ),
+        );
+      }
+    };
+
     const closeDeltas = (relay: string) => {
       const state = relayStates.get(relay);
       if (!state) return;
@@ -1676,7 +1725,14 @@ export function resilientAdditiveSubscription(
           allFilters,
           // The reconnect REQ re-reads allFilters, so any delta REQs opened
           // since the last cycle are consolidated into it.
-          { ...mainStreamOpts, onCycleRestart: closeDeltas },
+          {
+            ...mainStreamOpts,
+            onCycleRestart: closeDeltas,
+            onRelayEose: (url) => {
+              opts.onRelayEose?.(url);
+              startHistory(relay, state);
+            },
+          },
           signal,
         ),
       );
@@ -1688,6 +1744,8 @@ export function resilientAdditiveSubscription(
       const state: RelayStreams = {
         main: undefined,
         deltas: new Subscription(),
+        history: new Subscription(),
+        historyKeys: new Set(),
       };
       relayStates.set(relay, state);
       if (chunks.size > 0) {
@@ -1705,6 +1763,7 @@ export function resilientAdditiveSubscription(
       if (!state) return;
       state.main?.unsubscribe();
       state.deltas.unsubscribe();
+      state.history.unsubscribe();
       relayStates.delete(relay);
       signal.removeRelay(relay);
     };
@@ -1736,7 +1795,10 @@ export function resilientAdditiveSubscription(
               pool,
               relay,
               deltaFilters,
-              deltaStreamOpts,
+              {
+                ...deltaStreamOpts,
+                onRelayEose: () => startHistory(relay, state),
+              },
               noopSettleSignal,
             ),
           ),
@@ -1761,7 +1823,7 @@ export function resilientAdditiveSubscription(
           throw new AdditiveFilterConflictError(chunk.key);
         return; // canonical duplicate — no new work
       }
-      if (chunk.deltaSafe === true)
+      if (opts.history || chunk.deltaSafe === true)
         assertDeltaSafeShape(chunk.key, stored.filters);
       if (!initial && chunk.deltaSafe !== true)
         throw new TypeError(

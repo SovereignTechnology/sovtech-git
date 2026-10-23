@@ -1181,7 +1181,7 @@ export function nip34SupplementalRelayLoader(
       pool,
       relayGroupUrls$(relayGroup),
       { initial: [], additions$: itemAdditions },
-      { reconnect: true, gapFill: true, settle: false },
+      { reconnect: true, gapFill: true, settle: false, history: true },
     )
       .pipe(
         onlyEvents(),
@@ -1368,7 +1368,7 @@ export function nip34RepoLoader(
       pool,
       relayGroupUrls$(relayGroup),
       { initial: [], additions$: itemAdditions },
-      { reconnect: true, gapFill: true, settle: false },
+      { reconnect: true, gapFill: true, settle: false, history: true },
     )
       .pipe(
         onlyEvents(),

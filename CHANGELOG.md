@@ -30,6 +30,8 @@
 
 ### Fixed
 
+- Recover older repository issues and PRs when relays cap the initial root query, including late maintainer coordinates and supplemental relays.
+
 - Release superseded issue/PR list queries immediately as roots and essentials arrive, avoiding continued processing by obsolete cached models.
 
 - Release repository-owned item and author-mailbox subscriptions when leaving the repository, while preserving active shared consumers.
