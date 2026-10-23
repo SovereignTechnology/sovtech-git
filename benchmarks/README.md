@@ -345,3 +345,59 @@ not INP. First-content and startup long-task measurements remain descriptive
 because delivery order can differ. Use the capped replay separately to assess
 history recovery and interactions during loading. The real gitworkshop capture
 can be supplied locally via `BENCH_CORPUS`; CI needs no external dataset download.
+
+## Cold detail-entry scheduling experiment
+
+The `direct-entry-browser-*` tools compare concurrent repository loading with
+an experimental selected-item head start. They use a production bundle,
+replay a captured public repository corpus locally, and never publish or
+contact live relays. The experimental gate exists only in the benchmark
+bundle; do not deploy `perf-reports/direct-entry/dist`.
+
+```sh
+node benchmarks/direct-entry-browser-build.mjs
+# Separate terminals for the fixture receiver and preview server:
+BENCH_CORPUS=/absolute/path/to/repository.json.gz node benchmarks/direct-entry-browser-server.mjs
+pnpm exec vite preview --host 127.0.0.1 --port 4192 --strictPort --outDir perf-reports/direct-entry/dist
+
+lease="$(browser-session new --label direct-entry)"
+browser-session playwright "$lease" open about:blank
+```
+
+Write `perf-reports/direct-entry/config.json` with the selected root event ID:
+
+```json
+{
+  "itemId": "<64-character PR or issue event ID in the corpus>",
+  "mode": "baseline",
+  "port": 4192,
+  "label": "baseline-1",
+  "cap": 100,
+  "latencyMs": 20
+}
+```
+
+Run `node benchmarks/direct-entry-browser-run.mjs "$lease"`. Repeat with
+`"mode": "priority"` and a different label, alternating order for at least
+three pairs. Each run creates a fresh browser context. Close the lease with
+`browser-session close "$lease"` when finished. Reports stay in the ignored
+`perf-reports/direct-entry/` directory. The corpus format matches the captured
+fixtures used by the pagination benchmark (`owner`, `coordinate`, `events`).
+
+Priority mode holds new base and supplemental repository owners until the
+first selected comment reaches the DOM and two animation frames pass, with a
+three-second fallback. It is a hypothesis probe, not a production readiness
+policy. Existing owner subscriptions are never restarted by the gate. Empty
+threads exercise the fallback. Optional `"navigate": true` checks PR-list/back
+navigation after the observation window; `"snapshot"` accepts a screenshot
+path within the browser lease's artifact directory.
+
+Reports include selected-title/comment DOM milestones, following paint
+opportunities, long tasks, frame gaps, request filters and received event IDs
+over a twelve-second startup window (`observationMs` can extend it). A double animation frame is not
+proof of pixel presentation; comments may be below the viewport. Compare
+received IDs before interpreting CPU totals as equal-work measurements, and
+compare selected-content latency separately from background progress. Relay
+caps and transport latency are controlled parameters, not measured properties
+of public relays. Git HTTP and other external HTTP responses are stubbed, so
+this measures the Nostr conversation path rather than git diff/merge readiness.
