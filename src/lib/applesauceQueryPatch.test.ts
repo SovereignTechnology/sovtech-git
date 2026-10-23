@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { EventStore } from "applesauce-core";
-import { fakeVerifyEvent, type Filter } from "applesauce-core/helpers";
+import {
+  compileFilter,
+  fakeVerifyEvent,
+  matchFilter,
+  type Filter,
+} from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
 const hex = (n: number) => n.toString(16).padStart(64, "0");
@@ -136,5 +141,46 @@ describe("patched Applesauce broad index unions", () => {
     } finally {
       store.dispose();
     }
+  });
+});
+
+describe("patched compiled tag matching", () => {
+  it("preserves raw matcher semantics for broad OR and AND filters", () => {
+    const events = Array.from({ length: 520 }, (_, i) => event(i));
+    events.push({ ...event(800), tags: [["topic", "long"], ["E"], ["E", ""]] });
+    for (const width of [1, 16, 17, 200, 500]) {
+      const values = [...tags.slice(0, width), "missing", ""];
+      const filters: Filter[] = [
+        { "#E": values },
+        { kinds: [1111], "#E": values, "#p": [hex(1)] },
+        { "#E": values, "&E": [tags[0]] },
+        { "#E": values, "&E": values },
+        { "#E": [], "&p": [hex(1)] },
+        { "#topic": [...values, "long"] },
+      ];
+      for (const filter of filters) {
+        const matches = compileFilter(filter);
+        expect(events.map(matches)).toEqual(
+          events.map((e) => matchFilter(filter, e)),
+        );
+      }
+    }
+  });
+
+  it("keeps compiled filters as snapshots and recomputes tags for copied events", () => {
+    const values = tags.slice(0, 200);
+    const matches = compileFilter({ "#E": values });
+    const original = event(0);
+    expect(matches(original)).toBe(true);
+    values.splice(0, values.length, "changed");
+    expect(matches(original)).toBe(true);
+    expect(matches({ ...original, tags: [["E", "changed"]] })).toBe(false);
+    expect(matches({ ...original, tags: [["E", tags[199]]] })).toBe(true);
+    expect(
+      matches({
+        ...original,
+        tags: Array.from({ length: 300 }, (_, i) => ["E", String(i)]),
+      }),
+    ).toBe(false);
   });
 });

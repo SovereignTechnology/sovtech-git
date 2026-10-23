@@ -337,6 +337,22 @@ node --expose-gc benchmarks/repository-models.mjs <v6-tree> <unpatched-v7-tree> 
 BENCH_STREAMING=1 node --expose-gc benchmarks/repository-models.mjs <v6-tree> <patched-before-coalescing> <coalesced-tree>
 ```
 
+For the compiled matchers used by live timelines (separate from stored-query
+planning), compare two installed v7 checkouts:
+
+```sh
+BENCH_CORPUS=/path/to/repository-snapshot.json.gz node benchmarks/compiled-filters.mjs <before-tree>/node_modules/applesauce-core/dist/helpers/filter.js <after-tree>/node_modules/applesauce-core/dist/helpers/filter.js
+```
+
+This overwrites ignored `perf-reports/compiled-filters.json` (override with
+`BENCH_REPORT`). Nine alternating-order rounds compare single-root, 20-root
+and all-root comment filters. Each timed sample replays the corpus 50 times
+to measure matcher throughput; this repetition is not a user journey. Exact
+matching identities are checked against the raw matcher, compilation is timed
+separately, and event tag caches are warmed before timing. Module source hashes
+reject accidental comparisons against a shared, identical installation. Pair this diagnostic
+with browser journeys before drawing conclusions about responsiveness.
+
 For production browser replay, start the fixture server with
 the same `BENCH_CORPUS` environment variable, then use the
 existing browser runner with `retainEventIds: true` and
