@@ -1,3 +1,4 @@
+import { coalesceBursts } from "@/lib/coalesceBursts";
 import { combineLatest, of } from "rxjs";
 import { auditTime, switchMap, map } from "rxjs/operators";
 import type { Model } from "applesauce-core/event-store";
@@ -92,6 +93,8 @@ export function PRListModel(
           legacyReplies$,
           zaps$,
         ]).pipe(
+          // Keep the latest snapshot without rebuilding the entire list per event.
+          coalesceBursts(),
           map(
             ([
               essentialEvents,
