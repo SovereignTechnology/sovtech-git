@@ -8,6 +8,92 @@ behaviour); timings run against live public relays and are noisier, so they
 are budgeted with absolute ceilings — their job is to catch a 0.4s → 9s
 cliff, not a 10% wobble.
 
+## UX priorities and tradeoffs
+
+Use these priorities when assessing performance changes, including effects that
+the current benchmarks do not measure. A faster selected comment is useful, but
+does not justify quietly delaying repository counts, statuses, another page or
+live updates. This guidance records product priorities; it does not approve a
+particular scheduler, cache design or presentation delay.
+
+### What should become useful first
+
+- **Issue/PR detail:** accurate essentials first: status, re-titles and current
+  PR updates/revision; then the cover letter/body, first comment, and remaining
+  discussion. This is a preference for useful progress, not a requirement to
+  serialise all loading or wait for complete history before showing content.
+  Empty conversations must also become useful promptly. PR updates are
+  user-facing essentials even though the current loader groups them with
+  comments and CI.
+- **Git review:** commits and changed files are part of readiness too. Their
+  exact priority relative to conversation content remains a design decision;
+  explicitly opening those tabs makes them foreground work. Keep the displayed
+  revision, diff, target branch and CI association coherent. A Git-stubbed
+  conversation replay cannot establish review readiness.
+- **Repository Issues/PRs views:** show the newest work promptly and reach
+  accurate open membership and counts quickly. Reduce items appearing and then
+  disappearing as status/revision evidence arrives, and disruptive reordering
+  as newer activity is discovered. A brief initial settling period may be a
+  reasonable tradeoff, but must be weighed against delaying new work. Do not
+  withhold correctness updates merely to keep ordering still.
+- **Return visits:** frequently visited repositories should become useful
+  quickly while reconciling new items, statuses and activity. Investigate reuse
+  of existing event/Git caches before adding another cache. Cached state is not
+  proof of current state; repository-view caching remains a proposal.
+- **Throughout loading:** typing, clicking, scrolling, navigation and cancelling
+  should remain responsive, preserving drafts and the reader's position.
+  Background progress matters because the next navigation can make it
+  foreground. Preserve subsequent live updates and appropriate resource release
+  across repeated navigation and longer sessions.
+
+### Reason about what the benchmark misses
+
+For a performance change, briefly record in the PR or commit:
+
+1. Which user outcome improves, and why the change should improve it.
+2. Where work moves or is deferred, who may wait longer, and what happens if the
+   user navigates there before loading finishes.
+3. What the evidence establishes, what remains unmeasured, and why the proposed
+   tradeoff is acceptable. Label inference separately from measured results.
+
+For example, immediate detail queries may compete with repository essentials;
+coalescing list updates may delay new items; root-first delivery may show items
+before their classification is known; caching may expose stale state. Consider
+search, notifications, pagination, Git work and authenticated/outbox/private
+paths when they share the changed resources. Slow, capped, unavailable and
+partially overlapping relays can change the tradeoff. It is reasonable to explain
+an unaffected path from its ownership and dependencies rather than benchmark it.
+
+Preserve resilience, rate limiting, deletion detection, reciprocal maintainer
+authorization, private isolation and subscription ownership unless a separately
+justified change is proposed. Faster incomplete loading is not an efficiency win.
+Shared owners may intentionally remain active after a child page unmounts.
+
+### Keep measurement bounded
+
+Reuse the existing harness and add only the evidence needed for the decision.
+Useful focal journeys for scheduling/cache work are cold detail entry followed
+by list navigation **during** loading, and a return to a previously visited
+repository after new activity. These are priorities for targeted extensions,
+not claims that the current harness fully covers them or a mandate to build a
+new suite. Add checks for other paths when the change puts them at risk; do not
+create an exhaustive benchmark matrix.
+
+Correctness, authority, deletion handling and input preservation are guardrails.
+Judge latency alongside repository progress and interaction responsiveness.
+Request counts, bytes, long tasks and frame gaps help explain costs; they cannot
+alone establish a better experience. Keep existing benchmark gates unless
+explicitly reviewed, and do not invent universal timing thresholds or combine
+foreground gains and background regressions into one score.
+
+Event receipt is not correct rendered state. Matching counts can conceal wrong
+membership; compare identities and states where relevant. EOSE, silence and
+stable counts do not prove completeness. A full-snapshot run through production
+models is a useful query-coverage reference, not independent validation of those
+models. DOM anchors plus animation frames do not prove visible pixels. Preserve
+missing-data and timeout outcomes, state the fixture/relay/cache scope, and avoid
+generalising mirrored-relay or Git-stubbed replay to live usage.
+
 ## Scenarios
 
 Both scenarios run in one browser session against `vite preview` serving a

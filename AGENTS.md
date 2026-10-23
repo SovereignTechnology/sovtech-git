@@ -108,6 +108,12 @@ fi
 
 ### Benchmarks (`benchmarks/`) — manual only
 
+Before performance optimisation, read the
+[UX priorities and tradeoff guidance](benchmarks/README.md#ux-priorities-and-tradeoffs).
+Use these priorities to assess effects outside the measured scenario. Reuse the
+existing harness, keep measurement scope bounded, and explain likely sacrifices
+and unmeasured risks; a narrow benchmark win alone is not sufficient evidence.
+
 `pnpm bench` runs the browser-driven relay query-budget benchmark. It drives a production build in headless Playwright Chromium, measures REQ frames / filter bytes / relay connections against the committed `benchmarks/baseline.json` (`--compare`), and is never part of pre-commit, `pnpm test`, or CI. The default devShell deliberately omits the ~1 GB browser bundle — run it via `nix develop .#bench --command pnpm bench`, or outside Nix provision a browser once with `npx playwright-core install chromium`. The `playwright-core` devDependency must stay pinned to the exact version of `pkgs.playwright-driver` in `flake.nix`; see `benchmarks/README.md`.
 
 ## Nostr Protocol Integration
