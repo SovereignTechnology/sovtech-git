@@ -195,9 +195,9 @@ function useAuthorInboxDeltaRelays(
  * Two loading levels:
  *
  *   list (always) — essentials (status, labels, deletions) + comments.
- *     Fires nip34ListLoader. Merges automatically with nip34RepoLoader
- *     calls from useIssues / usePRs because both use the same singleton
- *     loader instances — applesauce batches them into one relay subscription.
+ *     Fires nip34ListLoader. Shares active essentials and comment requests
+ *     per item/relay with the repository owner, even across batching windows.
+ *     Different items are batched by the underlying singleton loaders.
  *
  *   thread (when includeThread is true) — reactions + zaps on root and
  *     recursively on each comment. Fires nip34ThreadItemLoader. Does NOT

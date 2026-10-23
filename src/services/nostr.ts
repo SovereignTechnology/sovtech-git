@@ -852,7 +852,7 @@ const nip34ThreadQuoteLoader = createPaginatedTagValueLoader(pool, "q", {
 // Pure RxJS observable factories — no React, no hooks. Consumed by React
 // hooks via use$(), which handles subscription lifecycle.
 //
-// Two levels, each non-additive (no overlap):
+// Two levels with overlapping coverage but different query scope:
 //
 //   nip34ListLoader    — list level: essentials + comments for a single item.
 //                        Also used by nip34RepoLoader to fire both loaders
@@ -956,6 +956,53 @@ function createItemEssentialsRequest(
   });
 }
 
+/** Active focused comment requests, shared across repository and detail owners. */
+const itemCommentsRequests = new Map<
+  string,
+  Observable<PaginatedTagValueResponse>
+>();
+
+/**
+ * Keep focused comment/PR-update/CI loading available immediately on direct
+ * entry, without repeating a repository owner's active item/relay request.
+ * Consumers read existing events from the store; replay only the latest signal.
+ * Relays requested together remain active until their last consumer leaves.
+ */
+export function nip34ItemCommentsLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return defer(() => {
+    const requests = new Set<Observable<PaginatedTagValueResponse>>();
+    const missingRelays: string[] = [];
+    for (const relay of new Set(relays.map(normalizeUrl))) {
+      const request = itemCommentsRequests.get(JSON.stringify([itemId, relay]));
+      if (request) requests.add(request);
+      else missingRelays.push(relay);
+    }
+    if (missingRelays.length > 0) {
+      const keys = missingRelays.map((relay) =>
+        JSON.stringify([itemId, relay]),
+      );
+      // Keep one pointer for newly needed relays so multi-relay repository
+      // loading does not fill the singleton's batch-size limit more quickly.
+      const request = nip34CommentsLoader({
+        value: itemId,
+        relays: missingRelays,
+      }).pipe(
+        finalize(() => keys.forEach((key) => itemCommentsRequests.delete(key))),
+        share({
+          connector: () => new ReplaySubject<PaginatedTagValueResponse>(1),
+          resetOnRefCountZero: true,
+        }),
+      );
+      for (const key of keys) itemCommentsRequests.set(key, request);
+      requests.add(request);
+    }
+    return merge(...requests);
+  });
+}
+
 /** Full list-level loading: essentials, withdrawals, and comments. */
 export function nip34ListLoader(
   itemId: string,
@@ -963,7 +1010,7 @@ export function nip34ListLoader(
 ): Observable<PaginatedTagValueResponse> {
   return merge(
     nip34ItemEssentialsLoader(itemId, relays),
-    nip34CommentsLoader({ value: itemId, relays }),
+    nip34ItemCommentsLoader(itemId, relays),
   );
 }
 
