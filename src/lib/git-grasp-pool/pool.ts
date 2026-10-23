@@ -1341,9 +1341,19 @@ export class GitGraspPool {
       let cachedGitAheadCommit: string | null = null;
       let cachedGitAheadUrl: string | null = null;
 
-      for (const url of allUrls) {
-        const cachedInfo =
-          this.cache.peekInfoRefs(url) ?? (await this.cache.getInfoRefs(url));
+      // Start disk reads together, but consume results in URL order so the
+      // first differing HEAD still wins. Do not wait for later mirrors once
+      // a winner is found; memory hits can still be used synchronously.
+      // Handle failures immediately because later reads can outlive an early exit.
+      const cachedInfos = allUrls.map(
+        (url) =>
+          this.cache.peekInfoRefs(url) ??
+          this.cache.getInfoRefs(url).catch(() => undefined),
+      );
+
+      for (const [index, url] of allUrls.entries()) {
+        const cached = cachedInfos[index];
+        const cachedInfo = cached instanceof Promise ? await cached : cached;
         if (signal.aborted) {
           this.fetching = false;
           return;
