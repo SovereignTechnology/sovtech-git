@@ -87,6 +87,41 @@ describe("createPaginatedTagValueLoader batching", () => {
     first.unsubscribe();
     second.unsubscribe();
   });
+  it("uses an empty initial EOSE as coverage without another history request and stays live", async () => {
+    const statuses: string[] = [];
+    const request = vi.spyOn(pool.relay(RELAY_URL), "request");
+    const loader = createPaginatedTagValueLoader(pool, "e", {
+      bufferTime: 1,
+      settleTime: 1,
+      onHistoryStatus: (status) => statuses.push(status.state),
+    });
+    const observed = subscribeSpyTo(
+      loader({ value: "empty-thread", relays: [RELAY_URL] }),
+    );
+    const initial = (await server.nextMessage) as [
+      string,
+      string,
+      Record<string, unknown>,
+    ];
+    expect(initial[0]).toBe("REQ");
+    expect(initial[2].since).toBeUndefined();
+    expect(initial[2].until).toBeUndefined();
+    server.send(["EOSE", initial[1]]);
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe("covered"), {
+      timeout: 1000,
+    });
+    expect(request).not.toHaveBeenCalled();
+    const live = taggedEvent("aa".repeat(32), "empty-thread");
+    server.send(["EVENT", initial[1], live]);
+    await vi.waitFor(
+      () =>
+        expect(observed.getValues().map((event) => event.id)).toContain(
+          live.id,
+        ),
+      { timeout: 1000 },
+    );
+    observed.unsubscribe();
+  });
   it("loads beyond a short relay page and keeps the original live subscription", async () => {
     const statuses: string[] = [];
     const loader = createPaginatedTagValueLoader(pool, "e", {

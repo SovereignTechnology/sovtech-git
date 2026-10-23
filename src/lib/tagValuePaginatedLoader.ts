@@ -182,6 +182,23 @@ function processRelayStream(
 
     const startPagination = () => {
       if (!manualPaginate$) {
+        // This path starts only after a real EOSE for the untimed live filter.
+        // Zero events proves an empty snapshot; a non-empty short response may
+        // still be capped by the relay and must go through history coverage.
+        if (oldestSeen === undefined) {
+          const window = { since: 0, until: Math.floor(Date.now() / 1000) };
+          historyDone = true;
+          exhausted.add(key);
+          signal.settle(relay);
+          onHistoryStatus?.({
+            source: relay,
+            filter: paginationFilter,
+            window,
+            buffer: window,
+            state: "covered",
+          });
+          return;
+        }
         paginateSub = historyWindow(
           (_relays, filters) => {
             signal.extend(relay);
