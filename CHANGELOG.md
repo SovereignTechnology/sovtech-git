@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- Release repository-owned item and author-mailbox subscriptions when leaving the repository, while preserving active shared consumers.
+
 - Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
 
 - Avoid re-querying empty tag history after a successful initial EOSE while keeping live updates active.

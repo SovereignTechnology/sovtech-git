@@ -1079,16 +1079,21 @@ export function nip34SupplementalRelayLoader(
     const itemAdditions = new Subject<AdditiveFilterChunk>();
 
     function fireLoaders(id: string, relays: string[]): void {
-      nip34ListLoader(id, relays).subscribe({
-        next: (msg) => {
-          if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-        },
-      });
+      // Release this owner's demand; shared consumers keep their subscriptions.
+      subscriber.add(
+        nip34ListLoader(id, relays).subscribe({
+          next: (msg) => {
+            if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
+          },
+        }),
+      );
     }
 
     function fireAuthorInboxLoaders(ev: NostrEvent): void {
       const perItemQueried = new Set(knownRelayUrls);
-      addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe();
+      subscriber.add(
+        addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe(),
+      );
       const s = eventStore
         .model(MailboxesModel, ev.pubkey)
         .pipe(
@@ -1102,11 +1107,7 @@ export function nip34SupplementalRelayLoader(
             .filter((r) => !perItemQueried.has(r));
           if (newRelays.length === 0) return;
           for (const r of newRelays) perItemQueried.add(r);
-          nip34ListLoader(ev.id, newRelays).subscribe({
-            next: (msg) => {
-              if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-            },
-          });
+          fireLoaders(ev.id, newRelays);
         });
       inboxSubs.add(s);
     }
@@ -1247,16 +1248,21 @@ export function nip34RepoLoader(
     const metaAdditions = new Subject<AdditiveFilterChunk>();
 
     function fireLoaders(id: string, relays: string[]): void {
-      nip34ListLoader(id, relays).subscribe({
-        next: (msg) => {
-          if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-        },
-      });
+      // Release this owner's demand; shared consumers keep their subscriptions.
+      subscriber.add(
+        nip34ListLoader(id, relays).subscribe({
+          next: (msg) => {
+            if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
+          },
+        }),
+      );
     }
 
     function fireAuthorInboxLoaders(ev: NostrEvent): void {
       const perItemQueried = new Set(knownRelayUrls);
-      addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe();
+      subscriber.add(
+        addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe(),
+      );
       const s = eventStore
         .model(MailboxesModel, ev.pubkey)
         .pipe(
@@ -1270,11 +1276,7 @@ export function nip34RepoLoader(
             .filter((r) => !perItemQueried.has(r));
           if (newRelays.length === 0) return;
           for (const r of newRelays) perItemQueried.add(r);
-          nip34ListLoader(ev.id, newRelays).subscribe({
-            next: (msg) => {
-              if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-            },
-          });
+          fireLoaders(ev.id, newRelays);
         });
       inboxSubs.add(s);
     }
