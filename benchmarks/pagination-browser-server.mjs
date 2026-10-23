@@ -1,4 +1,5 @@
 // Local, synthetic benchmark fixtures and JSON artifact receiver. Never publishes.
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
@@ -87,6 +88,15 @@ if (process.env.BENCH_CORPUS) {
     defaultRelays: [relay],
   };
 }
+// Synthetic Schnorr signatures use random auxiliary data; fingerprint the
+// unsigned event content so equivalent fixtures compare across fresh processes.
+fixture.sha256 = createHash("sha256")
+  .update(
+    JSON.stringify(
+      fixture.events.map(({ sig: _signature, ...event }) => event),
+    ),
+  )
+  .digest("hex");
 writeFileSync(`${out}/fixture.json`, JSON.stringify(fixture));
 createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");

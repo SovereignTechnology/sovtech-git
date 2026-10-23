@@ -1,0 +1,19 @@
+version: 1
+name: Controlled UI benchmark
+system: x86_64-linux
+on: [workflow_dispatch]
+reuse: never
+requirements:
+  resources:
+    memory-mib: { gte: 4096 }
+    scratch-mib: { gte: 8192 }
+jobs:
+  browser:
+    steps:
+      - dependencies: { build: packages.x86_64-linux.ci-dependencies }
+      - install
+      - replay
+    artifacts:
+      replay:
+        path: replay
+        storage: archive

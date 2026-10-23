@@ -45,7 +45,7 @@
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
         };
         ci = import ./.ngit/nix/workflows {
-          inherit pkgs system android-sdk ngit-grasp-pkg;
+          inherit pkgs system android-sdk ngit-grasp-pkg playwright-browsers;
         };
       in rec {
         ciCommands = ci.commands;

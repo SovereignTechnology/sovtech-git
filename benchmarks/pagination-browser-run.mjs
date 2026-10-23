@@ -19,6 +19,8 @@ export default async function run(controlPage) {
     byKind: {},
     requestLog: [],
     closes: 0,
+    pending: 0,
+    lastDelivery: 0,
   };
   const errors = [];
   const networkFailures = [];
@@ -71,12 +73,15 @@ export default async function run(controlPage) {
         ).replace(/%[A-F0-9]{2}/g, "x").length;
         counters.requestLog.push({ at: Date.now(), url: ws.url(), filters });
         active.add(frame[1]);
+        counters.pending++;
         try {
           await page.waitForTimeout(config.latencyMs ?? 20);
         } catch {
+          counters.pending--;
           return;
         }
         {
+          counters.pending--;
           if (!active.has(frame[1])) return;
           const found = new Map();
           for (const f of filters)
@@ -84,10 +89,12 @@ export default async function run(controlPage) {
               .filter((e) => matches(e, f))
               .slice(
                 0,
-                Math.min(
-                  f.limit ?? config.defaultLimit ?? 100,
-                  config.cap ?? 100,
-                ),
+                config.matchedData
+                  ? fixture.events.length
+                  : Math.min(
+                      f.limit ?? config.defaultLimit ?? 100,
+                      config.cap ?? 100,
+                    ),
               ))
               found.set(e.id, e);
           for (const e of found.values()) {
@@ -99,6 +106,7 @@ export default async function run(controlPage) {
             counters.byKind[e.kind] = (counters.byKind[e.kind] ?? 0) + 1;
             ws.send(JSON.stringify(["EVENT", frame[1], e]));
           }
+          counters.lastDelivery = Date.now();
           ws.send(JSON.stringify(["EOSE", frame[1]]));
         }
       });
@@ -255,6 +263,18 @@ export default async function run(controlPage) {
         .waitFor({ timeout: 15000 });
     readyMs = Date.now() - start;
     await capture("ready");
+    if (config.matchedData) {
+      if (config.live)
+        throw new Error("Matched data requires controlled replay");
+      // Quiet time is the condition under test, not a substitute for readiness.
+      // Compare event hashes across variants before interpreting these timings.
+      const deadline = Date.now() + 30000;
+      while (counters.pending || Date.now() - counters.lastDelivery < 1000) {
+        if (Date.now() > deadline) throw new Error("Replay did not settle");
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+      }
+      await capture("matched-data-ready");
+    }
     if (config.probeInitialInteraction && config.scenario === "notifications") {
       const interactionStart = Date.now();
       await page.locator('[aria-label="Group notifications by user"]').click();
@@ -310,7 +330,9 @@ export default async function run(controlPage) {
           }),
       );
       milestones.push({
-        label: "filter-during-history-painted",
+        label: config.matchedData
+          ? "filter-after-matched-data"
+          : "filter-during-history-painted",
         interactionMs: Date.now() - began,
         elapsedMs: Date.now() - start,
       });
@@ -405,6 +427,7 @@ export default async function run(controlPage) {
     config,
     browser: context.browser().version(),
     fixtureExpected: config.live ? null : fixture.expected,
+    fixtureSha256: config.live ? null : fixture.sha256,
     readyMs,
     failure,
     errors,
