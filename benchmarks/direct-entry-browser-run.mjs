@@ -13,6 +13,13 @@ async function run(control) {
     throw new Error("Mode must be baseline or priority");
   if (!/^[a-zA-Z0-9_-]+$/.test(config.label ?? ""))
     throw new Error("Invalid report label");
+  config.strategy ??= "shared";
+  if (
+    !["shared", "thread-only", "one-shot", "immediate-root"].includes(
+      config.strategy,
+    )
+  )
+    throw new Error("Unknown query strategy");
   const context = await control
     .context()
     .browser()
@@ -69,12 +76,31 @@ async function run(control) {
     });
   });
   await context.addInitScript(
-    ({ selected, config }) => {
+    ({ selected, config, repositoryComments, oracleEvents }) => {
       for (const key of ["extraRelays", "lookupRelays", "gitIndexRelays"])
         localStorage.setItem(key, JSON.stringify(["wss://fixture.invalid"]));
       localStorage.setItem("relayCurationMode", '"repo"');
       const b = (window.__detailBench = {
         mode: config.mode,
+        strategy: config.strategy,
+        oracleEvents,
+        coverage: Object.fromEntries(
+          Object.entries({
+            comments: selected.comments,
+            updates: selected.updates,
+            essentials: selected.essentials,
+            repositoryComments,
+          }).map(([name, ids]) => [
+            name,
+            {
+              expected: ids.length,
+              missing: new Set(ids),
+              firstAt: null,
+              completeAt: null,
+            },
+          ]),
+        ),
+        openPRCounts: [],
         root: selected.id,
         title: selected.title,
         comments: selected.comments,
@@ -119,6 +145,15 @@ async function run(control) {
           )
         )
           mark("title");
+        const countText = document.querySelector(
+          'nav a[href$="/prs"]',
+        )?.textContent;
+        const count = countText?.match(/PRs\s*(\d+)/)?.[1];
+        if (
+          count !== undefined &&
+          b.openPRCounts.at(-1)?.count !== Number(count)
+        )
+          b.openPRCounts.push({ at: performance.now(), count: Number(count) });
         const present = selected.comments.filter((id) =>
           document.getElementById(id.slice(0, 15)),
         );
@@ -144,6 +179,13 @@ async function run(control) {
               const m = JSON.parse(data);
               if (m[0] === "EVENT") {
                 b.events.add(m[2].id);
+                for (const coverage of Object.values(b.coverage)) {
+                  if (coverage.missing.delete(m[2].id)) {
+                    coverage.firstAt ??= performance.now();
+                    if (!coverage.missing.size)
+                      coverage.completeAt = performance.now();
+                  }
+                }
                 b.eventFrames++;
                 b.eventBytes += new TextEncoder().encode(data).length;
                 if (m[2].id === selected.id) mark("rootReceived");
@@ -167,7 +209,12 @@ async function run(control) {
         }
       };
     },
-    { selected, config },
+    {
+      selected,
+      config,
+      repositoryComments: fixture.repositoryComments,
+      oracleEvents: config.fullSnapshotReference ? fixture.events : undefined,
+    },
   );
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -186,7 +233,24 @@ async function run(control) {
     report = await page.evaluate(() => {
       const b = window.__detailBench;
       return {
+        observedUntil: performance.now(),
         marks: b.marks,
+        coverage: Object.fromEntries(
+          Object.entries(b.coverage).map(([name, c]) => [
+            name,
+            {
+              ...c,
+              missing: [...c.missing],
+              status:
+                c.expected === 0
+                  ? "not-applicable"
+                  : c.missing.size
+                    ? "incomplete"
+                    : "complete",
+            },
+          ]),
+        ),
+        openPRCounts: b.openPRCounts,
         longTasks: b.longTasks,
         frameMax: Math.max(...b.frames.map((x) => x.ms)),
         framesOver50: b.frames.filter((x) => x.ms > 50).length,
@@ -203,6 +267,20 @@ async function run(control) {
         ),
       };
     });
+    if (config.expectedOpenPRCount !== undefined) {
+      const counts = report.openPRCounts;
+      const lastWrong = counts.findLastIndex(
+        (x) => x.count !== config.expectedOpenPRCount,
+      );
+      report.openPRCountReference = {
+        expected: config.expectedOpenPRCount,
+        final: counts.at(-1)?.count ?? null,
+        correctThroughEndFrom:
+          counts.at(-1)?.count === config.expectedOpenPRCount
+            ? (counts[lastWrong + 1]?.at ?? null)
+            : null,
+      };
+    }
     if (config.snapshot)
       await page.screenshot({ path: config.snapshot, fullPage: false });
     if (config.navigate) {
@@ -248,6 +326,7 @@ async function run(control) {
           config,
           build,
           selected,
+          corpusHash: fixture.corpusHash,
           report,
           errors,
           requestCount: requests.length,

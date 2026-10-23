@@ -2,6 +2,7 @@
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { nip19 } from "nostr-tools";
 if (!process.env.BENCH_CORPUS)
   throw new Error(
@@ -13,7 +14,20 @@ c.events.sort(
   (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
 );
 const roots = c.events.filter((e) => [1618, 1617, 1621].includes(e.kind));
+const rootIds = new Set(roots.map((e) => e.id));
+const references = (event, id, tags) =>
+  event.tags.some((t) => tags.includes(t[0]) && t[1] === id);
 const fixture = {
+  corpusHash: createHash("sha256")
+    .update(JSON.stringify(c.events))
+    .digest("hex"),
+  repositoryComments: c.events
+    .filter(
+      (e) =>
+        e.kind === 1111 &&
+        e.tags.some((t) => t[0] === "E" && rootIds.has(t[1])),
+    )
+    .map((e) => e.id),
   ...c,
   basePath:
     "/" +
@@ -25,6 +39,16 @@ const fixture = {
     kind: e.kind,
     title: e.tags.find((t) => t[0] === "subject")?.[1],
     suffix: (e.kind === 1621 ? "/issues/" : "/prs/") + e.id,
+    updates: c.events
+      .filter((child) => child.kind === 1619 && references(child, e.id, ["E"]))
+      .map((child) => child.id),
+    essentials: c.events
+      .filter(
+        (child) =>
+          [1630, 1631, 1632, 1633, 1985, 5].includes(child.kind) &&
+          references(child, e.id, ["e"]),
+      )
+      .map((child) => child.id),
     comments: c.events
       .filter(
         (child) =>

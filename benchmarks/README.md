@@ -394,10 +394,92 @@ path within the browser lease's artifact directory.
 
 Reports include selected-title/comment DOM milestones, following paint
 opportunities, long tasks, frame gaps, request filters and received event IDs
-over a twelve-second startup window (`observationMs` can extend it). A double animation frame is not
+over a nominal twelve-second startup window (`observationMs` can extend it).
+`observedUntil` records the actual cutoff: a busy main thread can delay sampling. A double animation frame is not
 proof of pixel presentation; comments may be below the viewport. Compare
 received IDs before interpreting CPU totals as equal-work measurements, and
 compare selected-content latency separately from background progress. Relay
 caps and transport latency are controlled parameters, not measured properties
 of public relays. Git HTTP and other external HTTP responses are stubbed, so
 this measures the Nostr conversation path rather than git diff/merge readiness.
+
+### Query strategies and user-facing outcomes
+
+Set `strategy` independently of `mode` (keep `mode: "baseline"` when isolating
+query strategy):
+
+| Strategy           | Detail-page demand                                | Root thread                      | Recursive thread |
+| ------------------ | ------------------------------------------------- | -------------------------------- | ---------------- |
+| `shared` (default) | Shared essentials and focused comments/updates/CI | 500 ms buffer                    | 500 ms buffer    |
+| `thread-only`      | Shared essentials                                 | 500 ms buffer                    | 500 ms buffer    |
+| `one-shot`         | Shared essentials plus immediate focused preview  | 500 ms buffer                    | 500 ms buffer    |
+| `immediate-root`   | Shared essentials                                 | Immediate, one pointer per batch | 500 ms buffer    |
+
+All variants retain repository list owners, essential-deletion queries, full
+thread history and resilient relay handling. “Thread-only” removes **detail's**
+focused comment demand; repository demand still exists. The one-shot preview
+uses `resilientRequest`, closes each relay at EOSE, and cancels any remaining
+work after three seconds. It neither paginates nor establishes completeness;
+the persistent thread handles history and subsequent events. Immediate-root
+uses the existing paginated loader with `bufferSize: 1`, preserving history
+semantics without a zero-duration repeating buffer timer. These are benchmark
+injections, not production changes or approved replacements for shared ownership.
+
+Reports distinguish:
+
+- First/all selected NIP-22 comment DOM anchors and subsequent paint
+  opportunities. These do not assert on-screen visibility or include legacy replies.
+- First/all captured selected PR update and essential event **receipt**. Essentials
+  here are statuses, labels and root deletions; receipt does not establish their
+  authority, final rendered status, or deletion-of-essential coverage.
+- All captured NIP-22 comments referencing captured issue/PR/patch roots received.
+  Coverage reports expected counts, missing IDs and completion times. Empty sets
+  are `not-applicable`; deadlines leave incomplete sets explicitly censored.
+- The navigation badge's open-PR count transitions, compared with a full-snapshot
+  reference. `correctThroughEndFrom` is the start of the final uninterrupted
+  matching period within the observation window, not its first accidental match.
+  Matching a number alone can still be coincidental when inputs are incomplete;
+  it does not prove that the exact open-PR membership is correct.
+- Request count/filters, event bytes/duplicates, unique event IDs, long tasks and
+  frame gaps. Compare exact received sets before calling CPU totals equal-work.
+
+`fullSnapshotReference: true` preloads the complete fixture into the real
+EventStore before application startup. The normal resolver, role history,
+status/deletion handling and PR grouping compute the reference badge. This
+provides a reference for query completeness, **not** independent proof of those domain
+rules. The DOM count probe currently requires a visible positive badge; it fails
+rather than treating an absent/loading badge as zero. Reference runs are excluded from performance comparisons. A snapshot
+cannot prove completeness beyond the events that were captured.
+
+Run a repeatable suite with an existing browser-session lease:
+
+```sh
+node benchmarks/direct-entry-browser-suite.mjs "$lease" /absolute/path/to/suite.json
+```
+
+Example suite (choose real IDs from the local fixture):
+
+```json
+{
+  "rounds": 3,
+  "defaults": { "cap": 10000, "observationMs": 12000 },
+  "scenarios": [
+    { "name": "commented-pr", "itemId": "<PR ID>" },
+    { "name": "commented-issue", "itemId": "<issue ID>" }
+  ]
+}
+```
+
+The suite obtains a full-snapshot reference per scenario, alternates strategy
+order, fails on browser errors and writes `latest-suite.json` with coverage counts
+beside timing medians. Individual raw reports remain ignored. Corpus hashes and
+build commit/diff hashes identify the inputs. Reuse scenario names to replace
+previous local reports; archive selected evidence outside Git if needed.
+
+Use uncapped replay for equal-data comparisons; repeat with a low cap to expose
+history admission delays. Include a CI/update-heavy PR, a normal issue and an
+empty conversation before adopting a policy. Warm repository-to-detail navigation,
+missing/slow relays, and interaction latency while events arrive require separate
+scenarios; these cold-entry results alone do not validate those paths. Keep the
+repository gate fixed across strategy comparisons: releasing it on first comment
+would otherwise couple the policy to the outcome being measured.
