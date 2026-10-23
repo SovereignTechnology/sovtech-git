@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Coalesce issue/PR and essentials list rebuilds during event bursts, preserving initial and latest results while limiting repeated UI derivation work.
+
 - Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and explicit batch-triggered search and notification history using v7 coverage.
 
 - Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
@@ -19,6 +21,12 @@
 ### Fixed
 
 - Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
+
+- Avoid re-querying empty tag history after a successful initial EOSE while keeping live updates active.
+
+- Remove avoidable per-filter waiting from explicit notification history batches while preserving shared concurrency limits and relay cooldowns.
+
+- Honour limits on local event-store queries without time bounds through Applesauce v7's query implementation. Existing Android signer restoration, exact-ID deletion and WebSocket recovery fixes remain supplied upstream.
 
 - Continue repository search history from each completed initial filter response, preserving inclusive timestamp boundaries instead of repeating the first page.
 

@@ -231,3 +231,44 @@ Captured event-ID hashes permit equal-data checks. Heap readings remain
 GC-sensitive snapshots. Use production builds for primary results and identical
 profiling builds for supporting attribution. Record every config and failure;
 fixed observation windows do not establish completion.
+
+## Fixed public repository replay
+
+Supply a captured public repository snapshot with `BENCH_CORPUS`. Keep its
+verified public events and capture provenance in an external artifact archive,
+including relay failures and bounded-cursor limitations. A fixed snapshot is not
+a complete archive of every relay.
+
+Run the actual issue/PR models and populated-store queries with each checkout's
+own installed dependencies:
+
+```sh
+export BENCH_CORPUS=/path/to/repository-snapshot.json.gz
+node --expose-gc benchmarks/repository-models.mjs <v6-tree> <unpatched-v7-tree> <patched-v7-tree>
+BENCH_STREAMING=1 node --expose-gc benchmarks/repository-models.mjs <v6-tree> <patched-before-coalescing> <coalesced-tree>
+```
+
+For production browser replay, start the fixture server with
+the same `BENCH_CORPUS` environment variable, then use the
+existing browser runner with `retainEventIds: true` and
+`probeRepoInteraction: true`. Set both `cap` and `defaultLimit` to 500 to
+replay ngit-grasp's documented result cap and omitted-limit default; the runner
+otherwise defaults omitted limits to 100. Controlled replay selects repo relay
+mode and mirrors the snapshot across intercepted relays. It measures event-shape
+costs with fixed topology, not the traffic distribution of real outboxes.
+The interaction probe filters and clears the issue list while
+history loads, waiting for the rendered result and paint. Fixed observation
+windows measure ongoing work; they do not prove exhaustion. The 100-result cap
+also exposes the separate, unchanged root-discovery cap in both versions.
+
+For live query-budget validation in the isolated browser, the same fixture
+server receives reports and the production preview must already be running:
+
+```sh
+node benchmarks/budget-browser-session.mjs <lease> <preview-port> <report-label>
+```
+
+This adapter reuses the scenario functions and comparison limits from
+`bench.mjs`; it substitutes the lease's timer for Node's timer in bounded
+polling. It exits non-zero on scenario errors or budget failures, preserving the report.
+Allow the app's actual public relay/NIP-05 origins when creating the lease.

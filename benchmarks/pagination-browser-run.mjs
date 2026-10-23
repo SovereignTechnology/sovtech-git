@@ -82,7 +82,13 @@ export default async function run(controlPage) {
           for (const f of filters)
             for (const e of fixture.events
               .filter((e) => matches(e, f))
-              .slice(0, Math.min(f.limit ?? 100, config.cap ?? 100)))
+              .slice(
+                0,
+                Math.min(
+                  f.limit ?? config.defaultLimit ?? 100,
+                  config.cap ?? 100,
+                ),
+              ))
               found.set(e.id, e);
           for (const e of found.values()) {
             counters.eventFrames++;
@@ -194,7 +200,7 @@ export default async function run(controlPage) {
   const start = Date.now();
   const milestones = [];
   const capture = async (label) => {
-    const metrics = await page.evaluate(async () => {
+    const metrics = await page.evaluate(async (retainEventIds) => {
       const b = window.__bench;
       const digest = await crypto.subtle.digest(
         "SHA-256",
@@ -210,6 +216,7 @@ export default async function run(controlPage) {
         eventBytes: b?.eventBytes,
         eventFrames: b?.eventFrames,
         unique: b?.events.size,
+        eventIds: retainEventIds ? [...b.events].sort() : undefined,
         eventIdsSha256: [...new Uint8Array(digest)]
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join(""),
@@ -219,7 +226,7 @@ export default async function run(controlPage) {
         timeOrigin: performance.timeOrigin,
         body: document.body.innerText.slice(0, 1800),
       };
-    });
+    }, config.retainEventIds);
     milestones.push({ label, elapsedMs: Date.now() - start, metrics });
   };
   let readyMs = null,
@@ -279,6 +286,39 @@ export default async function run(controlPage) {
         elapsedMs: Date.now() - start,
         interactionMs: Date.now() - interactionStart,
       });
+    }
+    if (config.probeRepoInteraction && config.scenario === "repo") {
+      const input = page.getByPlaceholder(/^Search issues,/);
+      const began = Date.now();
+      await input.fill("benchmark-no-matching-subject-8b0ff5");
+      await page
+        .getByText("No issues match your filters", { exact: true })
+        .waitFor({ timeout: 5000 });
+      await page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error("Paint deadline")),
+              5000,
+            );
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                clearTimeout(timer);
+                resolve();
+              }),
+            );
+          }),
+      );
+      milestones.push({
+        label: "filter-during-history-painted",
+        interactionMs: Date.now() - began,
+        elapsedMs: Date.now() - start,
+      });
+      await input.fill("");
+      await page
+        .locator('a[href*="/issues/"]')
+        .first()
+        .waitFor({ timeout: 5000 });
     }
     // Fixed observation windows measure continuing background work, not readiness.
     await page.waitForTimeout(config.observationMs ?? 20000);
