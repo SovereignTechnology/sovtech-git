@@ -25,6 +25,7 @@ import IssuePage from "@/pages/IssuePage";
 import PRPage from "@/pages/PRPage";
 import { useIssues } from "@/hooks/useIssues";
 import { usePRs } from "@/hooks/usePRs";
+import { useNip34RepoLoader } from "@/hooks/useNip34RepoLoader";
 import { useRepoHasCI } from "@/hooks/useCI";
 import { useRepoReleaseSummary } from "@/hooks/useSoftwareReleases";
 import { usePrefetchNip05 } from "@/hooks/usePrefetchNip05";
@@ -374,18 +375,14 @@ function RepoLayoutSession({
     [relayHintsKey, confirmedMaintainersKey, isPrivate],
   );
 
-  const issues = useIssues(
+  useNip34RepoLoader(
     presentationRepoCoordinates,
     repoRelayGroup,
-    queryOptions,
+    queryOptions.privateRepository,
     repo?.roleHistory,
   );
-  const prs = usePRs(
-    presentationRepoCoordinates,
-    repoRelayGroup,
-    queryOptions,
-    repo?.roleHistory,
-  );
+  const issues = useIssues(presentationRepoCoordinates, repo?.roleHistory);
+  const prs = usePRs(presentationRepoCoordinates, repo?.roleHistory);
 
   const acceptedRepoCoordinates = useMemo(
     () => repo?.confirmedMemberCoordinates ?? [],

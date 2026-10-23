@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Share one repository item loader between issue and PR lists, avoiding duplicate root subscriptions while retaining additive maintainer and relay discovery.
+
 - Reuse event tag-value indexes when dispatching batched loader results, reducing repeated tag scans across subscribers.
 
 - Build local fuzzy-search indexes only while searching, avoiding indexing work when browsing repositories, issues, and PRs.
