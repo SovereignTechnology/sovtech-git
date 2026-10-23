@@ -20,6 +20,8 @@
 
 - Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
 
+- Continue repository search history from each completed initial filter response, preserving inclusive timestamp boundaries instead of repeating the first page.
+
 - Load automatic history beyond relay result caps without treating failed or cancelled pages as exhausted; report saturated timestamp boundaries as incomplete.
 
 - Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.

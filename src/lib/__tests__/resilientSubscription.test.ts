@@ -1298,3 +1298,217 @@ it("delivers manual v7 batch outcomes before live EOSE without draining history"
     trigger.complete();
   }
 });
+
+it("hands completed search results to manual history with an inclusive boundary", async () => {
+  const trigger = new Subject<void>();
+  const eose = vi.fn();
+  const batches = vi.fn();
+  const spy = subscribeSpyTo(
+    resilientSubscription(
+      pool,
+      [RELAY_URL],
+      [{ kinds: [1], search: "needle" }],
+      {
+        manualPaginate$: trigger,
+        limit: 20,
+        settle: false,
+        gapFill: false,
+        onRelayEose: eose,
+        onHistoryBatch: batches,
+      },
+    ),
+  );
+  try {
+    const initial = await expectReq(server);
+    server.send(["EVENT", initial, mockEvent2]);
+    server.send(["EVENT", initial, mockEvent]);
+    server.send(["EOSE", initial]);
+    await vi.waitFor(() => expect(eose).toHaveBeenCalledOnce());
+    // A late live arrival must not move the initial page's boundary.
+    const late = {
+      ...mockEvent,
+      id: "3".repeat(64),
+      created_at: mockEvent.created_at - 100,
+    };
+    server.send(["EVENT", initial, late]);
+    await vi.waitFor(() => expect(spy.getValues()).toContainEqual(late));
+    trigger.next();
+    const history = await expectReq(server, {
+      kinds: [1],
+      search: "needle",
+      until: mockEvent.created_at,
+      limit: 20,
+    });
+    const sameSecond = { ...mockEvent, id: "4".repeat(64) };
+    const older = {
+      ...mockEvent,
+      id: "5".repeat(64),
+      created_at: mockEvent.created_at - 1,
+    };
+    for (const event of [mockEvent, sameSecond, older])
+      server.send(["EVENT", history, event]);
+    server.send(["EOSE", history]);
+    await vi.waitFor(() => expect(batches).toHaveBeenCalledOnce());
+    expect(spy.getValues()).toContainEqual(sameSecond);
+    expect(spy.getValues()).toContainEqual(older);
+  } finally {
+    spy.unsubscribe();
+    trigger.complete();
+  }
+});
+
+it("keeps initial cursors separate for sparse relays and disjoint filters", async () => {
+  const trigger = new Subject<void>();
+  const eose = vi.fn();
+  const spy = subscribeSpyTo(
+    resilientSubscription(
+      pool,
+      [RELAY_URL, RELAY_URL_2],
+      [{ kinds: [1] }, { kinds: [2] }],
+      {
+        manualPaginate$: trigger,
+        limit: 20,
+        settle: false,
+        gapFill: false,
+        onRelayEose: eose,
+      },
+    ),
+  );
+  try {
+    const a = await expectReq(server),
+      b = await expectReq(server2);
+    for (const [socket, id, offset] of [
+      [server, a, 0],
+      [server2, b, 1000],
+    ] as const) {
+      socket.send([
+        "EVENT",
+        id,
+        {
+          ...mockEvent,
+          id: (offset ? "6" : "7").repeat(64),
+          created_at: mockEvent.created_at - offset,
+        },
+      ]);
+      socket.send([
+        "EVENT",
+        id,
+        {
+          ...mockEvent,
+          id: (offset ? "8" : "9").repeat(64),
+          kind: 2,
+          created_at: mockEvent.created_at - offset - 100,
+        },
+      ]);
+      socket.send(["EOSE", id]);
+    }
+    await vi.waitFor(() => expect(eose).toHaveBeenCalledTimes(2));
+    trigger.next();
+    await expectReq(server, { kinds: [1], until: mockEvent.created_at });
+    await expectReq(server2, {
+      kinds: [1],
+      until: mockEvent.created_at - 1000,
+    });
+    await expectReq(server, { kinds: [2], until: mockEvent.created_at - 100 });
+    await expectReq(server2, {
+      kinds: [2],
+      until: mockEvent.created_at - 1100,
+    });
+  } finally {
+    spy.unsubscribe();
+    trigger.complete();
+  }
+});
+
+it("does not seed ambiguous overlapping filters or filters without initial results", async () => {
+  const trigger = new Subject<void>();
+  const eose = vi.fn();
+  const horizon = Math.floor(Date.now() / 1000);
+  const spy = subscribeSpyTo(
+    resilientSubscription(
+      pool,
+      [RELAY_URL],
+      [
+        { kinds: [1] },
+        { kinds: [1], authors: [mockEvent.pubkey] },
+        { kinds: [2] },
+      ],
+      {
+        manualPaginate$: trigger,
+        limit: 20,
+        settle: false,
+        gapFill: false,
+        onRelayEose: eose,
+      },
+    ),
+  );
+  try {
+    const initial = await expectReq(server);
+    server.send(["EVENT", initial, mockEvent]);
+    server.send(["EOSE", initial]);
+    await vi.waitFor(() => expect(eose).toHaveBeenCalledOnce());
+    trigger.next();
+    await vi.waitFor(
+      () =>
+        expect(
+          server.messages.filter((m) => (m as string[])[0] === "REQ"),
+        ).toHaveLength(4),
+      { timeout: 4000 },
+    );
+    const reqs = server.messages.filter(
+      (m) => (m as string[])[0] === "REQ",
+    ) as [string, string, { until?: number }][];
+    expect(reqs.slice(1).every((m) => m[2].until! >= horizon)).toBe(true);
+  } finally {
+    spy.unsubscribe();
+    trigger.complete();
+  }
+});
+
+it("discards partial failed initial-page evidence before handing off search", async () => {
+  const trigger = new Subject<void>();
+  const eose = vi.fn();
+  const spy = subscribeSpyTo(
+    resilientSubscription(pool, [RELAY_URL], [{ kinds: [1] }], {
+      manualPaginate$: trigger,
+      limit: 20,
+      settle: false,
+      gapFill: false,
+      retryDelay: 0,
+      onRelayEose: eose,
+    }),
+  );
+  try {
+    const failed = await expectReq(server);
+    server.send([
+      "EVENT",
+      failed,
+      { ...mockEvent, created_at: mockEvent.created_at - 1000 },
+    ]);
+    server.send(["CLOSED", failed, "error: temporary failure"]);
+    await vi.waitFor(() =>
+      expect(
+        server.messages.filter((m) => (m as string[])[0] === "REQ"),
+      ).toHaveLength(2),
+    );
+    const reqs = server.messages.filter(
+      (m) => (m as string[])[0] === "REQ",
+    ) as [string, string][];
+    server.send(["EVENT", reqs[1][1], mockEvent]);
+    server.send(["EOSE", reqs[1][1]]);
+    await vi.waitFor(() => expect(eose).toHaveBeenCalledOnce());
+    trigger.next();
+    await vi.waitFor(() =>
+      expect(
+        server.messages.filter((m) => (m as string[])[0] === "REQ"),
+      ).toHaveLength(3),
+    );
+    const history = server.messages.filter(
+      (m) => (m as string[])[0] === "REQ",
+    )[2] as [string, string, { until: number }];
+    expect(history[2].until).toBe(mockEvent.created_at);
+  } finally {
+    spy.unsubscribe();
+    trigger.complete();
+  }
+});

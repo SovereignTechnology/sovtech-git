@@ -26,6 +26,8 @@ export interface HistoryBatchResult {
   filters: { exhausted: boolean; oldest?: number }[];
 }
 export interface BatchHistoryOptions {
+  /** Inclusive per-filter cursor from a completed initial fetch; sampled once. */
+  getInitialUntil?: (filter: TimelessFilter) => number | undefined;
   retryCount?: number;
   isTerminalError?: (error: unknown) => boolean;
   isAdmissionError?: (error: unknown) => boolean;
@@ -222,7 +224,9 @@ export function batchHistory(
           }
           for (const state of pending) {
             state.cursor ??= Math.min(
-              until ?? Math.floor(Date.now() / 1000),
+              until ??
+                options.getInitialUntil?.(state.filter) ??
+                Math.floor(Date.now() / 1000),
               Math.floor(Date.now() / 1000),
             );
             state.pageOldest = undefined;

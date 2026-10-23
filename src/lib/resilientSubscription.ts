@@ -41,6 +41,7 @@ import {
   RelayClosedError,
 } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
+import { compileFilter, isFilterEqual } from "applesauce-core/helpers/filter";
 import { batchHistory, type HistoryBatchResult } from "./batchHistory";
 import { historyWindow } from "./historyWindow";
 import type { TimelineStatus } from "applesauce-loaders/loaders";
@@ -422,6 +423,13 @@ function processRelay(
 
   return new Observable<NostrEvent>((subscriber) => {
     let oldestSeen: number | undefined;
+    // Only a completed initial request can seed manual history. Events matching
+    // multiple filters cannot be attributed to one filter's limited response.
+    const initialMatchers = opts.manualPaginate$
+      ? filtersSnapshot.map(compileFilter)
+      : [];
+    let initialOldest: Array<number | undefined> = [];
+    let initialPageComplete = false;
     let lastReceivedAt: number | undefined;
     let eoseSeen = false;
     // Persists across retry/repeat cycles. It becomes true only when the live
@@ -536,9 +544,9 @@ function processRelay(
         });
         return;
       }
-      // Keep one manual owner across reconnect EOSEs. Each filter starts at
-      // the snapshot horizon; the oldest event across mixed live filters is
-      // not a safe cursor for every filter.
+      // Keep one manual owner across reconnect EOSEs. Seed each cursor only
+      // from attributable initial results, retaining the inclusive boundary.
+      // Before EOSE or without evidence, start conservatively at the horizon.
       if (paginateSub) return;
       paginateSub = opts.manualPaginate$
         .pipe(
@@ -554,6 +562,14 @@ function processRelay(
               ...f,
             })),
             {
+              getInitialUntil: (filter) =>
+                initialPageComplete
+                  ? initialOldest[
+                      paginationFilters.findIndex((f) =>
+                        isFilterEqual(f, filter),
+                      )
+                    ]
+                  : undefined,
               onStatus: opts.onHistoryStatus,
               retryCount: opts.retryCount,
               isTerminalError: isHistoryTerminalError,
@@ -598,6 +614,7 @@ function processRelay(
       // lastReceivedAt and hasBaselineEose intentionally persist across cycles
       // so a proven baseline can use bounded recovery after a disruption.
       eoseSeen = false;
+      if (!initialPageComplete) initialOldest = [];
       if (cycleCount++ > 0) opts.onCycleRestart?.(relay);
       let lifecycleGeneration: number | undefined;
 
@@ -887,6 +904,7 @@ function processRelay(
       .subscribe({
         next: (msg) => {
           if (msg === "EOSE") {
+            initialPageComplete = true;
             eoseSeen = true;
             reconnectAttempts = 0;
             opts.onRelayEose?.(relay);
@@ -913,6 +931,18 @@ function processRelay(
             }
           } else {
             const event = msg as NostrEvent;
+            if (opts.manualPaginate$ && !initialPageComplete) {
+              const matching = initialMatchers.flatMap((matches, i) =>
+                matches(event) ? [i] : [],
+              );
+              if (matching.length === 1) {
+                const index = matching[0];
+                initialOldest[index] = Math.min(
+                  initialOldest[index] ?? Infinity,
+                  event.created_at,
+                );
+              }
+            }
             if (!eoseSeen) {
               if (oldestSeen === undefined || event.created_at < oldestSeen) {
                 oldestSeen = event.created_at;
