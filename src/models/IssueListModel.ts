@@ -1,3 +1,4 @@
+import { TimelineModel } from "applesauce-core/models";
 import { coalesceBursts } from "@/lib/coalesceBursts";
 import { combineLatest, of } from "rxjs";
 import { auditTime, switchMap, map } from "rxjs/operators";
@@ -89,17 +90,21 @@ export function IssueListModel(
         const ids = events.map((e) => e.id);
 
         // All inner streams are scoped to the current issue IDs.
-        const essentials$ = store.model(
-          ItemEssentialEventsModel,
-          ids.sort().join(","),
+        // The outer list model is shared. These changing ID sets belong only
+        // to this snapshot: caching them would keep obsolete queries active
+        // throughout the store's model keep-warm window.
+        const essentials$ = ItemEssentialEventsModel(ids.sort().join(","))(
+          store,
         );
-        const comments$ = store.timeline([
+        const comments$ = TimelineModel([
           { kinds: [COMMENT_KIND], "#E": ids } as Filter,
-        ]);
-        const legacyReplies$ = store.timeline([
+        ])(store);
+        const legacyReplies$ = TimelineModel([
           { kinds: [...LEGACY_REPLY_KINDS], "#e": ids } as Filter,
-        ]);
-        const zaps$ = store.timeline([{ kinds: [9735], "#e": ids } as Filter]);
+        ])(store);
+        const zaps$ = TimelineModel([{ kinds: [9735], "#e": ids } as Filter])(
+          store,
+        );
 
         return combineLatest([
           essentials$,

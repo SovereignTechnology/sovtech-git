@@ -1,3 +1,4 @@
+import { TimelineModel } from "applesauce-core/models";
 import { coalesceBursts } from "@/lib/coalesceBursts";
 import { combineLatest, of } from "rxjs";
 import { auditTime, switchMap, map } from "rxjs/operators";
@@ -71,21 +72,25 @@ export function PRListModel(
 
         const ids = events.map((e) => e.id);
 
-        const essentials$ = store.model(
-          ItemEssentialEventsModel,
-          ids.sort().join(","),
+        // The outer list model is shared. These changing ID sets belong only
+        // to this snapshot: caching them would keep obsolete queries active
+        // throughout the store's model keep-warm window.
+        const essentials$ = ItemEssentialEventsModel(ids.sort().join(","))(
+          store,
         );
         // Comments (kind:1111) and PR Updates (kind:1619) both use the
         // uppercase E root tag. Split them here so PR Updates don't inflate
         // comment counts but still factor into lastActivityAt.
-        const commentsAndUpdates$ = store.timeline([
+        const commentsAndUpdates$ = TimelineModel([
           { kinds: [COMMENT_KIND, PR_UPDATE_KIND], "#E": ids } as Filter,
-        ]);
+        ])(store);
         // Legacy replies (kind 1, 1622) via NIP-10 #e tag
-        const legacyReplies$ = store.timeline([
+        const legacyReplies$ = TimelineModel([
           { kinds: [...LEGACY_REPLY_KINDS], "#e": ids } as Filter,
-        ]);
-        const zaps$ = store.timeline([{ kinds: [9735], "#e": ids } as Filter]);
+        ])(store);
+        const zaps$ = TimelineModel([{ kinds: [9735], "#e": ids } as Filter])(
+          store,
+        );
 
         return combineLatest([
           essentials$,

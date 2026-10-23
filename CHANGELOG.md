@@ -30,6 +30,8 @@
 
 ### Fixed
 
+- Release superseded issue/PR list queries immediately as roots and essentials arrive, avoiding continued processing by obsolete cached models.
+
 - Release repository-owned item and author-mailbox subscriptions when leaving the repository, while preserving active shared consumers.
 
 - Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
