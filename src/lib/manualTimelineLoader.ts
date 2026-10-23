@@ -85,7 +85,9 @@ export function createManualTimelineLoader(
           .pipe(
             batchHistory(
               (_relays, pageFilters) =>
-                resilientHistoryRequest(pool, relay, pageFilters),
+                resilientHistoryRequest(pool, relay, pageFilters, {
+                  foreground: true,
+                }),
               relay,
               filters,
               {

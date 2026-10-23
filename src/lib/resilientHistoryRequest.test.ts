@@ -117,4 +117,59 @@ describe("history relay admission", () => {
     next.unsubscribe();
     subscriptions.forEach((s) => s.unsubscribe());
   });
+  it("paces foreground filters at 100ms without bypassing background reservations", async () => {
+    const { pool, request } = fixture();
+    const url = "wss://foreground-paced.test";
+    resilientHistoryRequest(pool, url, [{}], { foreground: true }).subscribe();
+    resilientHistoryRequest(pool, url, [{}], { foreground: true }).subscribe();
+    resilientHistoryRequest(pool, url, [{}]).subscribe();
+    resilientHistoryRequest(pool, url, [{}], { foreground: true }).subscribe();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(request).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(request).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+
+  it("rechecks cooldown and cancels queued foreground work", async () => {
+    const { pool, request } = fixture();
+    const url = "wss://foreground-cooldown.test";
+    const errors: unknown[] = [];
+    resilientHistoryRequest(pool, url, [{}], { foreground: true }).subscribe();
+    resilientHistoryRequest(pool, url, [{}], { foreground: true }).subscribe({
+      error: (e) => errors.push(e),
+    });
+    const cancelled = resilientHistoryRequest(pool, url, [{}], {
+      foreground: true,
+    }).subscribe();
+    await vi.advanceTimersByTimeAsync(0);
+    markRateLimited(url, Date.now() + 65_000);
+    cancelled.unsubscribe();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(HistoryAdmissionError);
+  });
+
+  it("keeps the shared active cap for foreground requests", async () => {
+    const { pool, request } = fixture(vi.fn(() => NEVER));
+    const errors: unknown[] = [];
+    const subscriptions = Array.from({ length: 6 }, () =>
+      resilientHistoryRequest(pool, "wss://foreground-cap.test", [{}], {
+        foreground: true,
+      }).subscribe({ error: (e) => errors.push(e) }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(request).toHaveBeenCalledTimes(5);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(HistoryAdmissionError);
+    subscriptions.forEach((s) => s.unsubscribe());
+  });
 });

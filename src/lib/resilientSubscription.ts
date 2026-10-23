@@ -1878,13 +1878,15 @@ export function isHistoryTerminalError(error: unknown): boolean {
 /**
  * One admitted history page. The v7 window loader owns retries; this method
  * never converts failure into empty completion or sleeps through a cooldown.
- * Background starts share 1s pacing and five active requests per pool/relay.
+ * Background starts share 1s pacing; explicit foreground batches use 100ms.
+ * Both share reservations, five active requests per pool/relay, and cooldowns.
  * Live subscriptions retain priority and continue using their existing owner.
  */
 export function resilientHistoryRequest(
   pool: RelayPool,
   relay: string,
   filters: Filter[],
+  options: { foreground?: boolean } = {},
 ): Observable<NostrEvent> {
   return defer(() => {
     let admissions = historyAdmissions.get(pool);
@@ -1903,7 +1905,10 @@ export function resilientHistoryRequest(
       throw new HistoryAdmissionError(
         Math.max(now + cooldown, start, now + 1_000),
       );
-    state.nextStart = start + 1_000;
+    // A bounded foreground batch need not pay the background drain interval
+    // for each independent filter. Keep a shared ledger: this is not a bypass
+    // of already reserved work, active capacity, or a relay refusal.
+    state.nextStart = start + (options.foreground ? 100 : 1_000);
 
     return timer(start - now).pipe(
       switchMap(() =>
