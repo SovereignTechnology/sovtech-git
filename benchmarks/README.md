@@ -511,6 +511,15 @@ uses the existing paginated loader with `bufferSize: 1`, preserving history
 semantics without a zero-duration repeating buffer timer. These are benchmark
 injections, not production changes or approved replacements for shared ownership.
 
+`direct-entry-thread-suite.json` isolates removal of detail's focused demand
+using the authored fixture's cold-navigation and warm-return journeys, with
+three alternating pairs. Run it with `direct-entry-browser-suite.mjs` and a
+fixture server started without `BENCH_CORPUS`. Both strategies retain the same
+thread buffer; this does not evaluate immediate root scheduling or a one-shot
+preview. Pair it with uninterrupted captured-data detail runs to check PR
+revision and comment readiness under repository load. A lower request count
+alone is not a reason to remove focused loading.
+
 Reports distinguish:
 
 - First/all selected NIP-22 comment DOM anchors and subsequent paint
