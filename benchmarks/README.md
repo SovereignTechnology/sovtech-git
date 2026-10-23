@@ -702,3 +702,19 @@ phase boundaries before interpreting a navigation timeout as an equivalent
 length UI freeze or a zero-offset list convergence as instant navigation.
 Pair navigation runs with uninterrupted detail observations when necessary;
 recorded long tasks and exact final membership provide separate evidence.
+
+For an unresolved status observation, opt into `"storeDiagnostics": true`.
+Reports then include retained EventStore IDs, insertion timestamps, and
+`modelEmissions` from the active issue/PR hooks before React commits the page.
+Hook rows precede the page's accepted-repository filter; compare matching
+repository scopes. Receipt, store retention, model output and committed page
+state are separate checkpoints. Deleted, expired and replaced events can be
+received without remaining in the store.
+
+On uninterrupted detail runs, `"followUpMs": 15000` adds a later checkpoint in
+`report.followUp` without replacing the original cutoff or its incomplete
+outcome. Use `report.requests` for original-window requests: the top-level
+transport request count and pending count cover the whole run, including the
+follow-up. Diagnostic allocations add overhead, so leave these options off for
+ordinary performance comparisons. A later recovery establishes delay, not that
+the original user-facing latency was acceptable.

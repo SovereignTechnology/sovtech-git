@@ -27,6 +27,7 @@ async function run(control) {
     "phaseMs",
     "navigateAtMs",
     "observationMs",
+    "followUpMs",
     "latencyMs",
     "commentLatencyMs",
     "cap",
@@ -135,6 +136,7 @@ async function run(control) {
       const b = (window.__detailBench = {
         mode: config.mode,
         strategy: config.strategy,
+        storeDiagnostics: config.storeDiagnostics === true,
         oracleEvents,
         coverage: Object.fromEntries(
           Object.entries({
@@ -393,8 +395,28 @@ async function run(control) {
           document.getElementById(id.slice(0, 15)),
         ),
         transitions: b.transitions,
+        store: b.inspectStore?.(),
+        modelEmissions: b.modelEmissions,
       };
     });
+    if (config.followUpMs) {
+      await page.waitForFunction(
+        (target) => performance.now() >= target,
+        report.observedUntil + config.followUpMs,
+        { timeout: config.followUpMs + 10000 },
+      );
+      // Preserve the original observation; a later recovery is separate evidence.
+      report.followUp = await page.evaluate(() => {
+        const b = window.__detailBench;
+        return {
+          observedUntil: performance.now(),
+          ids: [...b.events].sort(),
+          transitions: b.transitions,
+          store: b.inspectStore?.(),
+          modelEmissions: b.modelEmissions,
+        };
+      });
+    }
     if (journey) report.journey = journey;
     if (config.expectedOpenPRCount !== undefined) {
       const counts = report.openPRCounts;

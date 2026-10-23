@@ -54,6 +54,18 @@ function replaceOnce(code, target, replacement) {
 const injected = `
 import { resilientRequest as benchRequest } from "@/lib/resilientSubscription";
 import { takeUntil as benchTakeUntil, timer as benchTimer } from "rxjs";
+const benchDiagnostic = (globalThis as unknown as { __detailBench?: {
+  storeDiagnostics?: boolean;
+  inspectStore?: () => unknown;
+} }).__detailBench;
+if (benchDiagnostic?.storeDiagnostics) {
+  const inserted: { id: string; at: number }[] = [];
+  eventStore.insert$.subscribe(event => inserted.push({ id: event.id, at: performance.now() }));
+  benchDiagnostic.inspectStore = () => ({
+    ids: eventStore.getByFilters([{}]).map(event => event.id).sort(),
+    inserted: [...inserted],
+  });
+}
 const benchOracle = (globalThis as unknown as { __detailBench?: { oracleEvents?: import("nostr-tools").NostrEvent[] } }).__detailBench?.oracleEvents;
 if (benchOracle) for (const event of benchOracle) eventStore.add(event);
 function benchStrategy() {
@@ -124,6 +136,34 @@ await build({
       name: "direct-entry-experiment",
       enforce: "pre",
       transform(code, id) {
+        for (const [file, type, kind] of [
+          ["useIssues", "ResolvedIssueLite", "issues"],
+          ["usePRs", "ResolvedPRLite", "prs"],
+        ]) {
+          if (id.endsWith(`/src/hooks/${file}.ts`)) {
+            return (
+              `import { tap as benchTap } from "rxjs";\n` +
+              replaceOnce(
+                code,
+                `) as unknown as Observable<${type}[]>;`,
+                `).pipe(benchTap(benchRecordModel)) as unknown as Observable<${type}[]>;`,
+              ) +
+              `
+function benchRecordModel(items: ${type}[]) {
+  const b = (globalThis as unknown as { __detailBench?: {
+    storeDiagnostics?: boolean;
+    modelEmissions?: { at: number; kind: string; rows: { id: string; title: string; status: string }[] }[];
+  } }).__detailBench;
+  if (b?.storeDiagnostics) (b.modelEmissions ??= []).push({
+    at: performance.now(), kind: "${kind}",
+    rows: items.map(item => ({ id: item.id, title: item.currentSubject, status: item.status }))
+      .sort((a, c) => a.id.localeCompare(c.id)),
+  });
+}
+`
+            );
+          }
+        }
         if (id.endsWith("/src/pages/repo/RepoLayout.tsx")) {
           return replaceOnce(
             code,

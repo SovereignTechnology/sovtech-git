@@ -39,7 +39,11 @@ try {
         const child = spawnSync(
           process.execPath,
           ["benchmarks/direct-entry-browser-run.mjs", lease],
-          { encoding: "utf8", timeout: 6 * (config.phaseMs ?? 12000) + 90000 },
+          {
+            encoding: "utf8",
+            timeout:
+              6 * (config.phaseMs ?? 12000) + 90000 + (config.followUpMs ?? 0),
+          },
         );
         let row;
         try {

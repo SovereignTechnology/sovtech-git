@@ -26,9 +26,11 @@ function run(config) {
     ["benchmarks/direct-entry-browser-run.mjs", lease],
     {
       stdio: "pipe",
-      timeout: config.journey
-        ? 6 * (config.phaseMs ?? 6000) + 90000
-        : (config.observationMs ?? 12000) + 60000,
+      timeout:
+        (config.followUpMs ?? 0) +
+        (config.journey
+          ? 6 * (config.phaseMs ?? 6000) + 90000
+          : (config.observationMs ?? 12000) + 60000),
     },
   );
   const result = JSON.parse(
