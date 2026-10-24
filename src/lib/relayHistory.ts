@@ -37,14 +37,11 @@ export function historyLiveFilter(
 ): Filter {
   const policy = policies.get(pool);
   if (
-    // A focused, unrestricted thread query carries comments, updates and
-    // essentials needed for first paint. Keep its immediate relay snapshot;
-    // broader kind-scoped lists still avoid replaying cached event bodies.
-    (!filter.kinds &&
-      ["#e", "#E", "#q"].some(
-        (tag) =>
-          (filter[tag as keyof Filter] as string[] | undefined)?.length === 1,
-      )) ||
+    // An unrestricted reference closure carries the visible thread's comments,
+    // updates and essentials. It can batch the root with already-known children
+    // on expansion/navigation, so keep its immediate snapshot for every batch.
+    // Broad kind-scoped lists still avoid replaying cached event bodies.
+    (!filter.kinds && ["#e", "#E", "#q"].some((tag) => tag in filter)) ||
     !policy?.enabled(relay) ||
     filter.since !== undefined ||
     filter.until !== undefined ||

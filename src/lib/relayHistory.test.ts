@@ -48,6 +48,8 @@ it("keeps focused full-thread snapshots immediate even with cached history", () 
   for (const tag of ["#e", "#E", "#q"]) {
     const filter = { [tag]: ["root"] };
     expect(historyLiveFilter(pool, "wss://public.test", filter)).toBe(filter);
+    const closure = { [tag]: ["root", "cached-child"] };
+    expect(historyLiveFilter(pool, "wss://public.test", closure)).toBe(closure);
   }
   pool.close();
 });
