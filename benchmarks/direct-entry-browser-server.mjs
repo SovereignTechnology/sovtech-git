@@ -8,7 +8,7 @@ import { createJourneyFixture } from "./direct-entry-fixture.mjs";
 mkdirSync("perf-reports/direct-entry", { recursive: true });
 const c = process.env.BENCH_CORPUS
   ? JSON.parse(gunzipSync(readFileSync(process.env.BENCH_CORPUS)))
-  : createJourneyFixture();
+  : createJourneyFixture({ outbox: process.env.BENCH_OUTBOX === "1" });
 c.events.sort(
   (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
 );

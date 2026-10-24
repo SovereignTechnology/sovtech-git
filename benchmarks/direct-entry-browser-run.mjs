@@ -1,13 +1,16 @@
 // Uses only a browser-session-owned browser, with a fresh context for every run.
 // Call: node benchmarks/direct-entry-browser-run.mjs <lease>
 import { spawnSync } from "node:child_process";
+import { build } from "vite";
+import { fileURLToPath } from "node:url";
 import { runJourney } from "./direct-entry-journeys.mjs";
 async function run(control) {
   const api = control.request,
     fixture = await (await api.get("http://127.0.0.1:4190/fixture")).json(),
     config = await (await api.get("http://127.0.0.1:4190/config")).json();
   const itemId =
-    config.itemId ?? (config.journey ? fixture.journey?.itemId : undefined);
+    config.itemId ??
+    (config.journey || config.curation ? fixture.journey?.itemId : undefined);
   const selected = itemId
     ? fixture.cases.find((item) => item.id === itemId)
     : fixture.cases[config.case ?? 0];
@@ -51,7 +54,7 @@ async function run(control) {
   const context = await control
     .context()
     .browser()
-    .newContext({ viewport: { width: 1440, height: 900 } });
+    .newContext({ viewport: config.viewport ?? { width: 1440, height: 900 } });
   const errors = [],
     requests = [],
     deliveries = [];
@@ -62,7 +65,39 @@ async function run(control) {
     for (const key of ["comments", "updates", "essentials"])
       selected[key] = selected[key].filter((id) => !heldIds.has(id));
   }
+  if (config.curation === true) {
+    const root = fixture.events.find((event) => event.id === selected.id);
+    const other = fixture.journey?.initial.prs.find(
+      (item) => item.status === "open" && item.id !== selected.id,
+    );
+    if (
+      !root ||
+      !other ||
+      selected.comments.length === 0 ||
+      selected.updates.length === 0
+    )
+      throw Error(
+        "Curation requires the signed synthetic PR fixture with a separate outbox",
+      );
+    config.curation = {
+      commentId: selected.comments[0],
+      rootId: other.id,
+      curatedTip: root.tags.find((tag) => tag[0] === "c")?.[1],
+      expandedTip: fixture.journey.initial.detail.tip,
+    };
+    config.outboxOnlyIds = [
+      selected.comments[0],
+      other.id,
+      ...selected.updates,
+    ];
+  }
   const sockets = new Set();
+  const hiddenFromRepo = new Set(config.outboxOnlyIds ?? []);
+  const available = (event, url) =>
+    (updatesReleased || !heldIds.has(event.id)) &&
+    (url.includes("outbox.fixture.test") || !hiddenFromRepo.has(event.id));
+  let negotiationCount = 0,
+    negotiationBytes = 0;
   const matches = (e, f) =>
     !(
       (f.ids && !f.ids.includes(e.id)) ||
@@ -79,20 +114,73 @@ async function run(control) {
   await context.route("**/*", (r) =>
     r.request().url().startsWith("http://127.0.0.1:")
       ? r.continue()
-      : r.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
+      : r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            supported_nips: config.nip77 ? [1, 77] : [1],
+          }),
+        }),
   );
   await context.routeWebSocket(/.*/, (ws) => {
     const active = new Map();
-    const socket = { ws, active };
+    const negotiations = new Map();
+    const socket = { ws, active, negotiations };
     sockets.add(socket);
     ws.onClose(() => {
       active.clear();
+      negotiations.clear();
       sockets.delete(socket);
     });
     ws.onMessage(async (data) => {
       const m = JSON.parse(String(data));
       if (m[0] === "CLOSE") {
         active.delete(m[1]);
+        return;
+      }
+      if (m[0] === "NEG-CLOSE") {
+        negotiations.delete(m[1]);
+        return;
+      }
+      if (m[0] === "NEG-OPEN" || m[0] === "NEG-MSG") {
+        negotiationCount++;
+        negotiationBytes += encodeURIComponent(String(data)).match(
+          /%[0-9A-F]{2}|./g,
+        ).length;
+        if (!config.nip77) {
+          ws.send(
+            JSON.stringify(["NEG-ERR", m[1], "unsupported: NIP-77 disabled"]),
+          );
+          return;
+        }
+        pending++;
+        try {
+          if (m[0] === "NEG-OPEN") {
+            const storage = new NegentropyStorageVector();
+            for (const event of fixture.events.filter(
+              (e) => available(e, ws.url()) && matches(e, m[2]),
+            ))
+              storage.insert(event.created_at, event.id);
+            storage.seal();
+            negotiations.set(m[1], new Negentropy(storage));
+          }
+          const negotiation = negotiations.get(m[1]);
+          if (!negotiation) return;
+          const [response] = await negotiation.reconcile(
+            m[m[0] === "NEG-OPEN" ? 3 : 2],
+          );
+          // Model transport delay, not readiness. Cancellation prevents a late reply.
+          await page.waitForTimeout(config.latencyMs ?? 20).catch(() => {});
+          if (!negotiations.has(m[1])) return;
+          const reply = JSON.stringify(["NEG-MSG", m[1], response]);
+          negotiationBytes +=
+            encodeURIComponent(reply).match(/%[0-9A-F]{2}|./g).length;
+          ws.send(reply);
+        } catch (error) {
+          ws.send(JSON.stringify(["NEG-ERR", m[1], "error: " + String(error)]));
+        } finally {
+          pending--;
+        }
         return;
       }
       if (m[0] !== "REQ") return;
@@ -109,9 +197,7 @@ async function run(control) {
       const found = new Map();
       for (const f of m.slice(2))
         for (const e of fixture.events
-          .filter(
-            (e) => (updatesReleased || !heldIds.has(e.id)) && matches(e, f),
-          )
+          .filter((e) => available(e, ws.url()) && matches(e, f))
           .slice(0, Math.min(f.limit ?? config.cap ?? 100, config.cap ?? 100)))
           found.set(e.id, e);
       for (const e of found.values())
@@ -125,7 +211,11 @@ async function run(control) {
     for (const { ws, active } of sockets)
       for (const [id, filters] of active)
         for (const event of fixture.events)
-          if (heldIds.has(event.id) && filters.some((f) => matches(event, f)))
+          if (
+            available(event, ws.url()) &&
+            heldIds.has(event.id) &&
+            filters.some((f) => matches(event, f))
+          )
             ws.send(JSON.stringify(["EVENT", id, event]));
   };
   await context.addInitScript(
@@ -347,7 +437,8 @@ async function run(control) {
           pending,
           connections: sockets.size,
           subscriptions: [...sockets].reduce(
-            (sum, socket) => sum + socket.active.size,
+            (sum, socket) =>
+              sum + socket.active.size + socket.negotiations.size,
             0,
           ),
         }),
@@ -432,6 +523,65 @@ async function run(control) {
             : null,
       };
     }
+    if (config.curation) {
+      const id = config.curation.commentId;
+      const anchor = page.locator('[id="' + id.slice(0, 15) + '"]');
+      const epoch = await page.evaluate(() => performance.timeOrigin);
+      const assertTip = async (tip) => {
+        if (!tip) return;
+        await page.waitForFunction(
+          (expected) =>
+            window.__detailBench.transitions.detail?.at(-1)?.value?.tip ===
+            expected,
+          tip,
+          { timeout: 15000 },
+        );
+      };
+      await assertTip(config.curation.curatedTip);
+      await page
+        .getByRole("button", { name: "Include outbox relays", exact: true })
+        .first()
+        .waitFor();
+      if (await anchor.count())
+        throw Error("Outbox-only comment leaked into curated view");
+      const started = Date.now();
+      await page
+        .getByRole("button", { name: "Include outbox relays", exact: true })
+        .first()
+        .click();
+      await anchor.waitFor({ state: "visible", timeout: 20000 });
+      await assertTip(config.curation.expandedTip);
+      const expandedMs = Date.now() - started;
+      await page
+        .getByRole("button", { name: "Back to curated", exact: true })
+        .click();
+      await anchor.waitFor({ state: "detached", timeout: 10000 });
+      await assertTip(config.curation.curatedTip);
+      if ((await page.evaluate(() => performance.timeOrigin)) !== epoch)
+        throw Error("Toggle reloaded document");
+      if (config.curation.rootId) {
+        await page.evaluate((path) => {
+          history.pushState(null, "", path);
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        }, fixture.basePath + "/prs");
+        await page.getByPlaceholder(/^Search PRs,/).waitFor({ timeout: 10000 });
+        const row = page.locator(
+          '[data-bench-id="' + config.curation.rootId + '"]',
+        );
+        if (await row.count())
+          throw Error("Outbox-only root leaked into curated list");
+        await page
+          .getByRole("button", { name: "Include outbox relays", exact: true })
+          .first()
+          .click();
+        await row.waitFor({ state: "visible", timeout: 20000 });
+        await page
+          .getByRole("button", { name: "Back to curated", exact: true })
+          .click();
+        await row.waitFor({ state: "detached", timeout: 10000 });
+      }
+      report.curation = { expandedMs, returnedWithoutReload: true };
+    }
     if (config.snapshot)
       await page.screenshot({ path: config.snapshot, fullPage: false });
     if (config.navigate && !config.journey) {
@@ -467,6 +617,11 @@ async function run(control) {
       ...report,
       failure: String(e),
       body: await page.locator("body").innerText(),
+      finalState: await page.evaluate(() => ({
+        store: window.__detailBench?.inspectStore?.(),
+        ids: [...(window.__detailBench?.events ?? [])],
+        transitions: window.__detailBench?.transitions,
+      })),
     };
   } finally {
     try {
@@ -482,6 +637,9 @@ async function run(control) {
           report,
           errors,
           requestCount: requests.length,
+          transportRequests: requests,
+          negotiationCount,
+          negotiationBytes,
           pending,
         },
       });
@@ -501,6 +659,29 @@ async function run(control) {
     body: report?.body?.slice(0, 600),
   };
 }
+// Bundle the installed protocol codec for the isolated runner, whose VM does
+// not permit dynamic imports. No application source or protocol is duplicated.
+const codec = await build({
+  configFile: false,
+  logLevel: "silent",
+  build: {
+    write: false,
+    minify: true,
+    lib: {
+      entry: fileURLToPath(
+        new URL(
+          "../node_modules/applesauce-relay/dist/lib/negentropy.js",
+          import.meta.url,
+        ),
+      ),
+      name: "benchNegentropy",
+      formats: ["iife"],
+    },
+  },
+});
+const codecSource = (Array.isArray(codec) ? codec[0] : codec).output.find(
+  (item) => item.type === "chunk",
+).code;
 const child = spawnSync(
   "browser-session",
   [
@@ -508,6 +689,8 @@ const child = spawnSync(
     process.argv[2],
     "run-code",
     `async (control) => {
+    ${codecSource}
+    const { Negentropy, NegentropyStorageVector } = benchNegentropy;
     const runJourney = ${runJourney.toString()};
     return (${run.toString()})(control);
   }`,

@@ -1,7 +1,7 @@
 // Public fixture keys only. All events stay inside the intercepted local replay.
 import { finalizeEvent, getPublicKey } from "nostr-tools";
 
-export function createJourneyFixture() {
+export function createJourneyFixture({ outbox = false } = {}) {
   const key = new Uint8Array(32);
   key[31] = 1;
   const owner = getPublicKey(key);
@@ -18,7 +18,7 @@ export function createJourneyFixture() {
     return event;
   };
   add(0, [], JSON.stringify({ name: "Journey maintainer" }));
-  add(10002, [["r", relay]]);
+  add(10002, [["r", outbox ? "wss://outbox.fixture.test" : relay]]);
   add(30617, [
     ["d", "journey-fixture"],
     ["name", "Journey fixture"],
