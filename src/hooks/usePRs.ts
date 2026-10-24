@@ -1,3 +1,4 @@
+import type { IEventStore } from "applesauce-core";
 import { useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
@@ -23,8 +24,10 @@ import type { Observable } from "rxjs";
 export function usePRs(
   repoCoords: string | string[] | undefined,
   roleHistory?: RepositoryRoleHistory,
+  view?: IEventStore,
 ): ResolvedPRLite[] | undefined {
-  const store = useEventStore();
+  const canonical = useEventStore();
+  const store = view ?? canonical;
 
   const coords = useMemo(() => {
     if (!repoCoords) return undefined;

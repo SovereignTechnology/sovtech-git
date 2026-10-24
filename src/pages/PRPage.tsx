@@ -1,3 +1,4 @@
+import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import React, {
   useCallback,
@@ -345,18 +346,22 @@ export default function PRPage() {
 
   // ── "Search more relays" expansion (curated mode) ────────────────────────
   const [searchMoreActive, setSearchMoreActive] = useState(false);
+  const { mode: curationMode, setMode: setCurationMode } =
+    useRepositoryCuration();
 
   const extraSearchGroups = useMemo<RelayGroupSpec[]>(() => {
-    if (!searchMoreActive || repo?.isPrivate) return [];
+    if (!searchMoreActive || curationMode !== "outbox" || repo?.isPrivate)
+      return [];
     return [
       { label: "git index", relays$: gitIndexRelays },
       { label: "fallback relays", relays$: fallbackRelays },
     ];
-  }, [searchMoreActive, repo?.isPrivate]);
+  }, [searchMoreActive, curationMode, repo?.isPrivate]);
 
   const handleSearchMore = useCallback(() => {
+    setCurationMode("outbox");
     setSearchMoreActive(true);
-  }, []);
+  }, [setCurationMode]);
 
   // ── Unified PR/Patch resolution ─────────────────────────────────────────
   const { pr, search } = useResolvedPR(
@@ -1354,6 +1359,19 @@ export default function PRPage() {
   // page with the sub-patch shown as a commit detail.
   if (subPatchRedirect) {
     return <Navigate to={subPatchRedirect} replace />;
+  }
+
+  if (!pr && search?.found && curationMode === "repo" && !repo?.isPrivate) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="space-y-4 py-12 text-center">
+          <p>This item has not been confirmed on the repository relays.</p>
+          <Button variant="outline" onClick={handleSearchMore}>
+            Include outbox relays
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   if (showSearchStatus) {

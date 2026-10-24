@@ -1,3 +1,4 @@
+import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NostrEvent } from "nostr-tools";
 import { Link } from "react-router-dom";
@@ -66,18 +67,22 @@ export default function IssuePage() {
 
   // ── "Search more relays" expansion (curated mode) ────────────────────────
   const [searchMoreActive, setSearchMoreActive] = useState(false);
+  const { mode: curationMode, setMode: setCurationMode } =
+    useRepositoryCuration();
 
   const extraSearchGroups = useMemo<RelayGroupSpec[]>(() => {
-    if (!searchMoreActive || repo?.isPrivate) return [];
+    if (!searchMoreActive || curationMode !== "outbox" || repo?.isPrivate)
+      return [];
     return [
       { label: "git index", relays$: gitIndexRelays },
       { label: "fallback relays", relays$: fallbackRelays },
     ];
-  }, [searchMoreActive, repo?.isPrivate]);
+  }, [searchMoreActive, curationMode, repo?.isPrivate]);
 
   const handleSearchMore = useCallback(() => {
+    setCurationMode("outbox");
     setSearchMoreActive(true);
-  }, []);
+  }, [setCurationMode]);
 
   // ── Unified issue resolution ─────────────────────────────────────────────
   const { issue, search } = useResolvedIssue(
@@ -186,6 +191,19 @@ export default function IssuePage() {
 
   const showSearchStatus =
     !issue && search && searchDelayElapsed && !search.found;
+
+  if (!issue && search?.found && curationMode === "repo" && !repo?.isPrivate) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="space-y-4 py-12 text-center">
+          <p>This item has not been confirmed on the repository relays.</p>
+          <Button variant="outline" onClick={handleSearchMore}>
+            Include outbox relays
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (showSearchStatus) {
     const repoBasePath = repoToPath(

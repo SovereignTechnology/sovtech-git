@@ -3,6 +3,7 @@ import { RelayPool } from "applesauce-relay";
 import { EMPTY, firstValueFrom, toArray } from "rxjs";
 import {
   configureRelayHistory,
+  advertisesNegentropy,
   historyLiveFilter,
   loadRelayHistory,
 } from "./relayHistory";
@@ -48,5 +49,26 @@ it("keeps focused full-thread snapshots immediate even with cached history", () 
     const filter = { [tag]: ["root"] };
     expect(historyLiveFilter(pool, "wss://public.test", filter)).toBe(filter);
   }
+  pool.close();
+});
+
+it("requires an explicit NIP-77 advertisement before suppressing warm snapshots", () => {
+  const pool = new RelayPool();
+  const relay = pool.relay("wss://capability.test");
+  const info = vi.spyOn(relay, "information", "get");
+  info.mockReturnValue(null);
+  expect(advertisesNegentropy(pool, relay.url)).toBe(false);
+  const metadata = {
+    name: "fixture",
+    description: "",
+    pubkey: "",
+    contact: "",
+    software: "fixture",
+    version: "1",
+  };
+  info.mockReturnValue({ ...metadata, supported_nips: [1, 11] });
+  expect(advertisesNegentropy(pool, relay.url)).toBe(false);
+  info.mockReturnValue({ ...metadata, supported_nips: [1, 77] });
+  expect(advertisesNegentropy(pool, relay.url)).toBe(true);
   pool.close();
 });

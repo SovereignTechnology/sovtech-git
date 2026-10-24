@@ -109,10 +109,10 @@ function RelayCurationSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Event Fetching Strategy</CardTitle>
+        <CardTitle>Default Repository View</CardTitle>
         <CardDescription>
-          Controls which relays are queried when loading issues, patches, and
-          comments for a repository.
+          Controls which relay sources supply repository items and discussion.
+          You can switch views on the repository page without reloading.
         </CardDescription>
       </CardHeader>
       <CardContent>

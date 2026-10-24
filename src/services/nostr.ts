@@ -51,12 +51,7 @@ import {
 import { PersistentDeleteManager } from "./persistentDeleteManager";
 import { nip05IdbCache, loadAllNip05FromIdb } from "./nip05IdbCache";
 import { setHintEventStore } from "@/factories/hints";
-import {
-  fallbackRelays,
-  lookupRelays,
-  gitIndexRelays,
-  relayCurationMode,
-} from "./settings";
+import { fallbackRelays, lookupRelays, gitIndexRelays } from "./settings";
 import {
   ISSUE_KIND,
   REPO_KIND,
@@ -87,7 +82,10 @@ import {
   type RelayGroupResolver,
   unwrapRelayGroupId,
 } from "./outbox";
-import { configureRelayHistory } from "@/lib/relayHistory";
+import {
+  configureRelayHistory,
+  advertisesNegentropy,
+} from "@/lib/relayHistory";
 import { createReconciledHistory } from "@/lib/reconciledHistory";
 import { normalizeUrl } from "@/lib/url";
 import { isPersonalSingletonKind } from "@/lib/personalSingletons";
@@ -169,7 +167,9 @@ const publicHistoryStore = {
       .filter((event) => !isPrivateRepositoryEventId(event.id)),
 };
 configureRelayHistory(pool, {
-  enabled: (relay) => !isTrustedPrivateRepositoryRelay(relay),
+  enabled: (relay) =>
+    !isTrustedPrivateRepositoryRelay(relay) &&
+    advertisesNegentropy(pool, relay),
   hasInventory: (filter) => publicHistoryStore.getByFilters(filter).length > 0,
   load: createReconciledHistory(pool, publicHistoryStore),
 });
@@ -236,6 +236,10 @@ function reconnectDelayMs(attempts: number): number {
 }
 
 pool.add$.subscribe((relay) => {
+  // Capability discovery never blocks initial REQs. Unknown/unsupported relays
+  // retain ordinary coverage; later owners can use advertised reconciliation.
+  if (!isTrustedPrivateRepositoryRelay(relay.url))
+    relay.information$.pipe(take(1)).subscribe();
   relay.reconnectTimer = (_error, attempts) =>
     timer(reconnectDelayMs(attempts));
 
@@ -1032,7 +1036,7 @@ export function nip34ListLoader(
 }
 
 /**
- * Max inbox relay URLs to query per item author when resolveAuthorInbox is
+ * Max inbox relay URLs to query per item author when outbox expansion is
  * enabled. Keeps the relay connection count bounded even for authors with many
  * read relays declared in their kind:10002.
  */
@@ -1133,8 +1137,6 @@ export function nip34SupplementalRelayLoader(
   coords$: Observable<string[]>,
   relayGroup: RelayGroup,
 ): Observable<NostrEvent> {
-  const resolveAuthorInbox = relayCurationMode.getValue() === "outbox";
-
   return new Observable<NostrEvent>((subscriber) => {
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
@@ -1194,6 +1196,17 @@ export function nip34SupplementalRelayLoader(
         }
       });
 
+    function discover(event: NostrEvent): void {
+      if (!isRepositoryRootItem(event, coordinateSet) || seenIds.has(event.id))
+        return;
+      seenIds.add(event.id);
+      fireLoaders(event.id, [...knownRelayUrls]);
+      fireAuthorInboxLoaders(event);
+    }
+    // Expansion also enriches roots already found by the persistent repo
+    // owner, even if no supplemental relay carries the root itself.
+    const cachedRootsSub = eventStore.insert$.subscribe(discover);
+
     const itemSub = resilientAdditiveSubscription(
       pool,
       relayGroupUrls$(relayGroup),
@@ -1206,14 +1219,7 @@ export function nip34SupplementalRelayLoader(
         mapEventsToStore(eventStore),
       )
       .subscribe({
-        next: (event) => {
-          const ev = event as NostrEvent;
-          if (!seenIds.has(ev.id)) {
-            seenIds.add(ev.id);
-            fireLoaders(ev.id, [...knownRelayUrls]);
-            if (resolveAuthorInbox) fireAuthorInboxLoaders(ev);
-          }
-        },
+        next: discover,
         error: (err) => subscriber.error(err),
       });
 
@@ -1226,7 +1232,10 @@ export function nip34SupplementalRelayLoader(
         for (const coord of new Set(coords)) {
           if (coordinateSet.has(coord)) continue;
           coordinateSet.add(coord);
-          itemAdditions.next(repoItemChunk(coord));
+          const chunk = repoItemChunk(coord);
+          itemAdditions.next(chunk);
+          for (const event of eventStore.getByFilters([...chunk.filters]))
+            discover(event);
         }
       },
       error: (err) => subscriber.error(err),
@@ -1237,6 +1246,7 @@ export function nip34SupplementalRelayLoader(
       relaySub.unsubscribe();
       itemSub.unsubscribe();
       coordsSub.unsubscribe();
+      cachedRootsSub.unsubscribe();
       inboxSubs.unsubscribe();
     };
   });
@@ -1287,13 +1297,9 @@ export function nip34RepoLoader(
   relayGroup: RelayGroup,
   privateRepository = false,
 ): Observable<NostrEvent> {
-  const resolveAuthorInbox =
-    !privateRepository && relayCurationMode.getValue() === "outbox";
-
   return new Observable<NostrEvent>((subscriber) => {
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
-    const inboxSubs = new Subscription();
 
     // Grow-only coordinate state shared by every subscription below.
     // coordinateSet is read by isRepositoryRootItem at delivery time, so
@@ -1320,29 +1326,6 @@ export function nip34RepoLoader(
           },
         }),
       );
-    }
-
-    function fireAuthorInboxLoaders(ev: NostrEvent): void {
-      const perItemQueried = new Set(knownRelayUrls);
-      subscriber.add(
-        addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe(),
-      );
-      const s = eventStore
-        .model(MailboxesModel, ev.pubkey)
-        .pipe(
-          filter((m): m is NonNullable<typeof m> => m !== undefined),
-          take(1),
-        )
-        .subscribe((mailboxes) => {
-          const newRelays = mailboxes.inboxes
-            .slice(0, MAX_AUTHOR_INBOX_RELAYS)
-            .map(normalizeUrl)
-            .filter((r) => !perItemQueried.has(r));
-          if (newRelays.length === 0) return;
-          for (const r of newRelays) perItemQueried.add(r);
-          fireLoaders(ev.id, newRelays);
-        });
-      inboxSubs.add(s);
     }
 
     // When new relays join the group, re-fire existing items' loaders against
@@ -1402,7 +1385,6 @@ export function nip34RepoLoader(
             // (relayGroupUrls$ is a BehaviorSubject so relaySub fires
             // synchronously before itemSub can emit).
             fireLoaders(ev.id, [...knownRelayUrls]);
-            if (resolveAuthorInbox) fireAuthorInboxLoaders(ev);
           }
         },
         error: (err) => subscriber.error(err),
@@ -1540,7 +1522,6 @@ export function nip34RepoLoader(
       repoMetaSub.unsubscribe();
       stackCandidateSub.unsubscribe();
       inputsSub.unsubscribe();
-      inboxSubs.unsubscribe();
     };
   });
 }

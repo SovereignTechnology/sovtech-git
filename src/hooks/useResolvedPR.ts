@@ -31,7 +31,7 @@ import {
 import type { EventSearchState, RelayGroupSpec } from "./useEventSearch";
 import { PRDetailModel } from "@/models/PRDetailModel";
 import { type RepositoryRoleHistory, type ResolvedPR } from "@/lib/nip34";
-import { relayCurationMode } from "@/services/settings";
+import { useRepositoryCuration } from "./useRepositoryCuration";
 import type { RelayGroup } from "applesauce-relay";
 import { type Observable } from "rxjs";
 
@@ -69,7 +69,7 @@ export function useResolvedPR(
   options: UseResolvedPROptions = {},
 ): ResolvedPRResult {
   const store = useEventStore();
-  const curationMode = use$(relayCurationMode);
+  const { mode: curationMode } = useRepositoryCuration();
   const { extraSearchGroups, retryKey, privateRepository = false } = options;
 
   // ── 1. Fetch root event + tiered loading (shared with useResolvedIssue) ──

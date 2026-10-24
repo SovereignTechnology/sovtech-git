@@ -66,3 +66,10 @@ export function loadRelayHistory(
     ? policy.load(relay, filters, options)
     : historyWindow(request, relay, filters, options);
 }
+
+/** Missing or unreadable NIP-11 is not permission to stall history on a
+ * protocol the relay may silently ignore. Ordinary coverage stays available.
+ */
+export function advertisesNegentropy(pool: RelayPool, relay: string): boolean {
+  return pool.relay(relay).information?.supported_nips?.includes(77) === true;
+}

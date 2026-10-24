@@ -1,3 +1,4 @@
+import { useRepositoryCuration } from "./useRepositoryCuration";
 import { useEffect, useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
@@ -17,14 +18,9 @@ import {
   liveness,
   nip34ListLoader,
   nip34ThreadItemLoader,
-  eventStore as globalEventStore,
   pool,
 } from "@/services/nostr";
-import {
-  gitIndexRelays,
-  fallbackRelays,
-  relayCurationMode,
-} from "@/services/settings";
+import { gitIndexRelays, fallbackRelays } from "@/services/settings";
 import { normalizeUrl } from "@/lib/url";
 import { relayGroupUrls$ } from "@/models/RepositoryRelayGroup";
 
@@ -444,12 +440,15 @@ export function useNip34ItemDetailLoader(
   retryKey?: number,
   privateRepository = false,
 ): Nip34ItemDetailLoaderResult {
-  const curationMode = use$(relayCurationMode);
+  const { mode: curationMode } = useRepositoryCuration();
+  const visibleStore = useEventStore();
+  const visibleRoot = use$(
+    () => (itemId ? visibleStore.event(itemId) : undefined),
+    [itemId, visibleStore],
+  );
 
   // ── 1. Check if event is already in the store ────────────────────────────
-  const alreadyInStore = itemId
-    ? globalEventStore.getByFilters([{ ids: [itemId] }]).length > 0
-    : false;
+  const alreadyInStore = !!visibleRoot;
 
   // ── 2. Search for root event via useEventSearch ──────────────────────────
   // Build relay groups based on curation mode:

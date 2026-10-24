@@ -1,3 +1,4 @@
+import type { IEventStore } from "applesauce-core";
 import { useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
@@ -39,8 +40,10 @@ import type { Observable } from "rxjs";
 export function useIssues(
   repoCoords: string | string[] | undefined,
   roleHistory?: RepositoryRoleHistory,
+  view?: IEventStore,
 ): ResolvedIssueLite[] | undefined {
-  const store = useEventStore();
+  const canonical = useEventStore();
+  const store = view ?? canonical;
 
   // Normalise to a sorted array for consistent filter building and cache keys.
   const coords = useMemo(() => {

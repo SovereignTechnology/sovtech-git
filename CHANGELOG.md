@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Default public repository views to relay-confirmed items and discussion, with an on-page outbox toggle that also returns to curated content without reloading. Existing explicit preferences are preserved.
+
 - Reconcile public repository history with NIP-77 when matching events are cached, fetching missing IDs through shared rate-limit admission and retaining coverage-aware fallback for unsupported relays.
 
 - Share focused comment, PR-update and CI queries between repository lists and detail pages, preserving immediate loading on direct entry.

@@ -74,7 +74,13 @@ import {
   type RepoQueryOptions,
   type ResolvedRepo,
 } from "@/lib/nip34";
-import { relayCurationMode } from "@/services/settings";
+import { relayCurationMode, type RelayCurationMode } from "@/services/settings";
+import { RepositoryCurationContext } from "@/contexts/RepositoryCurationContext";
+import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
+import { CuratedEventStore } from "@/lib/curatedEventStore";
+import { relayEventPresence } from "@/lib/relayEventPresence";
+import { eventStore as canonicalEventStore } from "@/services/nostr";
+import { EventStoreProvider } from "applesauce-react/providers";
 import { cn } from "@/lib/utils";
 import { StarButton } from "@/components/StarButton";
 import { FollowRepoButton } from "@/components/FollowRepoButton";
@@ -205,12 +211,20 @@ function RepoLayoutResolved(
   props: Omit<ComponentProps<typeof RepoLayoutSession>, "onRetryAccess">,
 ) {
   const [attempt, setAttempt] = useState(0);
+  const preferred = use$(relayCurationMode) ?? "repo";
+  const [override, setMode] = useState<RelayCurationMode>();
+  const curation = useMemo(
+    () => ({ mode: override ?? preferred, setMode }),
+    [override, preferred],
+  );
   return (
-    <RepoLayoutSession
-      {...props}
-      key={attempt}
-      onRetryAccess={() => setAttempt((value) => value + 1)}
-    />
+    <RepositoryCurationContext.Provider value={curation}>
+      <RepoLayoutSession
+        {...props}
+        key={attempt}
+        onRetryAccess={() => setAttempt((value) => value + 1)}
+      />
+    </RepositoryCurationContext.Provider>
   );
 }
 
@@ -317,7 +331,20 @@ function RepoLayoutSession({
     use$(() => relayGroupUrls$(repoRelayGroup), [repoRelayGroup]) ?? [];
 
   // Respect the user's relay curation preference.
-  const curationMode = use$(relayCurationMode);
+  const { mode: curationMode, setMode: setCurationMode } =
+    useRepositoryCuration();
+  const curated = useMemo(
+    () => new CuratedEventStore(canonicalEventStore, relayEventPresence),
+    [],
+  );
+  useEffect(() => curated.connect(), [curated]);
+  const declaredRelaysKey = (repo?.relays ?? []).join(",");
+  useEffect(() => {
+    curated.setPolicy(repo?.relays ?? [], curationMode === "outbox");
+    // Content-keyed: resolver object churn must not rebuild the projection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curated, declaredRelaysKey, curationMode]);
+  const repositoryStore = isPrivate ? canonicalEventStore : curated.store;
 
   // In outbox mode, also subscribe to the extra maintainer mailbox relays so
   // issues and PRs published only to those relays are discovered. Uses
@@ -381,8 +408,16 @@ function RepoLayoutSession({
     queryOptions.privateRepository,
     repo?.roleHistory,
   );
-  const issues = useIssues(presentationRepoCoordinates, repo?.roleHistory);
-  const prs = usePRs(presentationRepoCoordinates, repo?.roleHistory);
+  const issues = useIssues(
+    presentationRepoCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
+  );
+  const prs = usePRs(
+    presentationRepoCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
+  );
 
   const acceptedRepoCoordinates = useMemo(
     () => repo?.confirmedMemberCoordinates ?? [],
@@ -1001,59 +1036,85 @@ function RepoLayoutSession({
           </div>
         )}
 
+        {repo && !isPrivate && (isIssuesTab || isPRsTab) && (
+          <div className="container max-w-screen-xl px-4 pt-4 md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+              <p className="text-sm text-muted-foreground">
+                {curationMode === "repo"
+                  ? "Curated: items and discussion confirmed on repository relays."
+                  : "Including content from outbox relays."}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={curationMode === "outbox"}
+                onClick={() =>
+                  setCurationMode(curationMode === "repo" ? "outbox" : "repo")
+                }
+              >
+                {curationMode === "repo"
+                  ? "Include outbox relays"
+                  : "Back to curated"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Page content */}
         {ctxValue ? (
           <BuzzRepositoryContext.Provider value={repo?.isBuzz ?? false}>
             <GitCommitLinkContext.Provider value={gitCommitLinkCtxValue}>
-              <RepoContext.Provider value={ctxValue}>
-                {isPrivate &&
-                (subPage === "actions" ||
-                  subPage === "action-coordinators" ||
-                  subPage === "releases" ||
-                  subPage === "settings" ||
-                  subPage === "edit") ? (
-                  <PrivateFeatureUnavailable />
-                ) : subPage === "code" ? (
-                  <RepoCodePage />
-                ) : subPage === "commits" ? (
-                  <RepoCommitsPage />
-                ) : subPage === "commit" ? (
-                  <RepoCommitPage />
-                ) : subPage === "branches" ? (
-                  <RepoBranchesPage />
-                ) : subPage === "tags" ? (
-                  <RepoTagsPage />
-                ) : subPage === "compare" ? (
-                  <RepoComparePage />
-                ) : subPage === "actions" ? (
-                  <RepoActionsPage />
-                ) : subPage === "action-coordinators" ? (
-                  <RepoCoordinatorsPage
-                    coordinatorIdentifier={coordinatorIdentifier}
-                  />
-                ) : subPage === "releases" ? (
-                  <RepoReleasesPage
-                    eventId={releaseId}
-                    view={releaseView ?? "releases"}
-                  />
-                ) : subPage === "issue" ? (
-                  <IssuePage />
-                ) : subPage === "issues" ? (
-                  <RepoIssuesPage />
-                ) : subPage === "pr" ? (
-                  <PRPage />
-                ) : subPage === "pr-commit" ? (
-                  <PRPage />
-                ) : subPage === "prs" ? (
-                  <RepoPRsPage />
-                ) : subPage === "about" ? (
-                  <RepoAboutPage />
-                ) : subPage === "edit" ? (
-                  <Navigate to={`${basePath}/settings`} replace />
-                ) : subPage === "settings" ? (
-                  <RepoSettingsPage />
-                ) : null}
-              </RepoContext.Provider>
+              <EventStoreProvider eventStore={repositoryStore}>
+                <RepoContext.Provider value={ctxValue}>
+                  {isPrivate &&
+                  (subPage === "actions" ||
+                    subPage === "action-coordinators" ||
+                    subPage === "releases" ||
+                    subPage === "settings" ||
+                    subPage === "edit") ? (
+                    <PrivateFeatureUnavailable />
+                  ) : subPage === "code" ? (
+                    <RepoCodePage />
+                  ) : subPage === "commits" ? (
+                    <RepoCommitsPage />
+                  ) : subPage === "commit" ? (
+                    <RepoCommitPage />
+                  ) : subPage === "branches" ? (
+                    <RepoBranchesPage />
+                  ) : subPage === "tags" ? (
+                    <RepoTagsPage />
+                  ) : subPage === "compare" ? (
+                    <RepoComparePage />
+                  ) : subPage === "actions" ? (
+                    <RepoActionsPage />
+                  ) : subPage === "action-coordinators" ? (
+                    <RepoCoordinatorsPage
+                      coordinatorIdentifier={coordinatorIdentifier}
+                    />
+                  ) : subPage === "releases" ? (
+                    <RepoReleasesPage
+                      eventId={releaseId}
+                      view={releaseView ?? "releases"}
+                    />
+                  ) : subPage === "issue" ? (
+                    <IssuePage />
+                  ) : subPage === "issues" ? (
+                    <RepoIssuesPage />
+                  ) : subPage === "pr" ? (
+                    <PRPage />
+                  ) : subPage === "pr-commit" ? (
+                    <PRPage />
+                  ) : subPage === "prs" ? (
+                    <RepoPRsPage />
+                  ) : subPage === "about" ? (
+                    <RepoAboutPage />
+                  ) : subPage === "edit" ? (
+                    <Navigate to={`${basePath}/settings`} replace />
+                  ) : subPage === "settings" ? (
+                    <RepoSettingsPage />
+                  ) : null}
+                </RepoContext.Provider>
+              </EventStoreProvider>
             </GitCommitLinkContext.Provider>
           </BuzzRepositoryContext.Provider>
         ) : privateProbe?.status === "unavailable" ? (

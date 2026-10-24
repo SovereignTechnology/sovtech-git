@@ -18,7 +18,12 @@ import { of } from "rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WS } from "vitest-websocket-mock";
 
-import { eventStore, nip34RepoLoader, pool } from "@/services/nostr";
+import {
+  eventStore,
+  nip34RepoLoader,
+  nip34SupplementalRelayLoader,
+  pool,
+} from "@/services/nostr";
 
 const RELAY_URL = "wss://stack-candidates.test";
 
@@ -132,4 +137,47 @@ describe("nip34RepoLoader stack-candidate subscription", () => {
     ]);
     expect(closes(server)).not.toContainEqual(["CLOSE", initialReq[1]]);
   });
+});
+
+it("enriches cached repository roots only for the supplemental owner's lifetime", async () => {
+  const key = generateSecretKey();
+  const coord = `30617:${getPublicKey(key)}:expanded-cache`;
+  const root = finalizeEvent(
+    { kind: 1621, created_at: 1700000000, content: "", tags: [["a", coord]] },
+    key,
+  );
+  eventStore.add(root);
+  const before = eventStore.insert$.observers.length;
+  loaderSub = nip34SupplementalRelayLoader(
+    of([coord]),
+    new RelayGroup([pool.relay(RELAY_URL)]),
+  ).subscribe();
+  await vi.waitFor(() =>
+    expect(
+      requests(server).some((req) =>
+        req
+          .slice(2)
+          .some((filter) => (filter as Filter)["#E"]?.includes(root.id)),
+      ),
+    ).toBe(true),
+  );
+  expect(eventStore.insert$.observers.length).toBeGreaterThan(before);
+  const childIds = requests(server)
+    .filter((req) =>
+      req
+        .slice(2)
+        .some((filter) => (filter as Filter)["#E"]?.includes(root.id)),
+    )
+    .map((req) => req[1]);
+  const activeObservers = eventStore.insert$.observers.length;
+  loaderSub.unsubscribe();
+  // Shared MailboxesModel caches may retain their own source observer. The
+  // supplemental owner's discovery observer and wire demands must release.
+  expect(eventStore.insert$.observers.length).toBeLessThan(activeObservers);
+  await vi.waitFor(() =>
+    expect(
+      childIds.every((id) => closes(server).some((close) => close[1] === id)),
+    ).toBe(true),
+  );
+  eventStore.remove(root.id);
 });

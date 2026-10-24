@@ -186,9 +186,9 @@ export const gitIndexRelaysCustomised$ = isCustomised$(
  * Relay curation mode.
  *
  * - "repo"   (default): Repo Relay Event Curation — only query the relays
- *   declared in the repository announcement plus maintainer mailbox relays
- *   discovered via the repo's own relay list. Keeps traffic focused and
- *   predictable.
+ *   declared in the repository announcement. Collaboration views require
+ *   current-session receipt or reconciliation evidence from those relays.
+ *   A repository's on-page control can temporarily expand this view.
  *
  * - "outbox": Full Nostr Outbox Model — additionally follows each maintainer's
  *   NIP-65 outbox and inbox relays when fetching issues, patches, and comments.
@@ -196,7 +196,7 @@ export const gitIndexRelaysCustomised$ = isCustomised$(
  */
 export type RelayCurationMode = "repo" | "outbox";
 
-const DEFAULT_RELAY_CURATION_MODE: RelayCurationMode = "outbox";
+const DEFAULT_RELAY_CURATION_MODE: RelayCurationMode = "repo";
 
 export const relayCurationMode = new BehaviorSubject<RelayCurationMode>(
   DEFAULT_RELAY_CURATION_MODE,
