@@ -441,6 +441,7 @@ async function run(control) {
   let report;
   let journey;
   let cacheSeedCount;
+  let cachePopulation;
   try {
     if (config.cacheReload) {
       await page.goto("http://127.0.0.1:" + config.port + "/about", {
@@ -449,42 +450,71 @@ async function run(control) {
       await page.waitForFunction(() => !!window.nostrdb, undefined, {
         timeout: 15000,
       });
-      const kinds = new Set([
-        1617, 1618, 1621, 1619, 1630, 1631, 1632, 1633, 1985, 1624, 5,
-      ]);
-      const cached = fixture.events.filter((event) => kinds.has(event.kind));
-      cacheSeedCount = cached.length;
-      await page.evaluate(async (events) => {
-        for (const event of events) await window.nostrdb.add(event);
-      }, cached);
-      // Exact-event reads bypass the backend write queue. Wait for durable
-      // bodies before navigation creates a new document and empty EventStore.
-      await page.waitForFunction(
-        async (ids) => {
-          const events = await Promise.all(
-            ids.map((id) => window.nostrdb.event(id)),
-          );
-          return events.every(Boolean);
-        },
-        cached.map((event) => event.id),
-        { timeout: 30000 },
-      );
-      // Seeded roots must also be discoverable by a filter query.
-      // Exact-ID durability alone does not validate the kind-index inventory.
-      const rootIds = cached
-        .filter((event) => [1617, 1618, 1621].includes(event.kind))
-        .map((event) => event.id);
-      await page.waitForFunction(
-        async (ids) => {
-          const roots = await window.nostrdb.filters([
-            { kinds: [1617, 1618, 1621] },
-          ]);
-          const found = new Set(roots.map((event) => event.id));
-          return ids.every((id) => found.has(id));
-        },
-        rootIds,
-        { timeout: 30000 },
-      );
+      if (config.cacheReload === "natural") {
+        await page.goto(
+          "http://127.0.0.1:" +
+            config.port +
+            fixture.basePath +
+            (config.entrySuffix ?? "/issues"),
+        );
+        // Observe an actual cold visit; do not inject cache bodies. The window
+        // measures cache population, not a claim that every relay has settled.
+        await page.waitForFunction(
+          () => performance.now() >= 60000,
+          undefined,
+          { timeout: 70000 },
+        );
+        cachePopulation = await page.evaluate(async () => ({
+          observedUntil: performance.now(),
+          events: (
+            await window.nostrdb.filters([
+              {
+                kinds: [
+                  1617, 1618, 1621, 1619, 1630, 1631, 1632, 1633, 1985, 1624, 5,
+                ],
+              },
+            ])
+          ).length,
+          repository: window.__detailBench.transitions.repository.at(-1)?.value,
+        }));
+      } else {
+        const kinds = new Set([
+          1617, 1618, 1621, 1619, 1630, 1631, 1632, 1633, 1985, 1624, 5,
+        ]);
+        const cached = fixture.events.filter((event) => kinds.has(event.kind));
+        cacheSeedCount = cached.length;
+        await page.evaluate(async (events) => {
+          for (const event of events) await window.nostrdb.add(event);
+        }, cached);
+        // Exact-event reads bypass the backend write queue. Wait for durable
+        // bodies before navigation creates a new document and empty EventStore.
+        await page.waitForFunction(
+          async (ids) => {
+            const events = await Promise.all(
+              ids.map((id) => window.nostrdb.event(id)),
+            );
+            return events.every(Boolean);
+          },
+          cached.map((event) => event.id),
+          { timeout: 30000 },
+        );
+        // Seeded roots must also be discoverable by a filter query.
+        // Exact-ID durability alone does not validate the kind-index inventory.
+        const rootIds = cached
+          .filter((event) => [1617, 1618, 1621].includes(event.kind))
+          .map((event) => event.id);
+        await page.waitForFunction(
+          async (ids) => {
+            const roots = await window.nostrdb.filters([
+              { kinds: [1617, 1618, 1621] },
+            ]);
+            const found = new Set(roots.map((event) => event.id));
+            return ids.every((id) => found.has(id));
+          },
+          rootIds,
+          { timeout: 30000 },
+        );
+      }
       requests.length = 0;
       deliveries.length = 0;
       negotiationCount = negotiationBytes = 0;
@@ -562,7 +592,9 @@ async function run(control) {
       };
     });
     if (config.cacheReload)
-      report.cacheReload = { seededEvents: cacheSeedCount };
+      report.cacheReload = cachePopulation
+        ? { source: "app", population: cachePopulation }
+        : { source: "seeded", seededEvents: cacheSeedCount };
     if (config.followUpMs) {
       await page.waitForFunction(
         (target) => performance.now() >= target,

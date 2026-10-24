@@ -36,6 +36,8 @@
 
 ### Fixed
 
+- Restore cached public repository announcements before relay discovery so warm issue/PR views can load without waiting for network privacy classification.
+
 - Recover older repository issues and PRs when relays cap the initial root query, including late maintainer coordinates and supplemental relays.
 
 - Release superseded issue/PR list queries immediately as roots and essentials arrive, avoiding continued processing by obsolete cached models.

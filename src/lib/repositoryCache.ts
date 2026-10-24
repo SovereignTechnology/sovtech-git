@@ -1,7 +1,18 @@
-import type { Filter } from "applesauce-core/helpers";
+import { getReplaceableIdentifier, type Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
-import { catchError, defer, finalize, from, of, timeout } from "rxjs";
-import { ISSUE_KIND, PR_ROOT_KINDS, isRepositoryRootItem } from "./nip34";
+import { catchError, defer, finalize, from, map, of, timeout } from "rxjs";
+import {
+  ISSUE_KIND,
+  PR_ROOT_KINDS,
+  REPO_KIND,
+  getRepoIsPrivate,
+  isRepositoryRootItem,
+  repoCoordinate,
+} from "./nip34";
+import {
+  isPrivateRepositoryCoordinate,
+  isPrivateRepositoryEvent,
+} from "@/services/privateRepositoryScope";
 
 export const REPOSITORY_CACHE_DEADLINE_MS = 3000;
 const essentialKinds = [1630, 1631, 1632, 1633, 1985, 1624, 5];
@@ -53,6 +64,32 @@ export function loadRepositoryCache(
     ).pipe(finalize(() => controller.abort()));
   }).pipe(
     timeout({ first: REPOSITORY_CACHE_DEADLINE_MS }),
+    catchError(() => of([] as NostrEvent[])),
+  );
+}
+
+/** Restore public discovery inputs without claiming fresh relay coverage.
+ * Identifier-scoped discovery is safe only because RepositoryModel still
+ * resolves reciprocal membership from the route's selected author.
+ */
+export function loadPublicRepositoryAnnouncements(
+  identifier: string,
+  read: (filters: Filter[]) => Promise<NostrEvent[]>,
+) {
+  return defer(() => read([{ kinds: [REPO_KIND], "#d": [identifier] }])).pipe(
+    timeout({ first: REPOSITORY_CACHE_DEADLINE_MS }),
+    map((events) =>
+      events.filter(
+        (event) =>
+          event.kind === REPO_KIND &&
+          getReplaceableIdentifier(event) === identifier &&
+          !getRepoIsPrivate(event) &&
+          !isPrivateRepositoryEvent(event) &&
+          !isPrivateRepositoryCoordinate(
+            repoCoordinate(event.pubkey, identifier),
+          ),
+      ),
+    ),
     catchError(() => of([] as NostrEvent[])),
   );
 }

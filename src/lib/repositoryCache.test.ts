@@ -83,3 +83,56 @@ it("does not publish late data after navigation cancels hydration", async () => 
   expect(next).not.toHaveBeenCalled();
   expect(read).toHaveBeenCalledTimes(1);
 });
+
+it("restores public announcement discovery inputs but excludes private and quarantined coordinates", async () => {
+  const { loadPublicRepositoryAnnouncements } =
+    await import("./repositoryCache");
+  const { markPrivateRepositoryCoordinate } =
+    await import("@/services/privateRepositoryScope");
+  const announcement = {
+    ...root,
+    kind: 30617,
+    tags: [["d", "cache-discovery-test"]],
+  };
+  const privateAnnouncement = {
+    ...announcement,
+    id: "1".repeat(64),
+    tags: [...announcement.tags, ["private", "true"]],
+  };
+  const quarantined = {
+    ...announcement,
+    id: "2".repeat(64),
+    pubkey: "9".repeat(64),
+  };
+  markPrivateRepositoryCoordinate(
+    `30617:${quarantined.pubkey}:cache-discovery-test`,
+  );
+  const other = {
+    ...announcement,
+    id: "3".repeat(64),
+    tags: [["d", "other-repo"]],
+  };
+  const read = vi
+    .fn()
+    .mockResolvedValue([announcement, privateAnnouncement, quarantined, other]);
+  expect(
+    await firstValueFrom(
+      loadPublicRepositoryAnnouncements("cache-discovery-test", read),
+    ),
+  ).toEqual([announcement]);
+  expect(read).toHaveBeenCalledWith([
+    { kinds: [30617], "#d": ["cache-discovery-test"] },
+  ]);
+});
+
+it("leaves network discovery available when announcement cache reads fail", async () => {
+  const { loadPublicRepositoryAnnouncements } =
+    await import("./repositoryCache");
+  expect(
+    await firstValueFrom(
+      loadPublicRepositoryAnnouncements("repo", async () => {
+        throw new Error("disk unavailable");
+      }),
+    ),
+  ).toEqual([]);
+});

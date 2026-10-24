@@ -512,11 +512,19 @@ for exact-ID reads and root-kind filter visibility, then opens a fresh document 
 uses the IndexedDB fallback rather than an optional host local relay. This mode
 cannot be combined with journey, curation or full-snapshot injection modes.
 Reports include the number of seeded events, initial list DOM transitions,
-and first-list/cached-view paint opportunities. These are animation-frame
-opportunities, not proof of pixel presentation.
+and first-list paint opportunities. These are animation-frame opportunities,
+not proof of pixel presentation. Older app bundles also expose a cached-banner
+paint marker.
 Compare exact final repository membership and statuses as well as convergence,
 traffic and responsiveness: a lower transfer count with missing visible items
 is a regression. Delivery coverage describes network receipts, not cached bodies.
+
+Set `"cacheReload": "natural"` to visit the list for a 60-second observation
+window before reloading, without injecting event bodies. Reports preserve the
+pre-reload repository model and the number of cached essential events under
+`cacheReload.population`. This exercises the app's admission/write/read cycle;
+the observation window is not a completeness assertion. Compare pre- and
+post-reload exact membership/statuses, and retain partial outcomes.
 
 ### Query strategies and user-facing outcomes
 
