@@ -63,3 +63,38 @@ describe("saveDeletionEvent", () => {
     await rejection;
   });
 });
+
+import { createRepositoryCacheWriter, saveEvents } from "./cache";
+import { RelayEventPresence } from "@/lib/relayEventPresence";
+
+it("keeps outbox collaboration out of general cache writes while retaining profiles", async () => {
+  const add = vi.spyOn(window.nostrdb, "add").mockResolvedValue(true);
+  try {
+    const issue = { ...deletionEvent(), kind: 1621 };
+    const profile = { ...deletionEvent(), kind: 0, id: "e".repeat(64) };
+    await saveEvents([issue, profile]);
+    expect(add.mock.calls.map(([event]) => event.id)).toEqual([profile.id]);
+  } finally {
+    add.mockRestore();
+  }
+});
+
+it("caches an existing outbox event only after repository-relay confirmation", async () => {
+  const presence = new RelayEventPresence();
+  const write = vi.fn().mockResolvedValue(undefined);
+  const writer = createRepositoryCacheWriter(presence, write);
+  const issue = { ...deletionEvent(), kind: 1621 };
+  try {
+    writer.setRelays(["wss://repo.test"]);
+    presence.observe(issue.id, "wss://outbox.test");
+    writer.consider(issue);
+    expect(write).not.toHaveBeenCalled();
+    presence.observe(issue.id, "wss://repo.test");
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith([issue]));
+    writer.consider(issue);
+    writer.close();
+    expect(write).toHaveBeenCalledTimes(1);
+  } finally {
+    writer.close();
+  }
+});

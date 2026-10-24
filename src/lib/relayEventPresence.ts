@@ -8,6 +8,7 @@ import { normalizeUrl } from "./url";
 export class RelayEventPresence {
   readonly changes$ = new Subject<ReadonlySet<string>>();
   private revision = 0;
+  private cached = new Set<string>();
   private evidence = new Map<
     string,
     Map<string, { present: boolean; revision: number }>
@@ -21,6 +22,31 @@ export class RelayEventPresence {
     const sources = this.evidence.get(id);
     return relays.some(
       (relay) => sources?.get(normalizeUrl(relay))?.present === true,
+    );
+  }
+
+  /** Legacy cache contents are accepted for display, not fresh relay evidence.
+   * A successful absence result from every current relay withdraws that fallback.
+   */
+  acceptCached(ids: Iterable<string>): void {
+    const changed = new Set<string>();
+    for (const id of ids) {
+      if (!this.cached.has(id)) {
+        this.cached.add(id);
+        changed.add(id);
+      }
+    }
+    if (changed.size) this.changes$.next(changed);
+  }
+
+  hasCached(id: string, relays: readonly string[]): boolean {
+    return (
+      this.cached.has(id) &&
+      relays.length > 0 &&
+      !relays.every(
+        (relay) =>
+          this.evidence.get(id)?.get(normalizeUrl(relay))?.present === false,
+      )
     );
   }
 
@@ -62,7 +88,7 @@ export class RelayEventPresence {
   ): boolean {
     let sources = this.evidence.get(id);
     if (!sources) this.evidence.set(id, (sources = new Map()));
-    const changed = (sources.get(relay)?.present ?? false) !== present;
+    const changed = sources.get(relay)?.present !== present;
     sources.set(relay, { present, revision });
     return changed;
   }

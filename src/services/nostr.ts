@@ -1,6 +1,12 @@
+import { loadRepositoryCache } from "@/lib/repositoryCache";
+import { relayEventPresence } from "@/lib/relayEventPresence";
 import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
-import { fakeVerifyEvent, persistEventsToCache } from "applesauce-core/helpers";
+import {
+  fakeVerifyEvent,
+  markFromCache,
+  persistEventsToCache,
+} from "applesauce-core/helpers";
 import type { Filter } from "applesauce-core/helpers";
 import {
   createAddressLoader,
@@ -20,6 +26,7 @@ import {
   Subject,
   Subscription,
   combineLatest,
+  concatMap,
   merge,
   distinctUntilChanged,
   firstValueFrom,
@@ -44,6 +51,7 @@ import {
 import { MailboxesModel } from "applesauce-core/models";
 import {
   cacheRequest,
+  createRepositoryCacheWriter,
   loadDeletionEvents,
   saveDeletionEvent,
   saveEvents,
@@ -1053,6 +1061,8 @@ const MAX_AUTHOR_INBOX_RELAYS = 3;
  * selected pubkey/dTag) must be a new loader subscription, not an emission.
  */
 export interface Nip34RepoLoaderInputs {
+  /** Declared repository relays, excluding supplemental outbox coverage. */
+  cacheRelays?: string[];
   /** Confirmed member coordinate strings for the repository. */
   coords: string[];
   /** Role history used to authorise PR updates for merge-base inference. */
@@ -1296,8 +1306,12 @@ export function nip34RepoLoader(
   inputs$: Observable<Nip34RepoLoaderInputs>,
   relayGroup: RelayGroup,
   privateRepository = false,
+  onCacheRestore?: (events: NostrEvent[] | undefined) => void,
 ): Observable<NostrEvent> {
   return new Observable<NostrEvent>((subscriber) => {
+    const cacheWriter = privateRepository
+      ? undefined
+      : createRepositoryCacheWriter();
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
 
@@ -1322,7 +1336,10 @@ export function nip34RepoLoader(
       subscriber.add(
         nip34ListLoader(id, relays).subscribe({
           next: (msg) => {
-            if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
+            if (msg !== "EOSE") {
+              cacheWriter?.consider(msg as NostrEvent);
+              subscriber.next(msg as NostrEvent);
+            }
           },
         }),
       );
@@ -1362,13 +1379,24 @@ export function nip34RepoLoader(
           { reconnect: true, gapFill: true, settle: false },
         )
           .pipe(onlyEvents(), mapEventsToStore(eventStore))
-          .subscribe({ error: (err) => subscriber.error(err) });
+          .subscribe({
+            next: (event) => cacheWriter?.consider(event),
+            error: (err) => subscriber.error(err),
+          });
 
     const itemSub = resilientAdditiveSubscription(
       pool,
       relayGroupUrls$(relayGroup),
       { initial: [], additions$: itemAdditions },
-      { reconnect: true, gapFill: true, settle: false, history: true },
+      {
+        reconnect: true,
+        gapFill: true,
+        settle: false,
+        history: true,
+        // Start inventory reconciliation before seeded item batches fill the
+        // shared history queue. Each coordinate is already an immutable chunk.
+        deltaBufferSize: privateRepository ? undefined : 1,
+      },
     )
       .pipe(
         onlyEvents(),
@@ -1378,6 +1406,7 @@ export function nip34RepoLoader(
       .subscribe({
         next: (event) => {
           const ev = event as NostrEvent;
+          cacheWriter?.consider(ev);
           if (!REPO_ITEM_KINDS.some((kind) => kind === ev.kind)) return;
           if (!seenIds.has(ev.id)) {
             seenIds.add(ev.id);
@@ -1476,44 +1505,86 @@ export function nip34RepoLoader(
     // (BehaviorSubject) reaches the live additive subscriptions. Growth is
     // content-keyed: only genuinely new coordinates or changed role-history
     // content produce chunk emissions; anything else is a strict no-op.
-    const inputsSub = inputs$.subscribe({
-      next: ({ coords, roleHistory }) => {
-        const newCoords = [...new Set(coords)].filter(
-          (coord) => !coordinateSet.has(coord),
-        );
-        const roleHistoryKey = roleHistoryCacheKey(roleHistory);
-        const roleHistoryChanged = roleHistoryKey !== lastRoleHistoryKey;
-        if (newCoords.length === 0 && !roleHistoryChanged) return;
-        for (const coord of newCoords) {
-          coordinateSet.add(coord);
-          const parsed = parseRepoCoordinate(coord);
-          if (parsed) maintainerPubkeys.add(parsed.pubkey);
-        }
-        // Software applications span authors × coordinates; emit the pairs
-        // not yet covered (new author × all coordinates, all authors × new
-        // coordinates), pushed before the item chunks so the small
-        // application REQ is not queued behind the item backlog.
-        for (const pubkey of maintainerPubkeys) {
-          for (const coord of coordinateSet) {
-            const chunk = softwareApplicationChunk(pubkey, coord);
-            if (emittedAppChunkKeys.has(chunk.key)) continue;
-            emittedAppChunkKeys.add(chunk.key);
-            appAdditions.next(chunk);
+    const inputsSub = inputs$
+      .pipe(
+        concatMap((input) =>
+          defer(() => {
+            const coords = [...new Set(input.coords)].filter(
+              (coord) => !coordinateSet.has(coord),
+            );
+            if (privateRepository || !coords.length)
+              return of({ ...input, cached: [] as NostrEvent[] });
+            onCacheRestore?.(undefined);
+            return loadRepositoryCache(coords, cacheRequest).pipe(
+              map((cached) => ({ ...input, cached })),
+            );
+          }),
+        ),
+      )
+      .subscribe({
+        next: ({ coords, roleHistory, cacheRelays, cached }) => {
+          cacheWriter?.setRelays(cacheRelays ?? []);
+          for (const event of cached) {
+            markFromCache(event);
+            eventStore.add(event);
           }
-        }
-        for (const coord of newCoords) {
-          itemAdditions.next(repoItemChunk(coord));
-          metaAdditions.next(repoMetaChunk(coord));
-        }
-        if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
-        if (roleHistoryChanged) {
-          lastRoleHistoryKey = roleHistoryKey;
-          roleHistory$.next(roleHistory);
-        }
-      },
-      error: (err) => subscriber.error(err),
-      // Completion means no further growth — the subscription lives on.
-    });
+          const restored = cached.filter((event) =>
+            eventStore.hasEvent(event.id),
+          );
+          relayEventPresence.acceptCached(restored.map((event) => event.id));
+          onCacheRestore?.(restored);
+          const newCoords = [...new Set(coords)].filter(
+            (coord) => !coordinateSet.has(coord),
+          );
+          const roleHistoryKey = roleHistoryCacheKey(roleHistory);
+          const roleHistoryChanged = roleHistoryKey !== lastRoleHistoryKey;
+          if (newCoords.length === 0 && !roleHistoryChanged) return;
+          for (const coord of newCoords) {
+            coordinateSet.add(coord);
+            const parsed = parseRepoCoordinate(coord);
+            if (parsed) maintainerPubkeys.add(parsed.pubkey);
+          }
+          // Software applications span authors × coordinates; emit the pairs
+          // not yet covered (new author × all coordinates, all authors × new
+          // coordinates), pushed before the item chunks so the small
+          // application REQ is not queued behind the item backlog.
+          for (const pubkey of maintainerPubkeys) {
+            for (const coord of coordinateSet) {
+              const chunk = softwareApplicationChunk(pubkey, coord);
+              if (emittedAppChunkKeys.has(chunk.key)) continue;
+              emittedAppChunkKeys.add(chunk.key);
+              appAdditions.next(chunk);
+            }
+          }
+          for (const coord of newCoords) {
+            itemAdditions.next(repoItemChunk(coord));
+            metaAdditions.next(repoMetaChunk(coord));
+          }
+          if (!privateRepository && newCoords.length) {
+            for (const event of eventStore.getByFilters({
+              kinds: [...REPO_ITEM_KINDS],
+              "#a": newCoords,
+            })) {
+              if (
+                isPrivateRepositoryEventId(event.id) ||
+                !isRepositoryRootItem(event, coordinateSet) ||
+                seenIds.has(event.id)
+              )
+                continue;
+              seenIds.add(event.id);
+              cacheWriter?.consider(event);
+              fireLoaders(event.id, [...knownRelayUrls]);
+            }
+          }
+          if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
+          if (roleHistoryChanged) {
+            lastRoleHistoryKey = roleHistoryKey;
+            roleHistory$.next(roleHistory);
+          }
+        },
+        error: (err) => subscriber.error(err),
+        // Completion means no further growth — the subscription lives on.
+      });
 
     return () => {
       relaySub.unsubscribe();
@@ -1522,6 +1593,7 @@ export function nip34RepoLoader(
       repoMetaSub.unsubscribe();
       stackCandidateSub.unsubscribe();
       inputsSub.unsubscribe();
+      cacheWriter?.close();
     };
   });
 }

@@ -1,5 +1,7 @@
 import type { Filter, NostrEvent } from "applesauce-core/helpers";
 import "window.nostrdb.js";
+import { relayEventPresence } from "@/lib/relayEventPresence";
+import type { RelayEventPresence } from "@/lib/relayEventPresence";
 import { instrumentCacheQuery } from "@/lib/perfRuntime";
 import {
   isPrivateRepositoryEvent,
@@ -25,13 +27,85 @@ export const cacheRequest =
     ? instrumentCacheQuery(queryCache)
     : queryCache;
 
-/** Save events to the cache */
+// Repository collaboration bodies are written by their repository owner only.
+// Identity/configuration caching and verified deletion persistence stay separate.
+const repositoryKinds = new Set([
+  1111, 1617, 1618, 1619, 1621, 1622, 1624, 1630, 1631, 1632, 1633, 1985, 9841,
+  9842, 39842,
+]);
+
+/** Save general-purpose events; repository owners admit collaboration events. */
 export async function saveEvents(events: NostrEvent[]) {
   await Promise.allSettled(
     events
-      .filter((event) => !isPrivateRepositoryEvent(event))
+      .filter(
+        (event) =>
+          !isPrivateRepositoryEvent(event) && !repositoryKinds.has(event.kind),
+      )
       .map((event) => window.nostrdb.add(event)),
   );
+}
+
+/** Scoped to a repository loader's lifetime. Late relay confirmation can make
+ * an existing outbox event eligible without another EventStore insertion.
+ * Admission does not guarantee continued relay retention. Future disk pruning
+ * would need completed absence evidence across the same repository filters;
+ * a timeout or a missing response must never evict a cached event.
+ */
+export function createRepositoryCacheWriter(
+  presence: RelayEventPresence = relayEventPresence,
+  write: (events: NostrEvent[]) => Promise<unknown> = async (events) => {
+    await Promise.all(events.map((event) => window.nostrdb.add(event)));
+  },
+) {
+  let relays: readonly string[] = [];
+  const candidates = new Map<string, NostrEvent>();
+  const saved = new Set<string>();
+  const pending = new Map<string, NostrEvent>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    const events = [...pending.values()].filter(
+      (event) =>
+        !isPrivateRepositoryEvent(event) && presence.has(event.id, relays),
+    );
+    pending.clear();
+    if (!events.length) return;
+    for (const event of events) saved.add(event.id);
+    void write(events).catch(() => {
+      for (const event of events) saved.delete(event.id);
+    });
+  };
+  const consider = (event: NostrEvent) => {
+    // Verified kind-5 events have their own durable writer. Do not persist raw
+    // deletion requests here or let discussion traffic evict deletion guards.
+    if (closed || event.kind === 5 || isPrivateRepositoryEvent(event)) return;
+    candidates.set(event.id, event);
+    if (saved.has(event.id) || !presence.has(event.id, relays)) return;
+    pending.set(event.id, event);
+    timer ??= setTimeout(flush, 250);
+  };
+  const subscription = presence.changes$.subscribe((ids) => {
+    for (const id of ids) {
+      const event = candidates.get(id);
+      if (event) consider(event);
+    }
+  });
+  return {
+    consider,
+    setRelays(next: readonly string[]) {
+      relays = next;
+      for (const event of candidates.values()) consider(event);
+    },
+    close() {
+      flush();
+      closed = true;
+      subscription.unsubscribe();
+      candidates.clear();
+    },
+  };
 }
 
 /** Load durable kind-5 tombstones before any cached originals are consumed. */

@@ -1,3 +1,4 @@
+import { relayEventPresence } from "@/lib/relayEventPresence";
 import { useEffect, useMemo } from "react";
 import { use$ } from "./use$";
 import type { RelayGroup } from "applesauce-relay";
@@ -6,7 +7,15 @@ import {
   roleHistoryCacheKey,
   type RepositoryRoleHistory,
 } from "@/lib/nip34";
-import { BehaviorSubject, EMPTY } from "rxjs";
+import {
+  auditTime,
+  combineLatest,
+  distinctUntilChanged,
+  map,
+  startWith,
+  BehaviorSubject,
+  EMPTY,
+} from "rxjs";
 import { catchError } from "rxjs/operators";
 import { nip34RepoLoader, type Nip34RepoLoaderInputs } from "@/services/nostr";
 
@@ -21,7 +30,8 @@ export function useNip34RepoLoader(
   repoRelayGroup: RelayGroup | undefined,
   privateRepository: boolean | undefined,
   roleHistory?: RepositoryRoleHistory,
-): void {
+  cacheRelays: string[] = [],
+) {
   // Normalise to a sorted array for consistent filter building and cache keys.
   const coords = useMemo(() => {
     if (!repoCoords) return undefined;
@@ -50,28 +60,76 @@ export function useNip34RepoLoader(
       new BehaviorSubject<Nip34RepoLoaderInputs>({
         coords: coords ?? [],
         roleHistory,
+        cacheRelays,
       }),
     // Intentionally NOT keyed on coords/roleHistory — they are fed in below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [repoRelayGroup],
   );
+  const cacheRelaysKey = cacheRelays.join(",");
   useEffect(() => {
     if (!coords || coords.length === 0) return;
-    inputs$.next({ coords, roleHistory });
+    inputs$.next({ coords, roleHistory, cacheRelays });
     // Content-keyed deps: pushes happen only when the coordinate set or the
     // role-history content changes; the loader additionally no-ops on
     // unchanged inputs, so re-pushes are free.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputs$, cacheKey, roleHistoryKey]);
+  }, [inputs$, cacheKey, roleHistoryKey, cacheRelaysKey]);
 
   // The factory retains seen item IDs across additive updates. Its root
   // subscriptions are released when this owner unsubscribes; per-item work
   // continues to use the shared singleton loaders.
+  const cacheState$ = useMemo(
+    () => new BehaviorSubject({ loading: false, ids: new Set<string>() }),
+    // A different repository owner must not inherit the previous cached IDs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [repoRelayGroup],
+  );
+  const cacheStatus = use$(
+    () =>
+      combineLatest([
+        cacheState$,
+        relayEventPresence.changes$.pipe(startWith(new Set<string>())),
+      ]).pipe(
+        auditTime(100),
+        map(([state]) => ({
+          loading: state.loading,
+          cached: state.ids.size > 0,
+          refreshing: [...state.ids].some(
+            (id) =>
+              relayEventPresence.hasCached(id, cacheRelays) &&
+              !relayEventPresence.has(id, cacheRelays),
+          ),
+        })),
+        distinctUntilChanged(
+          (a, b) =>
+            a.loading === b.loading &&
+            a.cached === b.cached &&
+            a.refreshing === b.refreshing,
+        ),
+      ),
+    [cacheState$, cacheRelaysKey],
+  );
   const hasCoords = !!coords && coords.length > 0;
   use$(() => {
     if (!hasCoords || !repoRelayGroup) return undefined;
-    return nip34RepoLoader(inputs$, repoRelayGroup, privateRepository).pipe(
-      catchError(() => EMPTY),
-    );
-  }, [hasCoords, repoRelayGroup, inputs$, privateRepository]);
+    return nip34RepoLoader(
+      inputs$,
+      repoRelayGroup,
+      privateRepository,
+      (events) => {
+        const previous = cacheState$.value;
+        cacheState$.next({
+          loading: events === undefined,
+          ids: new Set([
+            ...previous.ids,
+            ...(events
+              ?.filter((event) => event.kind !== 5)
+              .map((event) => event.id) ?? []),
+          ]),
+        });
+      },
+    ).pipe(catchError(() => EMPTY));
+  }, [hasCoords, repoRelayGroup, inputs$, privateRepository, cacheState$]);
+  return cacheStatus;
 }

@@ -92,7 +92,8 @@ export class CuratedEventStore {
       event.kind === 3 ||
       event.kind === 5 ||
       (event.kind >= 10000 && event.kind !== 39842) ||
-      this.presence.has(event.id, this.relays)
+      this.presence.has(event.id, this.relays) ||
+      this.presence.hasCached(event.id, this.relays)
     );
   }
 

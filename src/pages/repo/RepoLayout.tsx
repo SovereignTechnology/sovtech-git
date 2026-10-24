@@ -395,11 +395,12 @@ function RepoLayoutSession({
     [relayHintsKey, confirmedMaintainersKey, isPrivate],
   );
 
-  useNip34RepoLoader(
+  const cacheStatus = useNip34RepoLoader(
     presentationRepoCoordinates,
     repoRelayGroup,
     queryOptions.privateRepository,
     repo?.roleHistory,
+    repo?.relays,
   );
   const issues = useIssues(
     presentationRepoCoordinates,
@@ -902,6 +903,20 @@ function RepoLayoutSession({
             />
           </div>
         </div>
+
+        {!isPrivate &&
+          (cacheStatus?.loading ||
+            (cacheStatus?.cached && cacheStatus.refreshing)) && (
+            <p
+              role="status"
+              className="px-4 py-2 text-sm text-muted-foreground"
+              data-repository-cache-status
+            >
+              {cacheStatus.cached
+                ? "Showing cached items · Refreshing from repository relays…"
+                : "Loading cached repository items…"}
+            </p>
+          )}
 
         {repo && announcementsSettled && (
           <RepositoryLifecycleNotice repo={repo} />

@@ -181,3 +181,67 @@ it("enriches cached repository roots only for the supplemental owner's lifetime"
   );
   eventStore.remove(root.id);
 });
+
+it("restores cached statuses before roots and seeds the first essentials request", async () => {
+  const key = generateSecretKey();
+  const coord = `30617:${getPublicKey(key)}:cache-first`;
+  const root = finalizeEvent(
+    {
+      kind: 1618,
+      created_at: 1_700_000_000,
+      content: "Cached PR",
+      tags: [["a", coord]],
+    },
+    key,
+  );
+  const status = finalizeEvent(
+    {
+      kind: 1631,
+      created_at: root.created_at + 1,
+      content: "",
+      tags: [["e", root.id]],
+    },
+    key,
+  );
+  let releaseRoots!: (events: (typeof root)[]) => void;
+  const roots = new Promise<(typeof root)[]>((resolve) => {
+    releaseRoots = resolve;
+  });
+  const cache = vi
+    .spyOn(window.nostrdb, "filters")
+    .mockImplementationOnce(() => roots)
+    .mockResolvedValueOnce([status])
+    .mockResolvedValueOnce([]);
+  const restored = vi.fn();
+  const insertions: string[] = [];
+  const observer = eventStore.insert$.subscribe((event) => {
+    if (event.id === root.id || event.id === status.id)
+      insertions.push(event.id);
+  });
+  try {
+    loaderSub = nip34RepoLoader(
+      of({ coords: [coord], cacheRelays: [RELAY_URL] }),
+      new RelayGroup([pool.relay(RELAY_URL)]),
+      false,
+      restored,
+    ).subscribe();
+    await vi.waitFor(() => expect(cache).toHaveBeenCalled());
+    expect(requests(server)).toHaveLength(0);
+    releaseRoots([root]);
+    await vi.waitFor(() =>
+      expect(restored).toHaveBeenCalledWith([status, root]),
+    );
+    expect(insertions).toEqual([status.id, root.id]);
+    await vi.waitFor(() =>
+      expect(
+        requests(server).some((req) =>
+          req
+            .slice(2)
+            .some((filter) => (filter as Filter)["#e"]?.includes(root.id)),
+        ),
+      ).toBe(true),
+    );
+  } finally {
+    observer.unsubscribe();
+  }
+});

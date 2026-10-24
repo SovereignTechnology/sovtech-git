@@ -136,6 +136,17 @@ await build({
       name: "direct-entry-experiment",
       enforce: "pre",
       transform(code, id) {
+        if (id.endsWith("/src/lib/repositoryCache.ts")) {
+          return replaceOnce(
+            code,
+            "const result = await read(filters);",
+            `
+      const started = performance.now();
+      const result = await read(filters);
+      const bench = (globalThis as unknown as { __detailBench?: { cacheReads?: unknown[] } }).__detailBench;
+      bench?.cacheReads?.push({ at: started, ms: performance.now() - started, count: result.length, filters });`,
+          );
+        }
         for (const [file, type, kind] of [
           ["useIssues", "ResolvedIssueLite", "issues"],
           ["usePRs", "ResolvedPRLite", "prs"],

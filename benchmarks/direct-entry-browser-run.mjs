@@ -266,6 +266,7 @@ async function run(control) {
         eventFrames: 0,
         eventBytes: 0,
         requests: [],
+        cacheReads: [],
         gate: false,
         transitions: { repository: [], detail: [], list: [] },
       });
@@ -303,7 +304,7 @@ async function run(control) {
       };
       requestAnimationFrame(frame);
       const scan = () => {
-        if (config.journey) {
+        if (config.journey || config.cacheReload || config.entrySuffix) {
           const list = document.querySelector("[data-bench-list]");
           b.record(
             "list",
@@ -335,6 +336,13 @@ async function run(control) {
                 }
               : null,
           );
+          if (list?.querySelector("[data-bench-id]")) mark("firstListItems");
+          if (
+            document
+              .querySelector("[data-repository-cache-status]")
+              ?.textContent?.includes("Showing cached")
+          )
+            mark("cachedRepository");
           const detail = b.transitions.detail.at(-1)?.value;
           if (
             detail &&
@@ -461,6 +469,22 @@ async function run(control) {
         cached.map((event) => event.id),
         { timeout: 30000 },
       );
+      // Seeded roots must also be discoverable by a filter query.
+      // Exact-ID durability alone does not validate the kind-index inventory.
+      const rootIds = cached
+        .filter((event) => [1617, 1618, 1621].includes(event.kind))
+        .map((event) => event.id);
+      await page.waitForFunction(
+        async (ids) => {
+          const roots = await window.nostrdb.filters([
+            { kinds: [1617, 1618, 1621] },
+          ]);
+          const found = new Set(roots.map((event) => event.id));
+          return ids.every((id) => found.has(id));
+        },
+        rootIds,
+        { timeout: 30000 },
+      );
       requests.length = 0;
       deliveries.length = 0;
       negotiationCount = negotiationBytes = 0;
@@ -521,6 +545,7 @@ async function run(control) {
         frameMax: Math.max(...b.frames.map((x) => x.ms)),
         framesOver50: b.frames.filter((x) => x.ms > 50).length,
         requests: b.requests,
+        cacheReads: b.cacheReads,
         eventFrames: b.eventFrames,
         eventBytes: b.eventBytes,
         unique: b.events.size,
