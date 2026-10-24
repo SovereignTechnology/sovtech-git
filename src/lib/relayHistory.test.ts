@@ -36,3 +36,17 @@ it("uses a bounded live cursor only when a separate public history owner has inv
   expect(load).not.toHaveBeenCalled();
   pool.close();
 });
+
+it("keeps focused full-thread snapshots immediate even with cached history", () => {
+  const pool = new RelayPool();
+  configureRelayHistory(pool, {
+    enabled: () => true,
+    hasInventory: () => true,
+    load: () => EMPTY,
+  });
+  for (const tag of ["#e", "#E", "#q"]) {
+    const filter = { [tag]: ["root"] };
+    expect(historyLiveFilter(pool, "wss://public.test", filter)).toBe(filter);
+  }
+  pool.close();
+});

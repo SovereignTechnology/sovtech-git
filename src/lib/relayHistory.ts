@@ -37,6 +37,14 @@ export function historyLiveFilter(
 ): Filter {
   const policy = policies.get(pool);
   if (
+    // A focused, unrestricted thread query carries comments, updates and
+    // essentials needed for first paint. Keep its immediate relay snapshot;
+    // broader kind-scoped lists still avoid replaying cached event bodies.
+    (!filter.kinds &&
+      ["#e", "#E", "#q"].some(
+        (tag) =>
+          (filter[tag as keyof Filter] as string[] | undefined)?.length === 1,
+      )) ||
     !policy?.enabled(relay) ||
     filter.since !== undefined ||
     filter.until !== undefined ||
