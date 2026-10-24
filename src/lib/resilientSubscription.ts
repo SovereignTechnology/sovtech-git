@@ -34,7 +34,7 @@
  * and callers use onlyEvents() to strip EOSE if not needed.
  */
 
-import type { RelayPool } from "applesauce-relay";
+import type { RelayPool, Relay } from "applesauce-relay";
 import {
   onlyEvents,
   AuthRequiredError,
@@ -69,9 +69,11 @@ import {
   tap,
   timer,
   catchError,
+  timeout,
 } from "rxjs";
 import { makeSettleSignal, DEFAULT_SETTLE_TIME } from "./settleSignal";
 import type { SettleSignal, SettleSignalOptions } from "./settleSignal";
+import { relayEventPresence } from "./relayEventPresence";
 import { foregroundResume$ } from "./foregroundResume";
 
 /**
@@ -713,6 +715,7 @@ function processRelay(
       .pipe(
         tap((msg) => {
           if (msg !== "EOSE") {
+            relayEventPresence.observe(msg.id, relay);
             const t = (msg as NostrEvent).created_at;
             if (lastReceivedAt === undefined || t > lastReceivedAt)
               lastReceivedAt = t;
@@ -1980,6 +1983,41 @@ export function resilientHistoryRequest(
   filters: Filter[],
   options: { foreground?: boolean } = {},
 ): Observable<NostrEvent> {
+  return admittedHistoryOperation(
+    pool,
+    relay,
+    (connection) =>
+      connection.request(filters, {
+        reconnect: false,
+        timeout: 120_000,
+        authTimeout: 30_000,
+        authRetries: 1,
+      }),
+    options,
+  ).pipe(tap((event) => relayEventPresence.observe(event.id, relay)));
+}
+
+/** Receive-only negotiation. ID transfers must use resilientHistoryRequest.
+ * The caller serializes negotiations and disables them after a relay refusal;
+ * the dependency owns internal NEG-MSG rounds, not our request scheduler.
+ */
+export function resilientNegentropy(
+  pool: RelayPool,
+  relay: string,
+  inventory: NostrEvent[],
+  filter: Filter,
+) {
+  return admittedHistoryOperation(pool, relay, (connection) =>
+    connection.negentropy(inventory, filter).pipe(timeout({ each: 30_000 })),
+  ).pipe(timeout({ first: 160_000 }));
+}
+
+function admittedHistoryOperation<T>(
+  pool: RelayPool,
+  relay: string,
+  operation: (relay: Relay) => Observable<T>,
+  options: { foreground?: boolean } = {},
+): Observable<T> {
   return defer(() => {
     let admissions = historyAdmissions.get(pool);
     if (!admissions) historyAdmissions.set(pool, (admissions = new Map()));
@@ -2013,7 +2051,7 @@ export function resilientHistoryRequest(
             );
           const relayObject = pool.relay(relay);
           state.active++;
-          return new Observable<NostrEvent>((subscriber) => {
+          return new Observable<T>((subscriber) => {
             // Ignore a stale transport error: opening this request must be allowed
             // to restart the socket. New failures still terminate this attempt.
             const errors = relayObject.error$
@@ -2023,14 +2061,7 @@ export function resilientHistoryRequest(
               });
             subscriber.add(errors);
             if (subscriber.closed) return;
-            const request = relayObject
-              .request(filters, {
-                reconnect: false,
-                timeout: 120_000,
-                authTimeout: 30_000,
-                authRetries: 1,
-              })
-              .subscribe(subscriber);
+            const request = operation(relayObject).subscribe(subscriber);
             return () => {
               request.unsubscribe();
               errors.unsubscribe();
@@ -2120,7 +2151,8 @@ export function resilientSingleRelayRequest(
     if (remaining > 0) return timer(remaining).pipe(switchMap(() => req$));
     return req$;
   }).pipe(
-    tap(() => {
+    tap((event) => {
+      relayEventPresence.observe(event.id, relay);
       // Any event received means the request is succeeding — reset backoff
       // so the next retry (if any) starts from 1s again.
       everSucceeded = true;

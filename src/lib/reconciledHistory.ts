@@ -1,0 +1,259 @@
+import type { IEventStore } from "applesauce-core";
+import { compileFilter, type Filter } from "applesauce-core/helpers";
+import type { RelayPool, NegentropyRound } from "applesauce-relay";
+import type { TimelessFilter } from "applesauce-loaders";
+import type { NostrEvent } from "nostr-tools";
+import {
+  Observable,
+  Subscription,
+  defer,
+  from,
+  concatMap,
+  filter as rxFilter,
+  catchError,
+  retry,
+  timer,
+  throwError,
+  tap,
+  toArray,
+  concatWith,
+  EMPTY,
+} from "rxjs";
+import { historyWindow, type HistoryWindowOptions } from "./historyWindow";
+import {
+  HistoryAdmissionError,
+  resilientHistoryRequest,
+  resilientNegentropy,
+} from "./resilientSubscription";
+import { RelayEventPresence, relayEventPresence } from "./relayEventPresence";
+import { normalizeUrl } from "./url";
+
+export interface HistoryTransport {
+  negotiate: (
+    relay: string,
+    inventory: NostrEvent[],
+    filter: Filter,
+  ) => Observable<NegentropyRound>;
+  request: (relay: string, filters: Filter[]) => Observable<NostrEvent>;
+}
+
+/** Receive-only reconciliation with the existing coverage loader as fallback.
+ * A pool-scoped instance serializes negotiations per relay. Transfer pages and
+ * negotiations use the same admission/cooldown budget as ordinary history.
+ */
+export function createReconciledHistory(
+  pool: RelayPool,
+  store: IEventStore,
+  presence: RelayEventPresence = relayEventPresence,
+  transport: HistoryTransport = {
+    negotiate: (relay, inventory, filter) =>
+      resilientNegentropy(pool, relay, inventory, filter),
+    request: (relay, filters) => resilientHistoryRequest(pool, relay, filters),
+  },
+) {
+  const disabled = new Set<string>();
+  const queues = new Map<
+    string,
+    { active: boolean; pending: (() => void)[] }
+  >();
+  function serialize<T>(
+    relay: string,
+    source: () => Observable<T>,
+  ): Observable<T> {
+    return new Observable((subscriber) => {
+      let queue = queues.get(relay);
+      if (!queue) queues.set(relay, (queue = { active: false, pending: [] }));
+      const state = queue;
+      let started = false;
+      const owner = new Subscription();
+      const start = () => {
+        if (subscriber.closed) return;
+        started = state.active = true;
+        owner.add(defer(source).subscribe(subscriber));
+      };
+      subscriber.add(() => {
+        owner.unsubscribe();
+        if (started) {
+          state.active = false;
+          const next = state.pending.shift();
+          if (next) next();
+          else queues.delete(relay);
+        } else {
+          state.pending = state.pending.filter((item) => item !== start);
+        }
+      });
+      if (state.active) state.pending.push(start);
+      else start();
+    });
+  }
+  const admissionRetry = <T>(source: Observable<T>) =>
+    source.pipe(
+      retry({
+        delay: (error: unknown) =>
+          error instanceof HistoryAdmissionError
+            ? timer(Math.max(1, error.retryAt - Date.now()))
+            : throwError(() => error),
+      }),
+    );
+
+  return (
+    relay: string,
+    filters: TimelessFilter[],
+    options: HistoryWindowOptions,
+  ): Observable<NostrEvent> =>
+    defer(() => {
+      relay = normalizeUrl(relay);
+      const window = {
+        since: 0,
+        until: Math.min(
+          options.until ?? Math.floor(Date.now() / 1000),
+          Math.floor(Date.now() / 1000),
+        ),
+      };
+      let covered = true;
+      return from(filters).pipe(
+        concatMap((filter) =>
+          defer(() => {
+            const query = { ...filter, ...window };
+            const matches = compileFilter(query);
+            const inventory = [...store.getByFilters(query)];
+            const local = new Set(inventory.map((event) => event.id));
+            const started = presence.begin();
+            const missing = new Set<string>();
+            const received = new Set<string>();
+            const status = (
+              state: "loading" | "covered" | "incomplete",
+              error?: unknown,
+            ) =>
+              options.onStatus?.({
+                source: relay,
+                filter,
+                window,
+                buffer: window,
+                state,
+                ...(error ? { reason: "request" as const, error } : {}),
+              });
+            const observe = (event: NostrEvent) => {
+              received.add(event.id);
+              missing.delete(event.id);
+              presence.observe(event.id, relay);
+            };
+            const fallback = () =>
+              historyWindow(
+                (_relays, clauses) =>
+                  transport
+                    .request(relay, clauses)
+                    .pipe(rxFilter(matches), tap(observe)),
+                relay,
+                [filter],
+                {
+                  ...options,
+                  until: window.until,
+                  onStatus: (value) => {
+                    if (value.state !== "covered") options.onStatus?.(value);
+                  },
+                  onComplete: (complete) => {
+                    const success = complete && missing.size === 0;
+                    covered &&= success;
+                    if (success)
+                      presence.reconcile(relay, [...local], received, started);
+                    status(
+                      success ? "covered" : "incomplete",
+                      success
+                        ? undefined
+                        : new Error(
+                            "History did not establish complete relay membership",
+                          ),
+                    );
+                  },
+                },
+              );
+            // Cold stores use regular coverage requests; set reconciliation saves
+            // transfer only when we already possess some of the matching bodies.
+            if (disabled.has(relay) || inventory.length === 0)
+              return fallback();
+            status("loading");
+            const have = new Set<string>();
+            const transfer = (): Observable<NostrEvent> =>
+              defer(() => {
+                if (missing.size === 0) return EMPTY;
+                const ids = [...missing].slice(0, options.limit);
+                const requested = new Set(ids);
+                let progress = false;
+                return admissionRetry(
+                  defer(() => transport.request(relay, [{ ids }])),
+                ).pipe(
+                  concatMap((event) => {
+                    if (!requested.has(event.id) || !matches(event))
+                      return EMPTY;
+                    progress = true;
+                    observe(event);
+                    return [event];
+                  }),
+                  concatWith(
+                    defer(() => {
+                      if (!progress)
+                        return throwError(
+                          () => new Error("Relay omitted negotiated event IDs"),
+                        );
+                      return transfer();
+                    }),
+                  ),
+                );
+              });
+            return serialize(relay, () =>
+              admissionRetry(
+                defer(() => transport.negotiate(relay, inventory, query)),
+              ),
+            ).pipe(
+              tap((round) => {
+                for (const id of round.have) {
+                  if (!local.has(id))
+                    throw new Error("Invalid local reconciliation ID");
+                  have.add(id);
+                }
+                for (const id of round.need) {
+                  if (!/^[0-9a-f]{64}$/.test(id) || local.has(id))
+                    throw new Error("Invalid remote reconciliation ID");
+                  missing.add(id);
+                }
+              }),
+              toArray(),
+              concatMap((rounds) => {
+                if (rounds.length === 0)
+                  throw new Error("Negotiation ended without a terminal round");
+                // Only terminal negotiation establishes the common set. Cached
+                // bodies in it become visible without downloading duplicate EVENTs.
+                presence.reconcile(
+                  relay,
+                  [...local],
+                  new Set([...local].filter((id) => !have.has(id))),
+                  started,
+                );
+                return transfer();
+              }),
+              concatWith(
+                defer(() => {
+                  status("covered");
+                  return EMPTY;
+                }),
+              ),
+              catchError(() => {
+                // A refusal disables further NEG work for this session, including
+                // internal rounds whose pacing belongs to the dependency. Cooldown
+                // remains in the shared ledger; fallback cannot bypass it.
+                disabled.add(relay);
+                return fallback();
+              }),
+            );
+          }),
+        ),
+        concatWith(
+          defer(() => {
+            options.onComplete?.(covered);
+            return EMPTY;
+          }),
+        ),
+      );
+    });
+}
