@@ -51,6 +51,15 @@ async function run(control) {
     )
   )
     throw new Error("Unknown query strategy");
+  if (
+    config.cacheReload &&
+    (config.journey || config.curation || config.fullSnapshotReference)
+  )
+    throw Error(
+      "Cache reload runs must not inject a warm EventStore or mix journey phases",
+    );
+  if (config.entrySuffix && !["/prs", "/issues"].includes(config.entrySuffix))
+    throw Error("Unsupported list entry route");
   const context = await control
     .context()
     .browser()
@@ -223,6 +232,8 @@ async function run(control) {
       for (const key of ["extraRelays", "lookupRelays", "gitIndexRelays"])
         localStorage.setItem(key, JSON.stringify(["wss://fixture.invalid"]));
       localStorage.setItem("relayCurationMode", '"repo"');
+      // Exercise the actual IndexedDB fallback, not a host's optional local relay.
+      if (config.cacheReload) window.nostrdbConfig = { localRelays: [] };
       const b = (window.__detailBench = {
         mode: config.mode,
         strategy: config.strategy,
@@ -421,9 +432,44 @@ async function run(control) {
   page.on("pageerror", (e) => errors.push(String(e)));
   let report;
   let journey;
+  let cacheSeedCount;
   try {
+    if (config.cacheReload) {
+      await page.goto("http://127.0.0.1:" + config.port + "/about", {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => !!window.nostrdb, undefined, {
+        timeout: 15000,
+      });
+      const kinds = new Set([
+        1617, 1618, 1621, 1619, 1630, 1631, 1632, 1633, 1985, 1624, 5,
+      ]);
+      const cached = fixture.events.filter((event) => kinds.has(event.kind));
+      cacheSeedCount = cached.length;
+      await page.evaluate(async (events) => {
+        for (const event of events) await window.nostrdb.add(event);
+      }, cached);
+      // Exact-event reads bypass the backend write queue. Wait for durable
+      // bodies before navigation creates a new document and empty EventStore.
+      await page.waitForFunction(
+        async (ids) => {
+          const events = await Promise.all(
+            ids.map((id) => window.nostrdb.event(id)),
+          );
+          return events.every(Boolean);
+        },
+        cached.map((event) => event.id),
+        { timeout: 30000 },
+      );
+      requests.length = 0;
+      deliveries.length = 0;
+      negotiationCount = negotiationBytes = 0;
+    }
     await page.goto(
-      "http://127.0.0.1:" + config.port + fixture.basePath + selected.suffix,
+      "http://127.0.0.1:" +
+        config.port +
+        fixture.basePath +
+        (config.entrySuffix ?? selected.suffix),
       { waitUntil: "domcontentloaded", timeout: 30000 },
     );
     if (config.journey)
@@ -490,6 +536,8 @@ async function run(control) {
         modelEmissions: b.modelEmissions,
       };
     });
+    if (config.cacheReload)
+      report.cacheReload = { seededEvents: cacheSeedCount };
     if (config.followUpMs) {
       await page.waitForFunction(
         (target) => performance.now() >= target,

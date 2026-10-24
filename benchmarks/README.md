@@ -505,6 +505,17 @@ caps and transport latency are controlled parameters, not measured properties
 of public relays. Git HTTP and other external HTTP responses are stubbed, so
 this measures the Nostr conversation path rather than git diff/merge readiness.
 
+For a real IndexedDB reload, set `"cacheReload": true` and optionally
+`"entrySuffix": "/prs"` (or `"/issues"`). The harness seeds captured roots,
+statuses, updates, labels and deletions through the app's cache backend, waits
+for exact-ID reads, then opens a fresh document with an empty EventStore. It
+uses the IndexedDB fallback rather than an optional host local relay. This mode
+cannot be combined with journey, curation or full-snapshot injection modes.
+Reports include the number of seeded events.
+Compare exact final repository membership and statuses as well as convergence,
+traffic and responsiveness: a lower transfer count with missing visible items
+is a regression. Delivery coverage describes network receipts, not cached bodies.
+
 ### Query strategies and user-facing outcomes
 
 Set `strategy` independently of `mode` (keep `mode: "baseline"` when isolating
