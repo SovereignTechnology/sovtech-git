@@ -3,7 +3,8 @@ import { firstValueFrom } from "rxjs";
 import type { NostrEvent } from "nostr-tools";
 import {
   loadRepositoryCache,
-  REPOSITORY_CACHE_DEADLINE_MS,
+  observeRepositoryCacheRestore,
+  REPOSITORY_CACHE_FALLBACK_MS,
 } from "./repositoryCache";
 
 const root: NostrEvent = {
@@ -53,22 +54,83 @@ it("does not emit partial roots after a dependency read fails", async () => {
     await firstValueFrom(loadRepositoryCache(["30617:owner:repo"], read)),
   ).toEqual([]);
 });
-it("bounds storage waiting and stops dependent reads after timeout", async () => {
+it("waits beyond three seconds for coherent cache data", async () => {
   vi.useFakeTimers();
-  let release: (events: NostrEvent[]) => void = () => {};
-  const pending = new Promise<NostrEvent[]>((resolve) => {
-    release = resolve;
-  });
-  const read = vi.fn().mockReturnValue(pending);
-  const result = firstValueFrom(
-    loadRepositoryCache(["30617:owner:repo"], read),
-  );
-  await vi.advanceTimersByTimeAsync(REPOSITORY_CACHE_DEADLINE_MS);
-  expect(await result).toEqual([]);
+  let release!: (events: NostrEvent[]) => void;
+  const read = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<NostrEvent[]>((resolve) => {
+          release = resolve;
+        }),
+    )
+    .mockResolvedValueOnce([]);
+  const next = vi.fn();
+  const sub = observeRepositoryCacheRestore(
+    ["30617:owner:repo"],
+    read,
+  ).subscribe(next);
+  await vi.advanceTimersByTimeAsync(3500);
+  expect(next).not.toHaveBeenCalled();
   release([root]);
-  await pending;
+  await vi.waitFor(() =>
+    expect(next).toHaveBeenCalledWith({ state: "ready", events: [root] }),
+  );
+  await vi.advanceTimersByTimeAsync(REPOSITORY_CACHE_FALLBACK_MS);
+  expect(next).toHaveBeenCalledTimes(1);
+  sub.unsubscribe();
+});
+
+it("releases stalled discovery without discarding the eventual cache result", async () => {
+  vi.useFakeTimers();
+  let release!: (events: NostrEvent[]) => void;
+  const read = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<NostrEvent[]>((resolve) => {
+          release = resolve;
+        }),
+    )
+    .mockResolvedValueOnce([]);
+  const next = vi.fn();
+  const sub = observeRepositoryCacheRestore(
+    ["30617:owner:repo"],
+    read,
+  ).subscribe(next);
+  await vi.advanceTimersByTimeAsync(REPOSITORY_CACHE_FALLBACK_MS);
+  expect(next).toHaveBeenCalledExactlyOnceWith({ state: "fallback" });
+  release([root]);
+  await vi.waitFor(() =>
+    expect(next).toHaveBeenLastCalledWith({ state: "ready", events: [root] }),
+  );
+  expect(read).toHaveBeenCalledTimes(2);
+  sub.unsubscribe();
+});
+
+it("cancels a stalled recovery when its repository owner leaves", async () => {
+  vi.useFakeTimers();
+  let release!: (events: NostrEvent[]) => void;
+  const read = vi.fn().mockImplementation(
+    () =>
+      new Promise<NostrEvent[]>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const next = vi.fn();
+  const sub = observeRepositoryCacheRestore(
+    ["30617:owner:repo"],
+    read,
+  ).subscribe(next);
+  await vi.advanceTimersByTimeAsync(REPOSITORY_CACHE_FALLBACK_MS);
+  sub.unsubscribe();
+  release([root]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(next).toHaveBeenCalledExactlyOnceWith({ state: "fallback" });
   expect(read).toHaveBeenCalledTimes(1);
 });
+
 it("does not publish late data after navigation cancels hydration", async () => {
   let release: (events: NostrEvent[]) => void = () => {};
   const pending = new Promise<NostrEvent[]>((resolve) => {
@@ -135,4 +197,24 @@ it("leaves network discovery available when announcement cache reads fail", asyn
       }),
     ),
   ).toEqual([]);
+});
+
+it("does not discard slow public announcement discovery", async () => {
+  vi.useFakeTimers();
+  const { loadPublicRepositoryAnnouncements } =
+    await import("./repositoryCache");
+  const announcement = { ...root, kind: 30617, tags: [["d", "slow-public"]] };
+  let release!: (events: NostrEvent[]) => void;
+  const result = firstValueFrom(
+    loadPublicRepositoryAnnouncements(
+      "slow-public",
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(3500);
+  release([announcement]);
+  expect(await result).toEqual([announcement]);
 });

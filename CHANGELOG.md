@@ -36,6 +36,8 @@
 
 ### Fixed
 
+- Preserve slow repository cache restores and load cached statuses before supplemental relay items, avoiding count churn when a warm cache takes more than three seconds to read.
+
 - Restore cached public repository announcements before relay discovery so warm issue/PR views can load without waiting for network privacy classification.
 
 - Recover older repository issues and PRs when relays cap the initial root query, including late maintainer coordinates and supplemental relays.

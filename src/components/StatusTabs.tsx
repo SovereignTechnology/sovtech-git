@@ -93,6 +93,8 @@ const prStatusOverrides: Partial<
 interface StatusTabsProps {
   /** Count of items per status */
   counts: Record<IssueStatus, number>;
+  /** Counts are unknown while the initial inventory is loading. */
+  pending?: boolean;
   /** Currently selected statuses */
   selected: IssueStatus[];
   /** Called when selection changes */
@@ -111,6 +113,7 @@ interface StatusTabsProps {
  */
 export function StatusTabs({
   counts,
+  pending = false,
   selected,
   onChange,
   variant = "issue",
@@ -137,6 +140,7 @@ export function StatusTabs({
       className={cn("flex items-center gap-1.5 flex-wrap", className)}
       role="group"
       aria-label="Filter by status"
+      aria-busy={pending || undefined}
     >
       {statuses.map((status) => {
         const config = {
@@ -181,9 +185,9 @@ export function StatusTabs({
                   : "bg-muted text-muted-foreground",
               )}
             >
-              {count}
+              {pending ? undefined : count}
             </span>
-            {secondaryCount > 0 && (
+            {!pending && secondaryCount > 0 && (
               <span
                 className="-ml-0.5 inline-flex items-center gap-0.5 text-xs font-normal tabular-nums text-muted-foreground"
                 title={`${secondaryCount} ${

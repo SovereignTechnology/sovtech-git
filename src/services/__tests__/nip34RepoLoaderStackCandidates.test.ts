@@ -14,7 +14,8 @@ import { Relay, RelayGroup } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import type { Subscription } from "rxjs";
-import { of } from "rxjs";
+import { of, Subject } from "rxjs";
+import * as repositoryCache from "@/lib/repositoryCache";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WS } from "vitest-websocket-mock";
 
@@ -257,6 +258,87 @@ it("restores cached statuses before roots and seeds the first essentials request
       },
       { timeout: 5000 },
     );
+  } finally {
+    observer.unsubscribe();
+  }
+});
+
+it("hydrates late cache recovery and seeds essentials after discovery has already started", async () => {
+  const key = generateSecretKey();
+  const coord = `30617:${getPublicKey(key)}:late-cache`;
+  const root = finalizeEvent(
+    {
+      kind: 1618,
+      created_at: 1_700_000_000,
+      content: "Late cached PR",
+      tags: [["a", coord]],
+    },
+    key,
+  );
+  const status = finalizeEvent(
+    {
+      kind: 1631,
+      created_at: root.created_at + 1,
+      content: "",
+      tags: [["e", root.id]],
+    },
+    key,
+  );
+  const recovery = new Subject<repositoryCache.RepositoryCacheRestore>();
+  vi.spyOn(repositoryCache, "observeRepositoryCacheRestore").mockReturnValue(
+    recovery,
+  );
+  const restored = vi.fn();
+  const loading = vi.fn();
+  const insertions: string[] = [];
+  const observer = eventStore.insert$.subscribe((event) => {
+    if (event.id === root.id || event.id === status.id)
+      insertions.push(event.id);
+  });
+  try {
+    loaderSub = nip34RepoLoader(
+      of({ coords: [coord], cacheRelays: [RELAY_URL] }),
+      new RelayGroup([pool.relay(RELAY_URL)]),
+      false,
+      restored,
+      loading,
+    ).subscribe();
+    recovery.next({ state: "fallback" });
+    await vi.waitFor(() => expect(requests(server).length).toBeGreaterThan(0));
+    expect(restored).toHaveBeenLastCalledWith([]);
+    recovery.next({ state: "ready", events: [status, root] });
+    expect(insertions).toEqual([status.id, root.id]);
+    await vi.waitFor(() =>
+      expect(
+        requests(server).some((req) =>
+          req
+            .slice(2)
+            .some((filter) => (filter as Filter)["#e"]?.includes(root.id)),
+        ),
+      ).toBe(true),
+    );
+    const answered = new Set<string>();
+    await vi.waitFor(
+      () => {
+        for (const req of requests(server)) {
+          if (!answered.has(req[1])) {
+            answered.add(req[1]);
+            server.send(["EOSE", req[1]]);
+          }
+        }
+        expect(
+          requests(server).some((req) =>
+            req
+              .slice(2)
+              .some((filter) => (filter as Filter)["#E"]?.includes(root.id)),
+          ),
+        ).toBe(true);
+        expect(loading).toHaveBeenLastCalledWith(false);
+      },
+      { timeout: 5000 },
+    );
+    loaderSub.unsubscribe();
+    expect(recovery.observed).toBe(false);
   } finally {
     observer.unsubscribe();
   }

@@ -1,6 +1,6 @@
 import { getReplaceableIdentifier, type Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
-import { catchError, defer, finalize, from, map, of, timeout } from "rxjs";
+import { catchError, defer, finalize, from, map, of, Observable } from "rxjs";
 import {
   ISSUE_KIND,
   PR_ROOT_KINDS,
@@ -14,11 +14,11 @@ import {
   isPrivateRepositoryEvent,
 } from "@/services/privateRepositoryScope";
 
-export const REPOSITORY_CACHE_DEADLINE_MS = 3000;
+export const REPOSITORY_CACHE_FALLBACK_MS = 30_000;
 const essentialKinds = [1630, 1631, 1632, 1633, 1985, 1624, 5];
 
 /** Publish one coherent cache read, never roots followed by missing statuses.
- * Cancellation/deadline discards the result; ordinary relay discovery recovers
+ * Cancellation discards the result; ordinary relay discovery recovers
  * evicted or unavailable data. Cache contents do not prove freshness/completeness.
  */
 export function loadRepositoryCache(
@@ -62,10 +62,36 @@ export function loadRepositoryCache(
         return [...new Map(events.map((event) => [event.id, event])).values()];
       })(),
     ).pipe(finalize(() => controller.abort()));
-  }).pipe(
-    timeout({ first: REPOSITORY_CACHE_DEADLINE_MS }),
-    catchError(() => of([] as NostrEvent[])),
-  );
+  }).pipe(catchError(() => of([] as NostrEvent[])));
+}
+
+export type RepositoryCacheRestore =
+  | { state: "ready"; events: NostrEvent[] }
+  | { state: "fallback" };
+
+/** Storage latency is not evidence that the cache is empty. A prolonged stall
+ * releases network discovery, but the coherent read stays alive until it
+ * succeeds, fails or its repository owner leaves.
+ */
+export function observeRepositoryCacheRestore(
+  coords: string[],
+  read: (filters: Filter[]) => Promise<NostrEvent[]>,
+) {
+  return new Observable<RepositoryCacheRestore>((subscriber) => {
+    const fallback = setTimeout(
+      () => subscriber.next({ state: "fallback" }),
+      REPOSITORY_CACHE_FALLBACK_MS,
+    );
+    const restore = loadRepositoryCache(coords, read).subscribe((events) => {
+      clearTimeout(fallback);
+      subscriber.next({ state: "ready", events });
+      subscriber.complete();
+    });
+    return () => {
+      clearTimeout(fallback);
+      restore.unsubscribe();
+    };
+  });
 }
 
 /** Restore public discovery inputs without claiming fresh relay coverage.
@@ -77,7 +103,6 @@ export function loadPublicRepositoryAnnouncements(
   read: (filters: Filter[]) => Promise<NostrEvent[]>,
 ) {
   return defer(() => read([{ kinds: [REPO_KIND], "#d": [identifier] }])).pipe(
-    timeout({ first: REPOSITORY_CACHE_DEADLINE_MS }),
     map((events) =>
       events.filter(
         (event) =>

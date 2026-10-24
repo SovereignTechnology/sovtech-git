@@ -339,6 +339,30 @@ function RepoLayoutSession({
   }, [curated, declaredRelaysKey, curationMode]);
   const repositoryStore = isPrivate ? canonicalEventStore : curated.store;
 
+  const relayHintsKey = relayHints.join(",");
+  const confirmedMaintainersKey = repo?.confirmedMaintainers.join(",") ?? "";
+  const queryOptions: RepoQueryOptions = useMemo(
+    () => ({
+      relayHints: isPrivate ? [] : relayHints,
+      useItemAuthorRelays: false,
+      maintainerPubkeys: repo?.confirmedMaintainers ?? [],
+      privateRepository: isPrivate,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [relayHintsKey, confirmedMaintainersKey, isPrivate],
+  );
+
+  const cacheStatus = useNip34RepoLoader(
+    presentationRepoCoordinates,
+    repoRelayGroup,
+    queryOptions.privateRepository,
+    repo?.roleHistory,
+    repo?.relays,
+  );
+  // Initial cache hydration (or the storage-stall fallback) precedes
+  // supplemental roots so known statuses cannot lose a race to faster outbox
+  // delivery. Readiness stays true across
+  // later coordinate growth; existing supplemental subscriptions keep running.
   // In outbox mode, also subscribe to the extra maintainer mailbox relays so
   // issues and PRs published only to those relays are discovered. Uses
   // nip34SupplementalRelayLoader which — unlike a plain subscription — also
@@ -365,6 +389,7 @@ function RepoLayoutSession({
   use$(() => {
     if (
       curationMode !== "outbox" ||
+      !cacheStatus?.ready ||
       isPrivate ||
       !extraRelaysForMaintainerMailboxCoverage ||
       !hasMemberCoords
@@ -376,42 +401,33 @@ function RepoLayoutSession({
     ).pipe(catchError(() => EMPTY));
   }, [
     curationMode,
+    cacheStatus?.ready,
     isPrivate,
     extraRelaysForMaintainerMailboxCoverage,
     hasMemberCoords,
     supplementalCoords$,
   ]);
 
-  const relayHintsKey = relayHints.join(",");
-  const confirmedMaintainersKey = repo?.confirmedMaintainers.join(",") ?? "";
-  const queryOptions: RepoQueryOptions = useMemo(
-    () => ({
-      relayHints: isPrivate ? [] : relayHints,
-      useItemAuthorRelays: false,
-      maintainerPubkeys: repo?.confirmedMaintainers ?? [],
-      privateRepository: isPrivate,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [relayHintsKey, confirmedMaintainersKey, isPrivate],
+  const initialCachePending = !isPrivate && !cacheStatus?.ready;
+  const modelCoordinates = initialCachePending
+    ? undefined
+    : presentationRepoCoordinates;
+  const loadedIssues = useIssues(
+    modelCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
+  );
+  const loadedPRs = usePRs(
+    modelCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
   );
 
-  const cacheStatus = useNip34RepoLoader(
-    presentationRepoCoordinates,
-    repoRelayGroup,
-    queryOptions.privateRepository,
-    repo?.roleHistory,
-    repo?.relays,
-  );
-  const issues = useIssues(
-    presentationRepoCoordinates,
-    repo?.roleHistory,
-    repositoryStore,
-  );
-  const prs = usePRs(
-    presentationRepoCoordinates,
-    repo?.roleHistory,
-    repositoryStore,
-  );
+  // A pending cache read is not an empty repository. Subscribe to list models
+  // only after hydration, so their buffered pre-hydration empty result cannot
+  // briefly replace the skeleton with a false zero before cached roots settle.
+  const issues = initialCachePending ? undefined : loadedIssues;
+  const prs = initialCachePending ? undefined : loadedPRs;
 
   const acceptedRepoCoordinates = useMemo(
     () => repo?.confirmedMemberCoordinates ?? [],

@@ -1,4 +1,4 @@
-import { loadRepositoryCache } from "@/lib/repositoryCache";
+import { observeRepositoryCacheRestore } from "@/lib/repositoryCache";
 import { relayEventPresence } from "@/lib/relayEventPresence";
 import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
@@ -1513,6 +1513,34 @@ export function nip34RepoLoader(
       )
       .subscribe();
 
+    function restoreCachedEvents(cached: NostrEvent[]): NostrEvent[] {
+      for (const event of cached) {
+        markFromCache(event);
+        eventStore.add(event);
+      }
+      const restored = cached.filter((event) => eventStore.hasEvent(event.id));
+      relayEventPresence.acceptCached(restored.map((event) => event.id));
+      return restored;
+    }
+
+    function seedCachedItems(coords: string[]): void {
+      if (privateRepository || !coords.length) return;
+      for (const event of eventStore.getByFilters({
+        kinds: [...REPO_ITEM_KINDS],
+        "#a": coords,
+      })) {
+        if (
+          isPrivateRepositoryEventId(event.id) ||
+          !isRepositoryRootItem(event, coordinateSet) ||
+          seenIds.has(event.id)
+        )
+          continue;
+        seenIds.add(event.id);
+        cacheWriter?.consider(event);
+        fireLoaders(event.id, [...knownRelayUrls]);
+      }
+    }
+
     // Subscribed after every consumer above so a synchronous first emission
     // (BehaviorSubject) reaches the live additive subscriptions. Growth is
     // content-keyed: only genuinely new coordinates or changed role-history
@@ -1527,8 +1555,35 @@ export function nip34RepoLoader(
             if (privateRepository || !coords.length)
               return of({ ...input, cached: [] as NostrEvent[] });
             onCacheRestore?.(undefined);
-            return loadRepositoryCache(coords, cacheRequest).pipe(
-              map((cached) => ({ ...input, cached })),
+            return new Observable<typeof input & { cached: NostrEvent[] }>(
+              (initial) => {
+                let forwarded = false;
+                const restore = observeRepositoryCacheRestore(
+                  coords,
+                  cacheRequest,
+                ).subscribe((result) => {
+                  if (!forwarded) {
+                    forwarded = true;
+                    initial.next({
+                      ...input,
+                      cached: result.state === "ready" ? result.events : [],
+                    });
+                    initial.complete();
+                  } else if (result.state === "ready") {
+                    // A stalled read may finish after network discovery starts.
+                    // Restore dependencies before roots and seed newly recovered
+                    // IDs without replaying old role-history/coordinate inputs.
+                    restoreCachedEvents(result.events);
+                    seedCachedItems(coords);
+                  }
+                });
+                // Keep late cache recovery owned by the repository, not the
+                // one-shot input emission that releases subsequent input updates.
+                subscriber.add(restore);
+                return () => {
+                  if (!forwarded) restore.unsubscribe();
+                };
+              },
             );
           }),
         ),
@@ -1536,14 +1591,7 @@ export function nip34RepoLoader(
       .subscribe({
         next: ({ coords, roleHistory, cacheRelays, cached }) => {
           cacheWriter?.setRelays(cacheRelays ?? []);
-          for (const event of cached) {
-            markFromCache(event);
-            eventStore.add(event);
-          }
-          const restored = cached.filter((event) =>
-            eventStore.hasEvent(event.id),
-          );
-          relayEventPresence.acceptCached(restored.map((event) => event.id));
+          const restored = restoreCachedEvents(cached);
           onCacheRestore?.(restored);
           const newCoords = [...new Set(coords)].filter(
             (coord) => !coordinateSet.has(coord),
@@ -1574,22 +1622,7 @@ export function nip34RepoLoader(
             itemAdditions.next(chunk);
             metaAdditions.next(repoMetaChunk(coord));
           }
-          if (!privateRepository && newCoords.length) {
-            for (const event of eventStore.getByFilters({
-              kinds: [...REPO_ITEM_KINDS],
-              "#a": newCoords,
-            })) {
-              if (
-                isPrivateRepositoryEventId(event.id) ||
-                !isRepositoryRootItem(event, coordinateSet) ||
-                seenIds.has(event.id)
-              )
-                continue;
-              seenIds.add(event.id);
-              cacheWriter?.consider(event);
-              fireLoaders(event.id, [...knownRelayUrls]);
-            }
-          }
+          seedCachedItems(newCoords);
           if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
           if (roleHistoryChanged) {
             lastRoleHistoryKey = roleHistoryKey;

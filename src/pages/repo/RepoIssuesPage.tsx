@@ -310,6 +310,7 @@ export default function RepoIssuesPage() {
         <div className="flex items-center bg-muted/40 px-3 py-1.5 overflow-x-auto">
           <StatusTabs
             counts={statusCounts}
+            pending={issues === undefined}
             secondaryCounts={unconfirmedStatusCounts}
             selected={statusFilter}
             onChange={(v) => setStatusFilter(v as IssueStatus[])}
