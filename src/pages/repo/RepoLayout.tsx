@@ -792,6 +792,19 @@ function RepoLayoutSession({
         {/* Repo header */}
         <div className="relative isolate border-b border-border/40">
           <div className="absolute inset-0 -z-10 bg-gradient-to-br from-pink-500/5 via-transparent to-pink-500/5" />
+          {!isPrivate && (cacheStatus?.loading || cacheStatus?.refreshing) && (
+            <span
+              role="status"
+              className="pointer-events-none absolute right-4 top-1 text-muted-foreground"
+              aria-label="Refreshing repository"
+              data-repository-cache-status
+            >
+              <Loader2
+                className="h-3 w-3 motion-safe:animate-spin"
+                aria-hidden="true"
+              />
+            </span>
+          )}
 
           <div className="container max-w-screen-xl px-4 md:px-8 pt-6 pb-0">
             {repo ? (
@@ -903,20 +916,6 @@ function RepoLayoutSession({
             />
           </div>
         </div>
-
-        {!isPrivate && (cacheStatus?.loading || cacheStatus?.refreshing) && (
-          <p
-            role="status"
-            className="container mx-auto flex justify-end px-4 py-1 text-muted-foreground"
-            aria-label="Refreshing repository"
-            data-repository-cache-status
-          >
-            <Loader2
-              className="h-4 w-4 motion-safe:animate-spin"
-              aria-hidden="true"
-            />
-          </p>
-        )}
 
         {repo && announcementsSettled && (
           <RepositoryLifecycleNotice repo={repo} />
