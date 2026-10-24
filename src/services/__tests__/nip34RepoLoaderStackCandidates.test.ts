@@ -213,6 +213,7 @@ it("restores cached statuses before roots and seeds the first essentials request
     .mockResolvedValueOnce([status])
     .mockResolvedValueOnce([]);
   const restored = vi.fn();
+  const loading = vi.fn();
   const insertions: string[] = [];
   const observer = eventStore.insert$.subscribe((event) => {
     if (event.id === root.id || event.id === status.id)
@@ -224,6 +225,7 @@ it("restores cached statuses before roots and seeds the first essentials request
       new RelayGroup([pool.relay(RELAY_URL)]),
       false,
       restored,
+      loading,
     ).subscribe();
     await vi.waitFor(() => expect(cache).toHaveBeenCalled());
     expect(requests(server)).toHaveLength(0);
@@ -240,6 +242,20 @@ it("restores cached statuses before roots and seeds the first essentials request
             .some((filter) => (filter as Filter)["#e"]?.includes(root.id)),
         ),
       ).toBe(true),
+    );
+    expect(loading).toHaveBeenCalledWith(true);
+    const answered = new Set<string>();
+    await vi.waitFor(
+      () => {
+        for (const req of requests(server)) {
+          if (!answered.has(req[1])) {
+            answered.add(req[1]);
+            server.send(["EOSE", req[1]]);
+          }
+        }
+        expect(loading).toHaveBeenLastCalledWith(false);
+      },
+      { timeout: 5000 },
     );
   } finally {
     observer.unsubscribe();

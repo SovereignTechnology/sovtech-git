@@ -50,6 +50,17 @@ export class RelayEventPresence {
     );
   }
 
+  /** Absence needs a completed result from every relay in the current scope. */
+  isAbsent(id: string, relays: readonly string[]): boolean {
+    return (
+      relays.length > 0 &&
+      relays.every(
+        (relay) =>
+          this.evidence.get(id)?.get(normalizeUrl(relay))?.present === false,
+      )
+    );
+  }
+
   hasAny(id: string): boolean {
     return [...(this.evidence.get(id)?.values() ?? [])].some(
       (source) => source.present,

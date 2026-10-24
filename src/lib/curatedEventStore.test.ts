@@ -169,3 +169,18 @@ it("paints cached roots and statuses without inventing receipts, until all relay
   await Promise.resolve();
   source.dispose();
 });
+
+it("does not mistake early outbox receipt for confirmed repository absence", () => {
+  const presence = new RelayEventPresence();
+  const id = event(50, 1621).id;
+  const relays = ["wss://a.test", "wss://b.test"];
+  presence.observe(id, "wss://outbox.test");
+  expect(presence.isAbsent(id, relays)).toBe(false);
+  presence.reconcile(relays[0], [id], new Set(), presence.begin());
+  expect(presence.isAbsent(id, relays)).toBe(false);
+  presence.reconcile(relays[1], [id], new Set(), presence.begin());
+  expect(presence.isAbsent(id, relays)).toBe(true);
+  presence.observe(id, relays[1]);
+  expect(presence.isAbsent(id, relays)).toBe(false);
+  expect(presence.isAbsent(id, [])).toBe(false);
+});

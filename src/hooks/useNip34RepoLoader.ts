@@ -1,4 +1,3 @@
-import { relayEventPresence } from "@/lib/relayEventPresence";
 import { useEffect, useMemo } from "react";
 import { use$ } from "./use$";
 import type { RelayGroup } from "applesauce-relay";
@@ -7,15 +6,7 @@ import {
   roleHistoryCacheKey,
   type RepositoryRoleHistory,
 } from "@/lib/nip34";
-import {
-  auditTime,
-  combineLatest,
-  distinctUntilChanged,
-  map,
-  startWith,
-  BehaviorSubject,
-  EMPTY,
-} from "rxjs";
+import { auditTime, distinctUntilChanged, BehaviorSubject, EMPTY } from "rxjs";
 import { catchError } from "rxjs/operators";
 import { nip34RepoLoader, type Nip34RepoLoaderInputs } from "@/services/nostr";
 
@@ -80,35 +71,20 @@ export function useNip34RepoLoader(
   // subscriptions are released when this owner unsubscribes; per-item work
   // continues to use the shared singleton loaders.
   const cacheState$ = useMemo(
-    () => new BehaviorSubject({ loading: false, ids: new Set<string>() }),
-    // A different repository owner must not inherit the previous cached IDs.
+    () => new BehaviorSubject({ loading: false, refreshing: false }),
+    // Loading state belongs to this repository owner.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [repoRelayGroup],
   );
   const cacheStatus = use$(
     () =>
-      combineLatest([
-        cacheState$,
-        relayEventPresence.changes$.pipe(startWith(new Set<string>())),
-      ]).pipe(
+      cacheState$.pipe(
         auditTime(100),
-        map(([state]) => ({
-          loading: state.loading,
-          cached: state.ids.size > 0,
-          refreshing: [...state.ids].some(
-            (id) =>
-              relayEventPresence.hasCached(id, cacheRelays) &&
-              !relayEventPresence.has(id, cacheRelays),
-          ),
-        })),
         distinctUntilChanged(
-          (a, b) =>
-            a.loading === b.loading &&
-            a.cached === b.cached &&
-            a.refreshing === b.refreshing,
+          (a, b) => a.loading === b.loading && a.refreshing === b.refreshing,
         ),
       ),
-    [cacheState$, cacheRelaysKey],
+    [cacheState$],
   );
   const hasCoords = !!coords && coords.length > 0;
   use$(() => {
@@ -120,15 +96,11 @@ export function useNip34RepoLoader(
       (events) => {
         const previous = cacheState$.value;
         cacheState$.next({
+          ...previous,
           loading: events === undefined,
-          ids: new Set([
-            ...previous.ids,
-            ...(events
-              ?.filter((event) => event.kind !== 5)
-              .map((event) => event.id) ?? []),
-          ]),
         });
       },
+      (refreshing) => cacheState$.next({ ...cacheState$.value, refreshing }),
     ).pipe(catchError(() => EMPTY));
   }, [hasCoords, repoRelayGroup, inputs$, privateRepository, cacheState$]);
   return cacheStatus;

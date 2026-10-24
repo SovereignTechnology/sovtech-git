@@ -1307,11 +1307,18 @@ export function nip34RepoLoader(
   relayGroup: RelayGroup,
   privateRepository = false,
   onCacheRestore?: (events: NostrEvent[] | undefined) => void,
+  onLoadingChange?: (loading: boolean) => void,
 ): Observable<NostrEvent> {
   return new Observable<NostrEvent>((subscriber) => {
     const cacheWriter = privateRepository
       ? undefined
       : createRepositoryCacheWriter();
+    const pending = new Set<string>();
+    const loading = (key: string, active: boolean) => {
+      if (active) pending.add(key);
+      else pending.delete(key);
+      onLoadingChange?.(pending.size > 0);
+    };
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
 
@@ -1333,10 +1340,12 @@ export function nip34RepoLoader(
 
     function fireLoaders(id: string, relays: string[]): void {
       // Release this owner's demand; shared consumers keep their subscriptions.
+      loading(`item:${id}`, true);
       subscriber.add(
         nip34ListLoader(id, relays).subscribe({
           next: (msg) => {
-            if (msg !== "EOSE") {
+            if (msg === "EOSE") loading(`item:${id}`, false);
+            else {
               cacheWriter?.consider(msg as NostrEvent);
               subscriber.next(msg as NostrEvent);
             }
@@ -1396,6 +1405,9 @@ export function nip34RepoLoader(
         // Start inventory reconciliation before seeded item batches fill the
         // shared history queue. Each coordinate is already an immutable chunk.
         deltaBufferSize: privateRepository ? undefined : 1,
+        onHistoryComplete: (_relay, key, covered) => {
+          if (covered) loading(`inventory:${key}`, false);
+        },
       },
     )
       .pipe(
@@ -1557,7 +1569,9 @@ export function nip34RepoLoader(
             }
           }
           for (const coord of newCoords) {
-            itemAdditions.next(repoItemChunk(coord));
+            const chunk = repoItemChunk(coord);
+            loading(`inventory:${chunk.key}`, true);
+            itemAdditions.next(chunk);
             metaAdditions.next(repoMetaChunk(coord));
           }
           if (!privateRepository && newCoords.length) {

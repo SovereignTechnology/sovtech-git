@@ -904,19 +904,19 @@ function RepoLayoutSession({
           </div>
         </div>
 
-        {!isPrivate &&
-          (cacheStatus?.loading ||
-            (cacheStatus?.cached && cacheStatus.refreshing)) && (
-            <p
-              role="status"
-              className="px-4 py-2 text-sm text-muted-foreground"
-              data-repository-cache-status
-            >
-              {cacheStatus.cached
-                ? "Showing cached items · Refreshing from repository relays…"
-                : "Loading cached repository items…"}
-            </p>
-          )}
+        {!isPrivate && (cacheStatus?.loading || cacheStatus?.refreshing) && (
+          <p
+            role="status"
+            className="container mx-auto flex justify-end px-4 py-1 text-muted-foreground"
+            aria-label="Refreshing repository"
+            data-repository-cache-status
+          >
+            <Loader2
+              className="h-4 w-4 motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+          </p>
+        )}
 
         {repo && announcementsSettled && (
           <RepositoryLifecycleNotice repo={repo} />

@@ -24,16 +24,18 @@ function badge(id: string) {
 }
 
 describe("repository source labels", () => {
-  it("distinguishes unknown provenance and reacts to confirmation and completed withdrawal", () => {
+  it("waits for completed repository absence instead of labelling early outbox receipt", () => {
     render(badge("source-label-transition"));
-    expect(screen.getByText("Unconfirmed")).toBeInTheDocument();
+    expect(screen.queryByText("Unconfirmed")).not.toBeInTheDocument();
+    act(() => relayEventPresence.acceptCached(["source-label-transition"]));
+    expect(screen.queryByText("Cached")).not.toBeInTheDocument();
     act(() =>
       relayEventPresence.observe(
         "source-label-transition",
         "wss://outbox.test",
       ),
     );
-    expect(screen.getByText("Outbox only")).toBeInTheDocument();
+    expect(screen.queryByText("Outbox only")).not.toBeInTheDocument();
     act(() =>
       relayEventPresence.observe("source-label-transition", "wss://repo.test"),
     );
