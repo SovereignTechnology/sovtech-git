@@ -174,6 +174,19 @@ describe("receive-only reconciled history", () => {
     three.unsubscribe();
   });
 
+  it("sends queued owners to fallback after an earlier negotiation is refused", async () => {
+    const rounds = new Subject<{ have: string[]; need: string[] }>();
+    const negotiate = vi.fn(() => rounds);
+    const request = vi.fn(() => EMPTY);
+    const { load } = setup([event(1)], { negotiate, request });
+    const one = collect(load(relay, [{ kinds: [1621] }], options()));
+    const two = collect(load(relay, [{ kinds: [1621] }], options()));
+    rounds.error(new Error("unsupported"));
+    await Promise.all([one, two]);
+    expect(negotiate).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it("shares rate-limit cooldown for NEG refusals", async () => {
     const pool = new RelayPool();
     pools.push(pool);

@@ -203,7 +203,13 @@ export function createReconciledHistory(
               });
             return serialize(relay, () =>
               admissionRetry(
-                defer(() => transport.negotiate(relay, inventory, query)),
+                defer(() => {
+                  if (disabled.has(relay))
+                    throw new Error(
+                      "Reconciliation disabled for this relay session",
+                    );
+                  return transport.negotiate(relay, inventory, query);
+                }),
               ),
             ).pipe(
               tap((round) => {
