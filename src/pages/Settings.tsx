@@ -92,14 +92,14 @@ const CURATION_OPTIONS: {
     icon: <Shield className="h-5 w-5" />,
     title: "Curated",
     description:
-      "Only events from relays declared in the repository announcement are shown. Maintainers control what appears — spam-resistant and predictable.",
+      "Show repository items and discussion confirmed on the repository’s declared relays, respecting their curation.",
   },
   {
     value: "outbox",
     icon: <Globe className="h-5 w-5" />,
-    title: "Uncensored",
+    title: "Expanded relays",
     description:
-      "Events are fetched from every maintainer's NIP-65 outbox and inbox relays in addition to the repo's declared relays. Nothing is filtered out by relay selection.",
+      "Include additional relays that may hold repository-related events. This can include spam or content deliberately excluded by repository curation; it does not search every relay.",
   },
 ];
 
@@ -112,7 +112,8 @@ function RelayCurationSection() {
         <CardTitle>Default Repository View</CardTitle>
         <CardDescription>
           Controls which relay sources supply repository items and discussion.
-          You can switch views on the repository page without reloading.
+          You can switch between Curated and Expanded relays on the repository
+          page without reloading.
         </CardDescription>
       </CardHeader>
       <CardContent>

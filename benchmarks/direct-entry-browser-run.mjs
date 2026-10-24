@@ -537,24 +537,42 @@ async function run(control) {
           { timeout: 15000 },
         );
       };
+      const selectView = async (name) => {
+        await page
+          .locator("[data-relay-measure]")
+          .waitFor({ state: "attached", timeout: 15000 });
+        await page
+          .getByRole("button", {
+            name: /^(Repository relay view|More repository options)$/,
+          })
+          .click();
+        const current = name === "Curated" ? "Expanded relays" : "Curated";
+        const selected = page.getByRole("menuitemradio", {
+          name: current,
+          exact: true,
+        });
+        await selected.waitFor();
+        if ((await selected.getAttribute("aria-checked")) !== "true")
+          throw Error("Repository view menu shows the wrong selected mode");
+        await page.getByRole("menuitemradio", { name, exact: true }).click();
+      };
       await assertTip(config.curation.curatedTip);
-      await page
-        .getByRole("button", { name: "Include outbox relays", exact: true })
-        .first()
-        .waitFor();
       if (await anchor.count())
         throw Error("Outbox-only comment leaked into curated view");
       const started = Date.now();
-      await page
-        .getByRole("button", { name: "Include outbox relays", exact: true })
-        .first()
-        .click();
+      await selectView("Expanded relays");
       await anchor.waitFor({ state: "visible", timeout: 20000 });
       await assertTip(config.curation.expandedTip);
+      await anchor.locator('[data-repository-source="outbox"]').waitFor();
       const expandedMs = Date.now() - started;
-      await page
-        .getByRole("button", { name: "Back to curated", exact: true })
-        .click();
+      if (config.curationSnapshot) {
+        await anchor.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: config.curationSnapshot,
+          fullPage: false,
+        });
+      }
+      await selectView("Curated");
       await anchor.waitFor({ state: "detached", timeout: 10000 });
       await assertTip(config.curation.curatedTip);
       if ((await page.evaluate(() => performance.timeOrigin)) !== epoch)
@@ -570,17 +588,17 @@ async function run(control) {
         );
         if (await row.count())
           throw Error("Outbox-only root leaked into curated list");
-        await page
-          .getByRole("button", { name: "Include outbox relays", exact: true })
-          .first()
-          .click();
+        await selectView("Expanded relays");
         await row.waitFor({ state: "visible", timeout: 20000 });
-        await page
-          .getByRole("button", { name: "Back to curated", exact: true })
-          .click();
+        await row.locator('[data-repository-source="outbox"]').waitFor();
+        await selectView("Curated");
         await row.waitFor({ state: "detached", timeout: 10000 });
       }
-      report.curation = { expandedMs, returnedWithoutReload: true };
+      report.curation = {
+        expandedMs,
+        expansionPath: "repository-menu",
+        returnedWithoutReload: true,
+      };
     }
     if (config.snapshot)
       await page.screenshot({ path: config.snapshot, fullPage: false });

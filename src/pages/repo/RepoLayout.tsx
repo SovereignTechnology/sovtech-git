@@ -55,18 +55,12 @@ import {
   Loader2,
   Code2,
   Info,
-  MoreHorizontal,
   Settings,
   Workflow,
   Package,
   UserPlus,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { RepositoryNavigation } from "@/components/RepositoryNavigation";
 import { RepoContext, type RepoContextValue } from "./RepoContext";
 import {
   getRepositoryPresentationCoordinates,
@@ -81,7 +75,6 @@ import { CuratedEventStore } from "@/lib/curatedEventStore";
 import { relayEventPresence } from "@/lib/relayEventPresence";
 import { eventStore as canonicalEventStore } from "@/services/nostr";
 import { EventStoreProvider } from "applesauce-react/providers";
-import { cn } from "@/lib/utils";
 import { StarButton } from "@/components/StarButton";
 import { FollowRepoButton } from "@/components/FollowRepoButton";
 import { RepoZapButton } from "@/components/RepoZapButton";
@@ -842,130 +835,71 @@ function RepoLayoutSession({
               </div>
             )}
 
-            {/* Tab navigation */}
-            <nav className="-mb-px flex w-full gap-0 sm:gap-1">
-              {/* Primary tabs — always visible */}
-              <TabLink
-                to={basePath}
-                active={isCodeTab}
-                icon={<Code2 className="h-4 w-4" />}
-                label="Code"
-              />
-              <TabLink
-                to={`${basePath}/issues`}
-                active={isIssuesTab}
-                icon={<CircleDot className="h-4 w-4" />}
-                label="Issues"
-                count={openIssueCount}
-              />
-              <TabLink
-                to={`${basePath}/prs`}
-                active={isPRsTab}
-                icon={<GitPullRequest className="h-4 w-4" />}
-                label="PRs"
-                count={openPRCount}
-              />
-
-              {/* Secondary tabs — visible on md+ screens */}
-              <div className="hidden md:flex gap-1">
-                {!isPrivate && (hasCI || isActionsTab) && (
-                  <TabLink
-                    to={`${basePath}/actions`}
-                    active={isActionsTab}
-                    icon={<Workflow className="h-4 w-4" />}
-                    label="Actions"
-                  />
-                )}
-                {showReleases && (
-                  <TabLink
-                    to={`${basePath}/releases`}
-                    active={isReleasesTab}
-                    icon={<Package className="h-4 w-4" />}
-                    label="Releases"
-                  />
-                )}
-                <TabLink
-                  to={`${basePath}/about`}
-                  active={isAboutTab}
-                  icon={<Info className="h-4 w-4" />}
-                  label="About"
-                />
-                {canOpenSettings && (
-                  <TabLink
-                    to={`${basePath}/settings`}
-                    active={isSettingsTab}
-                    icon={<Settings className="h-4 w-4" />}
-                    label="Settings"
-                  />
-                )}
-              </div>
-
-              {/* "More" dropdown — mobile only */}
-              <div className="flex shrink-0 items-end pb-px md:hidden">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className={cn(
-                        "inline-flex items-center gap-1.5 px-2 py-2.5 text-sm font-medium border-b-2 transition-colors sm:px-3",
-                        isAboutTab ||
-                          isSettingsTab ||
-                          isActionsTab ||
-                          isReleasesTab
-                          ? "border-pink-500 text-foreground"
-                          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-                      )}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                      <span className="sr-only">More</span>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {!isPrivate && (hasCI || isActionsTab) && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/actions`}
-                          className="flex items-center gap-2"
-                        >
-                          <Workflow className="h-4 w-4" />
-                          Actions
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    {showReleases && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/releases`}
-                          className="flex items-center gap-2"
-                        >
-                          <Package className="h-4 w-4" />
-                          Releases
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem asChild>
-                      <Link
-                        to={`${basePath}/about`}
-                        className="flex items-center gap-2"
-                      >
-                        <Info className="h-4 w-4" />
-                        About
-                      </Link>
-                    </DropdownMenuItem>
-                    {canOpenSettings && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/settings`}
-                          className="flex items-center gap-2"
-                        >
-                          <Settings className="h-4 w-4" />
-                          Settings
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </nav>
+            <RepositoryNavigation
+              tabs={[
+                {
+                  to: basePath,
+                  active: isCodeTab,
+                  icon: <Code2 className="h-4 w-4 shrink-0" />,
+                  label: "Code",
+                },
+                {
+                  to: `${basePath}/issues`,
+                  active: isIssuesTab,
+                  icon: <CircleDot className="h-4 w-4 shrink-0" />,
+                  label: "Issues",
+                  count: openIssueCount,
+                },
+                {
+                  to: `${basePath}/prs`,
+                  active: isPRsTab,
+                  icon: <GitPullRequest className="h-4 w-4 shrink-0" />,
+                  label: "PRs",
+                  count: openPRCount,
+                },
+                ...(!isPrivate && (hasCI || isActionsTab)
+                  ? [
+                      {
+                        to: `${basePath}/actions`,
+                        active: isActionsTab,
+                        icon: <Workflow className="h-4 w-4 shrink-0" />,
+                        label: "Actions",
+                      },
+                    ]
+                  : []),
+                ...(showReleases
+                  ? [
+                      {
+                        to: `${basePath}/releases`,
+                        active: isReleasesTab,
+                        icon: <Package className="h-4 w-4 shrink-0" />,
+                        label: "Releases",
+                      },
+                    ]
+                  : []),
+                {
+                  to: `${basePath}/about`,
+                  active: isAboutTab,
+                  icon: <Info className="h-4 w-4 shrink-0" />,
+                  label: "About",
+                },
+                ...(canOpenSettings
+                  ? [
+                      {
+                        to: `${basePath}/settings`,
+                        active: isSettingsTab,
+                        icon: <Settings className="h-4 w-4 shrink-0" />,
+                        label: "Settings",
+                      },
+                    ]
+                  : []),
+              ]}
+              relayView={
+                repo && !isPrivate && (isIssuesTab || isPRsTab)
+                  ? { mode: curationMode, onChange: setCurationMode }
+                  : undefined
+              }
+            />
           </div>
         </div>
 
@@ -1032,30 +966,6 @@ function RepoLayoutSession({
                   <Link to="/settings">Review Private Git services</Link>
                 </Button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {repo && !isPrivate && (isIssuesTab || isPRsTab) && (
-          <div className="container max-w-screen-xl px-4 pt-4 md:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-              <p className="text-sm text-muted-foreground">
-                {curationMode === "repo"
-                  ? "Curated: items and discussion confirmed on repository relays."
-                  : "Including content from outbox relays."}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                aria-pressed={curationMode === "outbox"}
-                onClick={() =>
-                  setCurationMode(curationMode === "repo" ? "outbox" : "repo")
-                }
-              >
-                {curationMode === "repo"
-                  ? "Include outbox relays"
-                  : "Back to curated"}
-              </Button>
             </div>
           </div>
         )}
@@ -1907,46 +1817,5 @@ function RepoBreadcrumb({
         {repoName}
       </Link>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tab link
-// ---------------------------------------------------------------------------
-
-function TabLink({
-  to,
-  active,
-  icon,
-  label,
-  count,
-}: {
-  to: string;
-  active: boolean;
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-}) {
-  return (
-    <Link
-      to={to}
-      className={cn(
-        "inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-1 py-2.5 text-sm font-medium border-b-2 transition-colors sm:flex-none sm:gap-2 sm:px-4",
-        active
-          ? "border-pink-500 text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-      )}
-    >
-      {icon}
-      {label}
-      {count !== undefined && count > 0 && (
-        <Badge
-          variant="secondary"
-          className="ml-0.5 h-5 min-w-[20px] shrink-0 px-1.5 text-[11px] font-medium sm:ml-1"
-        >
-          {count}
-        </Badge>
-      )}
-    </Link>
   );
 }
