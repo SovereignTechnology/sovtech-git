@@ -755,3 +755,22 @@ transport request count and pending count cover the whole run, including the
 follow-up. Diagnostic allocations add overhead, so leave these options off for
 ordinary performance comparisons. A later recovery establishes delay, not that
 the original user-facing latency was acceptable.
+
+### Repository cache storage comparison
+
+With the captured-data direct-entry fixture server running on port 4190 and an
+opened `browser-session` lease, run
+`node benchmarks/repository-cache-browser.mjs "$lease"`. This manual benchmark
+uses the installed nostr-idb backend in temporary databases: repository
+essentials alone versus the same events in a shared cache of roughly 10,000
+events, padded with synthetic unrelated collaboration events. It alternates
+five reads per database with fresh application index/body maps, both idle and
+with a competing 1,000-event write burst, and checks exact returned IDs against
+independently selected fixture essentials. Results overwrite ignored
+`perf-reports/cache/latest.json`; failures retain their browser log alongside it.
+
+This measures storage query cost, not full reload paint time, OS-cold disk
+reads, protected retention or migration correctness. Separate databases still
+share browser and CPU resources. Use repeated comparisons before making a
+storage architecture decision; do not interpret the synthetic filler as
+verified relay events or the write burst as representative of every workload.
