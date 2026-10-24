@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Reconcile public repository history with NIP-77 when matching events are cached, fetching missing IDs through shared rate-limit admission and retaining coverage-aware fallback for unsupported relays.
+
 - Share focused comment, PR-update and CI queries between repository lists and detail pages, preserving immediate loading on direct entry.
 
 - Share one repository item loader between issue and PR lists, avoiding duplicate root subscriptions while retaining additive maintainer and relay discovery.

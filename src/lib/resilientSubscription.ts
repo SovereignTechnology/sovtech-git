@@ -43,7 +43,7 @@ import {
 import type { Filter } from "applesauce-core/helpers";
 import { compileFilter, isFilterEqual } from "applesauce-core/helpers/filter";
 import { batchHistory, type HistoryBatchResult } from "./batchHistory";
-import { historyWindow } from "./historyWindow";
+import { loadRelayHistory, historyLiveFilter } from "./relayHistory";
 import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TimelessFilter } from "applesauce-loaders";
 import type { NostrEvent } from "nostr-tools";
@@ -503,7 +503,8 @@ function processRelay(
       if (!opts.manualPaginate$) {
         if (automaticHistoryStarted) return;
         automaticHistoryStarted = true;
-        paginateSub = historyWindow(
+        paginateSub = loadRelayHistory(
+          pool,
           (_relays, pageFilters) => {
             signal.extend(relay);
             return resilientHistoryRequest(pool, relay, pageFilters);
@@ -1631,6 +1632,7 @@ export function resilientAdditiveSubscription(
       deltas: Subscription;
       history: Subscription;
       historyKeys: Set<string>;
+      liveFilters: Map<Filter, Filter>;
     }
     const relayStates = new Map<string, RelayStreams>();
     const root = new Subscription();
@@ -1696,7 +1698,8 @@ export function resilientAdditiveSubscription(
         // A short initial response cannot prove exhaustion under a relay cap.
         state.history.add(
           subscribeStream(
-            historyWindow(
+            loadRelayHistory(
+              pool,
               (_relays, filters) =>
                 resilientHistoryRequest(pool, relay, filters),
               relay,
@@ -1720,12 +1723,27 @@ export function resilientAdditiveSubscription(
       state.deltas = new Subscription();
     };
 
+    const liveFilters = (
+      relay: string,
+      state: RelayStreams,
+      filters: Filter[],
+    ) =>
+      filters.map((filter) => {
+        if (!opts.history) return filter;
+        let live = state.liveFilters.get(filter);
+        if (!live) {
+          live = historyLiveFilter(pool, relay, filter);
+          state.liveFilters.set(filter, live);
+        }
+        return live;
+      });
+
     const openMain = (relay: string, state: RelayStreams) => {
       state.main = subscribeStream(
         processRelay(
           pool,
           relay,
-          allFilters,
+          () => liveFilters(relay, state, allFilters()),
           // The reconnect REQ re-reads allFilters, so any delta REQs opened
           // since the last cycle are consolidated into it.
           {
@@ -1749,6 +1767,7 @@ export function resilientAdditiveSubscription(
         deltas: new Subscription(),
         history: new Subscription(),
         historyKeys: new Set(),
+        liveFilters: new Map(),
       };
       relayStates.set(relay, state);
       if (chunks.size > 0) {
@@ -1797,7 +1816,7 @@ export function resilientAdditiveSubscription(
             processRelay(
               pool,
               relay,
-              deltaFilters,
+              liveFilters(relay, state, deltaFilters),
               {
                 ...deltaStreamOpts,
                 onRelayEose: () => startHistory(relay, state),

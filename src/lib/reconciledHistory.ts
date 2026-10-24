@@ -43,7 +43,7 @@ export interface HistoryTransport {
  */
 export function createReconciledHistory(
   pool: RelayPool,
-  store: IEventStore,
+  store: Pick<IEventStore, "getByFilters">,
   presence: RelayEventPresence = relayEventPresence,
   transport: HistoryTransport = {
     negotiate: (relay, inventory, filter) =>
@@ -230,7 +230,10 @@ export function createReconciledHistory(
                   new Set([...local].filter((id) => !have.has(id))),
                   started,
                 );
-                return transfer();
+                const common = inventory.filter((event) => !have.has(event.id));
+                // Confirmed cached roots still drive their dependent loaders.
+                // Emission here is not a new network receipt.
+                return from(common).pipe(concatWith(transfer()));
               }),
               concatWith(
                 defer(() => {

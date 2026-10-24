@@ -11,7 +11,11 @@ import { mergeRelaySets } from "applesauce-core/helpers/relays";
 import type { Filter } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
 import { batchHistory } from "./batchHistory";
-import { historyWindow } from "./historyWindow";
+import {
+  loadRelayHistory,
+  historyLiveFilter,
+  hasRelayHistory,
+} from "./relayHistory";
 import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TagValuePointer } from "applesauce-loaders/loaders";
 import type { CacheRequest, TimelessFilter } from "applesauce-loaders";
@@ -157,12 +161,15 @@ function processRelayStream(
   onHistoryStatus: ((status: TimelineStatus) => void) | undefined,
 ): Observable<NostrEvent> {
   // No limit on the live filter — we want all future events.
-  const liveFilter: Filter = { ...relayFilter };
+  const reconciled = !manualPaginate$ && hasRelayHistory(pool, relay);
+  const liveFilter: Filter = {
+    ...(reconciled ? historyLiveFilter(pool, relay, relayFilter) : relayFilter),
+  };
   delete liveFilter.limit;
 
   // If already exhausted, just open the live subscription — signal settled
   // immediately since there is no history work to do.
-  if (exhausted.has(key)) {
+  if (exhausted.has(key) && !reconciled) {
     signal.settle(relay);
     return resilientSubscription(pool, [relay], [liveFilter], {
       paginate: false,
@@ -185,7 +192,7 @@ function processRelayStream(
         // This path starts only after a real EOSE for the untimed live filter.
         // Zero events proves an empty snapshot; a non-empty short response may
         // still be capped by the relay and must go through history coverage.
-        if (oldestSeen === undefined) {
+        if (oldestSeen === undefined && !reconciled) {
           const window = { since: 0, until: Math.floor(Date.now() / 1000) };
           historyDone = true;
           exhausted.add(key);
@@ -199,7 +206,8 @@ function processRelayStream(
           });
           return;
         }
-        paginateSub = historyWindow(
+        paginateSub = loadRelayHistory(
+          pool,
           (_relays, filters) => {
             signal.extend(relay);
             return resilientHistoryRequest(pool, relay, filters);
@@ -208,7 +216,7 @@ function processRelayStream(
           [paginationFilter],
           {
             limit,
-            until: oldestSeen,
+            until: reconciled ? undefined : oldestSeen,
             isTerminalError: isHistoryTerminalError,
             onStatus: (status) => {
               onHistoryStatus?.(status);

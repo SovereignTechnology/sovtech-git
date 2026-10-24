@@ -87,6 +87,8 @@ import {
   type RelayGroupResolver,
   unwrapRelayGroupId,
 } from "./outbox";
+import { configureRelayHistory } from "@/lib/relayHistory";
+import { createReconciledHistory } from "@/lib/reconciledHistory";
 import { normalizeUrl } from "@/lib/url";
 import { isPersonalSingletonKind } from "@/lib/personalSingletons";
 import { relayGroupUrls$ } from "@/models/RepositoryRelayGroup";
@@ -99,6 +101,7 @@ import {
   getPrivateRepositoryRelays,
   getPrivateRelayTrustSession,
   isPrivateRepositoryCoordinate,
+  isPrivateRepositoryEventId,
   isTrustedPrivateRepositoryRelay,
   markPrivateRelayEvent,
 } from "@/services/privateRepositoryScope";
@@ -156,6 +159,20 @@ setHintEventStore(eventStore);
  * Use this to query events and publish to relays.
  */
 export const pool = new RelayPool();
+
+// Never disclose private cached IDs to public relays during reconciliation.
+// Private authenticated transports keep the established request path.
+const publicHistoryStore = {
+  getByFilters: (filters: Filter | Filter[]) =>
+    eventStore
+      .getByFilters(filters)
+      .filter((event) => !isPrivateRepositoryEventId(event.id)),
+};
+configureRelayHistory(pool, {
+  enabled: (relay) => !isTrustedPrivateRepositoryRelay(relay),
+  hasInventory: (filter) => publicHistoryStore.getByFilters(filter).length > 0,
+  load: createReconciledHistory(pool, publicHistoryStore),
+});
 
 /**
  * Global relay liveness tracker.

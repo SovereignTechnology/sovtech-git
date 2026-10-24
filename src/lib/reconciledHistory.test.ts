@@ -79,7 +79,7 @@ describe("receive-only reconciled history", () => {
     });
     presence.observe(b.id, relay);
     const opts = options();
-    expect(await collect(load(relay, [{ kinds: [1621] }], opts))).toEqual([]);
+    expect(await collect(load(relay, [{ kinds: [1621] }], opts))).toEqual([a]);
     expect(presence.has(a.id, [relay + "/"])).toBe(true);
     expect(presence.has(b.id, [relay])).toBe(false);
     expect(request).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("receive-only reconciled history", () => {
     const opts = options();
     expect(
       (await collect(load(relay, [{ kinds: [1621] }], opts))).map((e) => e.id),
-    ).toEqual(events.slice(1).map((e) => e.id));
+    ).toEqual(events.map((e) => e.id));
     expect(request).toHaveBeenCalledTimes(3);
     expect(
       request.mock.calls.every(
