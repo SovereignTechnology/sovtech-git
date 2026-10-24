@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import React, {
@@ -1433,6 +1434,7 @@ export default function PRPage() {
                     <code className="font-mono text-xs text-muted-foreground/80">
                       #{pr.rootEvent.id.slice(0, 8)}
                     </code>
+                    <RepositorySourceBadge eventId={pr.rootEvent.id} />
                     <EventShareButton
                       event={pr.rootEvent}
                       label="Copy link"

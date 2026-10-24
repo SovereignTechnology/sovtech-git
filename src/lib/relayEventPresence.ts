@@ -24,6 +24,12 @@ export class RelayEventPresence {
     );
   }
 
+  hasAny(id: string): boolean {
+    return [...(this.evidence.get(id)?.values() ?? [])].some(
+      (source) => source.present,
+    );
+  }
+
   observe(id: string, relay: string): void {
     const changed = this.write(id, normalizeUrl(relay), true);
     if (changed) this.changes$.next(new Set([id]));

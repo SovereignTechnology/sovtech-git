@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import {
   useComposerDraft,
   useHasComposerDraft,
@@ -384,6 +385,7 @@ function ResolvedFooter({
             </span>
           )}
           <span className="text-muted-foreground/50 shrink-0">{timeAgo}</span>
+          <RepositorySourceBadge eventId={resolveEvent.id} />
         </div>
 
         {/* Delete — only for own events */}

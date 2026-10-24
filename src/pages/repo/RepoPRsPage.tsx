@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
 import { compareRepoItems } from "@/lib/repoListSort";
@@ -551,6 +552,7 @@ function PRRow({
             >
               {pr.currentSubject}
             </Link>
+            <RepositorySourceBadge eventId={pr.id} />
             {ci?.status && (
               <CIStatusTrustIcon
                 status={ci.status}

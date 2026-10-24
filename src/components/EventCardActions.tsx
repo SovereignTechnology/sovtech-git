@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRecoveryToast } from "@/hooks/useRecoveryToast";
 import { useState, useCallback } from "react";
 import type { NostrEvent } from "nostr-tools";
@@ -179,7 +180,8 @@ export function EventCardActions({
 
   return (
     <>
-      <div className={cn("flex items-center gap-0.5", className)}>
+      <div className={cn("flex flex-wrap items-center gap-0.5", className)}>
+        <RepositorySourceBadge eventId={event.id} />
         {onEdit && (
           <Button
             variant="ghost"

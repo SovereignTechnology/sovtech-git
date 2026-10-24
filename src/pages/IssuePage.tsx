@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NostrEvent } from "nostr-tools";
@@ -265,6 +266,7 @@ export default function IssuePage() {
                   <code className="font-mono text-xs text-muted-foreground/80">
                     #{issue.id.slice(0, 8)}
                   </code>
+                  <RepositorySourceBadge eventId={issue.id} />
                   <EventShareButton
                     event={issue.rootEvent}
                     label="Copy link"

@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Default public repository views to relay-confirmed items and discussion, with an on-page outbox toggle that also returns to curated content without reloading. Existing explicit preferences are preserved.
+- Default public repository views to relay-confirmed items and discussion, with per-event source labels and an on-page outbox toggle that also returns to curated content without reloading. Existing explicit preferences are preserved.
 
 - Reconcile public repository history with NIP-77 when matching events are cached, fetching missing IDs through shared rate-limit admission and retaining coverage-aware fallback for unsupported relays.
 

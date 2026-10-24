@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
@@ -428,6 +429,7 @@ function IssueRow({
             <span className="font-medium text-foreground group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors line-clamp-1">
               {issue.currentSubject}
             </span>
+            <RepositorySourceBadge eventId={issue.id} />
             {issue.labels.map((label) => (
               <LabelBadge
                 key={label}
