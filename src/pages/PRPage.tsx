@@ -1,3 +1,4 @@
+import { RepositorySourceNotice } from "@/components/RepositorySourceNotice";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
@@ -1364,14 +1365,10 @@ export default function PRPage() {
 
   if (!pr && search?.found && curationMode === "repo" && !repo?.isPrivate) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="space-y-4 py-12 text-center">
-          <p>This item has not been confirmed on the repository relays.</p>
-          <Button variant="outline" onClick={handleSearchMore}>
-            Include outbox relays
-          </Button>
-        </CardContent>
-      </Card>
+      <RepositorySourceNotice
+        eventId={search.event?.id ?? prId}
+        onExpand={handleSearchMore}
+      />
     );
   }
 

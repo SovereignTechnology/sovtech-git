@@ -1,8 +1,6 @@
-import { useCallback, useSyncExternalStore } from "react";
 import { Globe2 } from "lucide-react";
-import { useOptionalRepoContext } from "@/pages/repo/RepoContext";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
-import { relayEventPresence } from "@/lib/relayEventPresence";
+import { useRepositoryOutboxOnly } from "@/hooks/useRepositoryOutboxOnly";
 import {
   Tooltip,
   TooltipContent,
@@ -11,29 +9,8 @@ import {
 
 /** Receipt/reconciliation evidence is independent of authorship and publishing status. */
 export function RepositorySourceBadge({ eventId }: { eventId: string }) {
-  const repo = useOptionalRepoContext()?.resolved?.repo;
   const { mode } = useRepositoryCuration();
-  const active = !!repo && !repo.isPrivate && mode === "outbox";
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      if (!active) return () => {};
-      const sub = relayEventPresence.changes$.subscribe((ids) => {
-        if (ids.has(eventId)) notify();
-      });
-      return () => sub.unsubscribe();
-    },
-    [active, eventId],
-  );
-  const snapshot = useCallback(() => {
-    if (!active || relayEventPresence.has(eventId, repo?.relays ?? []))
-      return false;
-    // Other-relay receipt is not proof of absence from repository relays.
-    return (
-      relayEventPresence.isAbsent(eventId, repo?.relays ?? []) &&
-      relayEventPresence.hasAny(eventId)
-    );
-  }, [active, eventId, repo?.relays]);
-  const outsideRepository = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const outsideRepository = useRepositoryOutboxOnly(eventId, mode === "outbox");
   if (!outsideRepository) return null;
   return (
     <Tooltip>
