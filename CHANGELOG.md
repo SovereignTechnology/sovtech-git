@@ -36,6 +36,8 @@
 
 ### Fixed
 
+- Remember decrypted private Git service lists across event versions and share concurrent decrypt requests to avoid repeated signer prompts after reloads.
+
 - Preserve slow repository cache restores and load cached statuses before supplemental relay items, avoiding count churn when a warm cache takes more than three seconds to read.
 
 - Restore cached public repository announcements before relay discovery so warm issue/PR views can load without waiting for network privacy classification.
