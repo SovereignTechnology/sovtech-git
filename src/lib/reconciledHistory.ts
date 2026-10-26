@@ -47,7 +47,8 @@ export interface HistoryTransport {
  */
 export function createReconciledHistory(
   pool: RelayPool,
-  store: Pick<IEventStore, "getByFilters">,
+  store: Pick<IEventStore, "getByFilters"> &
+    Partial<Pick<IEventStore, "insert$">>,
   presence: RelayEventPresence = relayEventPresence,
   transport: HistoryTransport = {
     negotiate: (relay, inventory, filter) =>
@@ -61,6 +62,7 @@ export function createReconciledHistory(
     (ids) => store.getByFilters({ ids }),
     (relay, filters) => transport.request(relay, filters),
     (event, relay) => presence.observe(event.id, relay),
+    store.insert$,
   );
   const disabled = new Set<string>();
   // Keep negotiation admission separate from download coordination changes.

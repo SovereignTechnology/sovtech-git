@@ -140,6 +140,25 @@ describe("receive-only reconciled history", () => {
     expect(presence.has(event(3).id, [relay])).toBe(false);
   });
 
+  it("releases a stalled negotiated body from the store without fresh relay evidence", async () => {
+    const cancelled = vi.fn();
+    const request = vi.fn(() => NEVER.pipe(finalize(cancelled)));
+    const { load, store, presence } = setup([event(1)], {
+      negotiate: () => of({ have: [], need: [event(2).id] }),
+      request,
+    });
+    const receipt = vi.spyOn(presence, "observe");
+    const pending = collect(load(relay, [{ kinds: [1621] }], options()));
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    // A newer absence check must still beat the original negotiation's evidence.
+    presence.reconcile(relay, [event(2).id], new Set(), presence.begin());
+    store.add(event(2));
+    expect(await pending).toEqual([event(1), event(2)]);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(receipt).not.toHaveBeenCalled();
+    expect(presence.has(event(2).id, [relay])).toBe(false);
+  });
+
   it("rechecks cached bodies after a local admission refusal", async () => {
     vi.useFakeTimers();
     try {
@@ -553,7 +572,168 @@ describe("shared negotiated body downloads", () => {
     }
   });
 
-  it("reuses an independently cached body when a stalled active batch expires", async () => {
+  it("shares one store listener and retains a partial transfer until all pending IDs arrive", async () => {
+    const arrivals = new Subject<NostrEvent>();
+    const response = new Subject<NostrEvent>();
+    const cached = new Map<string, NostrEvent>();
+    const read = vi.fn((ids: string[]) =>
+      ids.flatMap((id) => {
+        const value = cached.get(id);
+        return value ? [value] : [];
+      }),
+    );
+    const cancelled = vi.fn();
+    const request = vi.fn(() => response.pipe(finalize(cancelled)));
+    const receipt = vi.fn();
+    let listeners = 0;
+    const notifications = new Observable<NostrEvent>((subscriber) => {
+      listeners++;
+      const sub = arrivals.subscribe(subscriber);
+      return () => {
+        sub.unsubscribe();
+        listeners--;
+      };
+    });
+    const download = createMissingEventDownloads(
+      read,
+      request,
+      receipt,
+      notifications,
+    );
+    const one: NostrEvent[] = [],
+      two: NostrEvent[] = [];
+    const a = download(
+      relay,
+      [event(1).id, event(2).id],
+      accepts,
+      downloadOptions,
+    ).subscribe((e) => one.push(e));
+    const b = download(
+      other,
+      [event(2).id],
+      accepts,
+      downloadOptions,
+    ).subscribe((e) => two.push(e));
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(listeners).toBe(1);
+    read.mockClear();
+    arrivals.next(event(99));
+    await Promise.resolve();
+    expect(read).not.toHaveBeenCalled();
+    cached.set(event(1).id, event(1));
+    arrivals.next(event(1));
+    await vi.waitFor(() => expect(one).toEqual([event(1)]));
+    expect(cancelled).not.toHaveBeenCalled();
+    expect(two).toEqual([]);
+    cached.set(event(2).id, event(2));
+    arrivals.next(event(2));
+    await vi.waitFor(() => expect(a.closed && b.closed).toBe(true));
+    expect(one).toEqual([event(1), event(2)]);
+    expect(two).toEqual([event(2)]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(receipt).not.toHaveBeenCalled();
+    expect(listeners).toBe(0);
+    const next = download(
+      relay,
+      [event(3).id],
+      accepts,
+      downloadOptions,
+    ).subscribe();
+    expect(listeners).toBe(1);
+    next.unsubscribe();
+    expect(listeners).toBe(0);
+  });
+
+  it("rechecks scope visibility and consumer filters before waking a cached ID", async () => {
+    const arrivals = new Subject<NostrEvent>();
+    const cached: NostrEvent[] = [];
+    const receipt = vi.fn();
+    const request = vi.fn(() => NEVER);
+    const publicDownload = createMissingEventDownloads(
+      () => [],
+      request,
+      receipt,
+      arrivals,
+    );
+    const privateDownload = createMissingEventDownloads(
+      () => cached,
+      request,
+      receipt,
+      arrivals,
+    );
+    const publicValues: NostrEvent[] = [],
+      rejectedValues: NostrEvent[] = [];
+    const publicOwner = publicDownload(
+      relay,
+      [event(1).id],
+      accepts,
+      downloadOptions,
+    ).subscribe((e) => publicValues.push(e));
+    const rejectedOwner = privateDownload(
+      relay,
+      [event(1).id],
+      () => false,
+      downloadOptions,
+    ).subscribe((e) => rejectedValues.push(e));
+    const accepted = result(
+      privateDownload(other, [event(1).id], accepts, downloadOptions),
+    );
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    cached.push(event(1));
+    arrivals.next(event(1));
+    expect(await accepted).toEqual([event(1)]);
+    expect(publicValues).toEqual([]);
+    expect(rejectedValues).toEqual([]);
+    expect(publicOwner.closed || rejectedOwner.closed).toBe(false);
+    expect(receipt).not.toHaveBeenCalled();
+    publicOwner.unsubscribe();
+    rejectedOwner.unsubscribe();
+    expect(arrivals.observed).toBe(false);
+  });
+
+  it("fulfills a cached body during admission cooldown without another network attempt", async () => {
+    vi.useFakeTimers();
+    try {
+      const cached: NostrEvent[] = [];
+      const arrivals = new Subject<NostrEvent>();
+      const request = vi.fn(() =>
+        throwError(() => new HistoryAdmissionError(Date.now() + 65_000)),
+      );
+      const receipt = vi.fn();
+      const download = createMissingEventDownloads(
+        () => cached,
+        request,
+        receipt,
+        arrivals,
+      );
+      let completed = false;
+      const pending = firstValueFrom(
+        download(relay, [event(1).id], accepts, downloadOptions).pipe(
+          toArray(),
+        ),
+      ).then((events) => {
+        completed = true;
+        return events;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(completed).toBe(false);
+      cached.push(event(1));
+      arrivals.next(event(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(completed).toBe(true);
+      expect(await pending).toEqual([event(1)]);
+      expect(arrivals.observed).toBe(false);
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(receipt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("wakes notified owners while read-only adapters retain the inactivity fallback", async () => {
     vi.useFakeTimers();
     try {
       const cached: NostrEvent[] = [];
@@ -564,6 +744,22 @@ describe("shared negotiated body downloads", () => {
         request,
         receipt,
       );
+      const arrivals = new Subject<NostrEvent>();
+      const notified = createMissingEventDownloads(
+        () => cached,
+        request,
+        receipt,
+        arrivals,
+      );
+      let notifiedComplete = false;
+      const notifiedResult = firstValueFrom(
+        notified(relay, [event(1).id], accepts, downloadOptions).pipe(
+          toArray(),
+        ),
+      ).then((events) => {
+        notifiedComplete = true;
+        return events;
+      });
       let completed = false;
       const result = firstValueFrom(
         download(relay, [event(1).id], accepts, downloadOptions).pipe(
@@ -575,13 +771,18 @@ describe("shared negotiated body downloads", () => {
       });
       await vi.advanceTimersByTimeAsync(0);
       cached.push(event(1));
-      // Active transfers currently have no store-arrival wake-up. Characterise
-      // that boundary separately from the next-source network failover policy.
+      arrivals.next(event(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(notifiedComplete).toBe(true);
+      expect(await notifiedResult).toEqual([event(1)]);
+      expect(arrivals.observed).toBe(false);
+      // Both received the same body at the same instant. Only the read-only
+      // adapter must wait for the existing 15-second inactivity deadline.
       await vi.advanceTimersByTimeAsync(14_999);
       expect(completed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect(await result).toEqual([event(1)]);
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(2);
       expect(receipt).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

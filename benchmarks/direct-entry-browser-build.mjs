@@ -180,6 +180,10 @@ await build({
               'benchTrace("finish", { relay: batch.relay, pending: batch.entries.filter(live).map(entry => entry.id), error: error instanceof Error ? error.name : null });',
             ],
             [
+              "const batch = entry.batch;",
+              'benchTrace("cache-reuse", { id: entry.id, active: !!entry.batch, relay: entry.batch?.relay });',
+            ],
+            [
               "owner.subscriber.next(event);",
               'benchTrace("deliver", { id: event.id });',
             ],

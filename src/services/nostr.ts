@@ -169,6 +169,9 @@ export const pool = new RelayPool();
 // Never disclose private cached IDs to public relays during reconciliation.
 // Private authenticated transports keep the established request path.
 const publicHistoryStore = {
+  insert$: eventStore.insert$.pipe(
+    filter((event) => !isPrivateRepositoryEventId(event.id)),
+  ),
   getByFilters: (filters: Filter | Filter[]) =>
     eventStore
       .getByFilters(filters)

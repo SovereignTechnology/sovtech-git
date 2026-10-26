@@ -49,9 +49,13 @@ export function createMissingEventDownloads(
   read: (ids: string[]) => NostrEvent[],
   request: (relay: string, filters: Filter[]) => Observable<NostrEvent>,
   onReceipt: (event: NostrEvent, relay: string) => void,
+  arrivals?: Observable<NostrEvent>,
 ) {
   const entries = new Map<string, Entry>();
   const active = new Map<string, Batch>();
+  const arrived = new Set<string>();
+  let storeSubscription: Subscription | undefined;
+  let notificationScheduled = false;
   let scheduled = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -62,6 +66,39 @@ export function createMissingEventDownloads(
       scheduled = false;
       pump();
     });
+  };
+  const releaseStoreIfIdle = () => {
+    if (entries.size) return;
+    const subscription = storeSubscription;
+    storeSubscription = undefined;
+    arrived.clear();
+    subscription?.unsubscribe();
+  };
+  const observeStore = () => {
+    if (!arrivals || storeSubscription) return;
+    const subscription = new Subscription();
+    storeSubscription = subscription;
+    subscription.add(
+      arrivals.subscribe({
+        next: (event) => {
+          if (!entries.has(event.id)) return;
+          arrived.add(event.id);
+          if (notificationScheduled) return;
+          notificationScheduled = true;
+          queueMicrotask(() => {
+            notificationScheduled = false;
+            // Our own delivery inserts bodies synchronously. Discard its already
+            // satisfied IDs before waking the full queue, rather than scanning
+            // every pending entry for each body we just delivered ourselves.
+            for (const id of arrived) if (!entries.has(id)) arrived.delete(id);
+            if (arrived.size) schedule();
+          });
+        },
+        // Notifications are an optional acceleration. Transport retries remain
+        // responsible for progress if the notification source stops working.
+        error: () => undefined,
+      }),
+    );
   };
   const live = (entry: Entry) =>
     entries.get(entry.id) === entry && entry.owners.size > 0;
@@ -171,15 +208,31 @@ export function createMissingEventDownloads(
     try {
       // Reuse bodies arriving from live subscriptions or unrelated queries,
       // including while a failed source was being tried. Reads stay bounded.
-      // Active batches do not observe store arrivals; a body obtained elsewhere
-      // is reused here only after that batch finishes or times out.
-      const waiting = [...entries.values()].filter((entry) => !entry.batch);
+      // An insertion is a wake-up hint, not evidence of relay origin. Re-read
+      // through this scope's store so private, deleted or no-longer-retained
+      // bodies cannot enter public history through the notification stream.
+      // Only signalled active IDs are rechecked; unrelated inserts cost a lookup.
+      const waiting = [...entries.values()].filter(
+        (entry) => !entry.batch || arrived.has(entry.id),
+      );
+      arrived.clear();
       for (let offset = 0; offset < waiting.length; offset += 500) {
         for (const event of read(
           waiting.slice(offset, offset + 500).map((entry) => entry.id),
         )) {
           const entry = entries.get(event.id);
-          if (entry && !entry.batch) deliver(entry, event);
+          if (entry) {
+            const batch = entry.batch;
+            deliver(entry, event);
+            // Keep a partially fulfilled transfer alive for its other owners.
+            // External progress does not reset this relay's inactivity deadline.
+            if (
+              batch &&
+              !batch.closed &&
+              batch.entries.every((item) => !live(item))
+            )
+              finish(batch);
+          }
         }
       }
       const pending = [...entries.values()]
@@ -234,6 +287,8 @@ export function createMissingEventDownloads(
       for (const entry of [...entries.values()]) {
         for (const owner of [...entry.owners]) owner.subscriber.error(error);
       }
+    } finally {
+      releaseStoreIfIdle();
     }
   }
 
@@ -272,6 +327,7 @@ export function createMissingEventDownloads(
         entry.owners.add(owner);
         entry.sources.add(relay);
       }
+      observeStore();
       schedule();
       return () => {
         for (const id of owner.pending) {
@@ -280,6 +336,7 @@ export function createMissingEventDownloads(
           if (entry?.owners.size === 0) entries.delete(id);
         }
         owner.pending.clear();
+        releaseStoreIfIdle();
         // A departing consumer does not cancel another consumer's transfer.
         for (const batch of [...active.values()]) {
           if (batch.entries.every((entry) => !live(entry))) finish(batch);
