@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { IdentityStatus } from "applesauce-loaders/helpers";
 import type { Identity } from "applesauce-loaders/helpers";
 import { dnsIdentityLoader, nip05WarmupReady } from "@/services/nostr";
+import { nip05IdbCache } from "@/services/nip05IdbCache";
 
 const RESOLVE_TIMEOUT_MS = 5_000;
 
@@ -126,7 +127,10 @@ export function useDnsIdentity(
       return;
     }
     const { name, domain } = parsed;
-    setState({ status: "loading" });
+    const initial = isDotBitNip05(nip05)
+      ? undefined
+      : dnsIdentityLoader.getIdentity(name, domain);
+    setState(initial ? cachedIdentityToState(initial) : { status: "loading" });
 
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -186,20 +190,21 @@ export function useDnsIdentity(
       };
     }
 
-    // Await the IDB warmup before checking the in-memory cache. On a fresh
-    // page load the warmup is async; if the user navigates to a NIP-05 repo
-    // URL before it completes, getIdentity() would return undefined even
-    // though IDB has the entry. Awaiting the warmup first ensures the
-    // synchronous cache check always reflects the persisted state.
-    nip05WarmupReady.then(() => {
+    // An in-memory hit must not wait for unrelated persisted identities.
+    // After reload, restore the persisted mapping before deciding it is missing.
+    const resolve = async () => {
+      if (!initial) await nip05WarmupReady;
       if (cancelled) return;
 
-      // Check in-memory cache — avoids a loading flash when the identity is
-      // already resolved (e.g. back-navigation or warm IDB).
       const cached = dnsIdentityLoader.getIdentity(name, domain);
+      const keepCached = cached?.status === IdentityStatus.Found;
       if (cached && !forceRefresh) {
         setState(cachedIdentityToState(cached));
-        return;
+        const lifetime =
+          cached.status === IdentityStatus.Error
+            ? dnsIdentityLoader.errorExpiration
+            : dnsIdentityLoader.expiration;
+        if (Math.floor(Date.now() / 1000) - cached.checked <= lifetime) return;
       }
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -212,17 +217,26 @@ export function useDnsIdentity(
       Promise.race([
         forceRefresh
           ? dnsIdentityLoader.fetchIdentity(name, domain)
-          : dnsIdentityLoader.loadIdentity(name, domain),
+          : dnsIdentityLoader.requestIdentity(name, domain),
         timeoutPromise,
       ])
         .then((identity) => {
           if (cancelled) return;
-          // Populate the in-memory map so subsequent getIdentity() calls hit.
+          // A transient failure does not invalidate a previously resolved name.
+          // A successful changed mapping or explicit missing result does.
+          if (keepCached && identity.status === IdentityStatus.Error) return;
           dnsIdentityLoader.identities.set(`${name}@${domain}`, identity);
+          if (identity.status === IdentityStatus.Missing) {
+            // The upstream loader persists found mappings, but not missing names.
+            // Replace the old disk entry so reload cannot resurrect it.
+            void Promise.resolve(
+              nip05IdbCache.save({ [`${name}@${domain}`]: identity }),
+            ).catch(() => undefined);
+          }
           setState(cachedIdentityToState(identity));
         })
         .catch((err: unknown) => {
-          if (cancelled) return;
+          if (cancelled || keepCached) return;
           if (err instanceof Error && err.message === "__timeout__") {
             setState({
               status: "error",
@@ -247,7 +261,8 @@ export function useDnsIdentity(
           }
         })
         .finally(() => clearTimeout(timeout));
-    });
+    };
+    void resolve();
 
     return () => {
       clearTimeout(timeout);

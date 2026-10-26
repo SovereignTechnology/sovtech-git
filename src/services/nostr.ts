@@ -703,7 +703,10 @@ dnsIdentityLoader.expiration = 60 * 60 * 24 * 30; // 30 days in seconds
 export const nip05WarmupReady: Promise<void> = loadAllNip05FromIdb().then(
   (entries) => {
     for (const [address, identity] of Object.entries(entries)) {
-      dnsIdentityLoader.identities.set(address, identity);
+      const current = dnsIdentityLoader.identities.get(address);
+      if (!current || current.checked < identity.checked) {
+        dnsIdentityLoader.identities.set(address, identity);
+      }
     }
   },
 );
