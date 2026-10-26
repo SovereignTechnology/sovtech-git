@@ -71,9 +71,8 @@ export function useNip34RepoLoader(
   // subscriptions are released when this owner unsubscribes; per-item work
   // continues to use the shared singleton loaders.
   const cacheState$ = useMemo(
-    () =>
-      new BehaviorSubject({ loading: false, refreshing: false, ready: false }),
-    // Loading state belongs to this repository owner.
+    () => new BehaviorSubject({ ready: false }),
+    // Initial cache readiness belongs to this repository owner.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [repoRelayGroup],
   );
@@ -81,12 +80,7 @@ export function useNip34RepoLoader(
     () =>
       cacheState$.pipe(
         auditTime(100),
-        distinctUntilChanged(
-          (a, b) =>
-            a.loading === b.loading &&
-            a.refreshing === b.refreshing &&
-            a.ready === b.ready,
-        ),
+        distinctUntilChanged((a, b) => a.ready === b.ready),
       ),
     [cacheState$],
   );
@@ -98,14 +92,9 @@ export function useNip34RepoLoader(
       repoRelayGroup,
       privateRepository,
       (events) => {
-        const previous = cacheState$.value;
-        cacheState$.next({
-          ...previous,
-          loading: events === undefined,
-          ready: previous.ready || events !== undefined,
-        });
+        if (events !== undefined && !cacheState$.value.ready)
+          cacheState$.next({ ready: true });
       },
-      (refreshing) => cacheState$.next({ ...cacheState$.value, refreshing }),
     ).pipe(catchError(() => EMPTY));
   }, [hasCoords, repoRelayGroup, inputs$, privateRepository, cacheState$]);
   return cacheStatus;
