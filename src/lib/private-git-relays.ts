@@ -25,8 +25,8 @@ interface PrivateGitRelayListCache {
   relayUrls: string[];
 }
 
-// Keep every successfully decoded event: relays can replay older versions
-// before delivering the current winner after a reload.
+// Retain recent versions because relays can replay older events after reload.
+const PRIVATE_GIT_RELAY_LIST_CACHE_LIMIT = 5;
 const pendingDecodes = new Map<string, Promise<string[]>>();
 
 function privateGitRelayListCacheKey(pubkey: string, eventId?: string): string {
@@ -60,10 +60,12 @@ function loadPrivateGitRelayListCache(
       return undefined;
     }
 
-    return {
+    const cache = {
       eventId,
       relayUrls: normalizePrivateGitRelayUrls(candidate.relayUrls),
     };
+    savePrivateGitRelayListCache(pubkey, cache);
+    return cache;
   } catch {
     return undefined;
   }
@@ -74,10 +76,57 @@ function savePrivateGitRelayListCache(
   cache: PrivateGitRelayListCache,
 ): void {
   try {
+    const prefix = privateGitRelayListCacheKey(pubkey);
+    const currentKey = privateGitRelayListCacheKey(pubkey, cache.eventId);
     localStorage.setItem(
-      privateGitRelayListCacheKey(pubkey, cache.eventId),
-      JSON.stringify(cache),
+      currentKey,
+      JSON.stringify({ ...cache, lastUsed: Date.now() }),
     );
+
+    const entries: { key: string; lastUsed: number }[] = [];
+    // Include the legacy single-entry cache in the limit. Entries written
+    // before recency tracking are evicted first; a hit promotes them.
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key || (key !== prefix && !key.startsWith(`${prefix}:`))) {
+        continue;
+      }
+      let lastUsed = 0;
+      try {
+        const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+        if (typeof value === "object" && value !== null) {
+          const record = value as Record<string, unknown>;
+          if (
+            typeof record.lastUsed === "number" &&
+            Number.isFinite(record.lastUsed)
+          ) {
+            lastUsed = record.lastUsed;
+          }
+          // Remove the legacy duplicate after successfully storing its
+          // promoted per-event entry.
+          if (key === prefix && record.eventId === cache.eventId) {
+            entries.push({ key, lastUsed: -Infinity });
+            continue;
+          }
+        }
+      } catch {
+        // Malformed cache records are also candidates for eviction.
+      }
+      entries.push({ key, lastUsed });
+    }
+    entries.sort((a, b) => {
+      if (a.key === currentKey) return -1;
+      if (b.key === currentKey) return 1;
+      return b.lastUsed - a.lastUsed;
+    });
+    for (const [index, entry] of entries.entries()) {
+      if (
+        index >= PRIVATE_GIT_RELAY_LIST_CACHE_LIMIT ||
+        entry.lastUsed === -Infinity
+      ) {
+        localStorage.removeItem(entry.key);
+      }
+    }
   } catch {
     // Storage is an optimization; decoding still works without it.
   }
