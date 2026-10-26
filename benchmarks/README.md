@@ -731,6 +731,18 @@ latest comparison is `latest-revision-suite.json`. Use explicit journey
 expectations for correctness, and check received identity sets and unfinished
 work before interpreting resource totals as equivalent workloads.
 
+`negotiation-admission-suite.json` provides a bounded NIP-77 scheduling
+comparison: two alternating pairs each for a seeded-cache conversation reload,
+navigation during loading, and a return with new activity. Serve the before/after
+bundles on 4193/4192 and preserve their build metadata as
+`perf-reports/direct-entry/before-meta.json` and `after-meta.json`. Run it with
+the revision runner above. The selected conversation ID belongs to the captured
+gitworkshop corpus; replace it when using another corpus with journey expectations.
+The reload seeds event bodies, not relay membership or a warm EventStore.
+Check remaining repository comments as well as selected-item readiness: the
+20-second observation can end with unfinished history. A failed initial return
+checkpoint is an incomplete run, not evidence of a successful warm comparison.
+
 Under heavy replay, browser automation can itself queue behind WebSocket
 delivery. In the cold journey, `scheduledAt` is the intended departure time,
 `actualAt` is a pre-action observation, and `start` is sampled before the click
