@@ -19,7 +19,11 @@ const results = [];
 let corpusHash;
 try {
   for (const scenario of suite.scenarios) {
-    for (let round = 0; round < (suite.rounds ?? 3); round++) {
+    for (
+      let round = 0;
+      round < (scenario.rounds ?? suite.rounds ?? 3);
+      round++
+    ) {
       for (const variant of round % 2 ? [...variants].reverse() : variants) {
         const label = `${scenario.name}-${variant.name}-${round}`;
         if (!/^[a-zA-Z0-9_-]+$/.test(label))
@@ -60,7 +64,8 @@ try {
               ? "Corpus changed between runs"
               : null) ||
             (report.config.label !== label ? "Report label mismatch" : null) ||
-            (report.build.commit !== JSON.parse(variant.metadata).commit
+            (JSON.stringify(report.build) !==
+            JSON.stringify(JSON.parse(variant.metadata))
               ? "Build revision mismatch"
               : null);
           row = {

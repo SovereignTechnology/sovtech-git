@@ -5,6 +5,27 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+const overrideRef = process.env.BENCH_TRANSFER_CONTROL_REF;
+const overrideCommit = overrideRef
+  ? execFileSync("git", ["rev-parse", "--verify", `${overrideRef}^{commit}`], {
+      encoding: "utf8",
+    }).trim()
+  : null;
+const overridePath = "src/lib/reconciledHistory.ts";
+const overrideSource = overrideCommit
+  ? execFileSync("git", ["show", `${overrideCommit}:${overridePath}`], {
+      encoding: "utf8",
+    })
+  : null;
+const sourceOverrides = overrideCommit
+  ? [
+      {
+        path: overridePath,
+        commit: overrideCommit,
+        sha256: createHash("sha256").update(overrideSource).digest("hex"),
+      },
+    ]
+  : [];
 mkdirSync("perf-reports/direct-entry", { recursive: true });
 writeFileSync(
   "perf-reports/direct-entry/build-meta.json",
@@ -16,6 +37,7 @@ writeFileSync(
       diffHash: createHash("sha256")
         .update(execFileSync("git", ["diff", "HEAD"]))
         .digest("hex"),
+      sourceOverrides,
       createdAt: new Date().toISOString(),
       harnessHash: createHash("sha256")
         .update(
@@ -135,7 +157,67 @@ await build({
     {
       name: "direct-entry-experiment",
       enforce: "pre",
+      load(id) {
+        if (overrideSource && id === path.resolve(overridePath))
+          return overrideSource;
+      },
       transform(code, id) {
+        const trace = `function benchTrace(stage: string, value: unknown) {
+          (globalThis as unknown as { __detailBench?: { trace?: (stage: string, value: unknown) => void } }).__detailBench?.trace?.(stage, value);
+        }\n`;
+        if (id.endsWith("/src/lib/missingEventDownloads.ts")) {
+          for (const [target, extra] of [
+            [
+              "const owner: Owner = {",
+              'benchTrace("demand", { relay, ids, priority: options.priority });',
+            ],
+            [
+              "active.set(relay, batch);",
+              'benchTrace("batch", { relay, ids: selected.map(entry => entry.id) });',
+            ],
+            [
+              "batch.closed = true;",
+              'benchTrace("finish", { relay: batch.relay, pending: batch.entries.filter(live).map(entry => entry.id), error: error instanceof Error ? error.name : null });',
+            ],
+            [
+              "owner.subscriber.next(event);",
+              'benchTrace("deliver", { id: event.id });',
+            ],
+          ])
+            code = replaceOnce(code, target, extra + "\n" + target);
+          return trace + code;
+        }
+        if (id.endsWith("/src/lib/reconciledHistory.ts")) {
+          for (const [target, extra] of [
+            [
+              "return serialize(relay, () =>",
+              'benchTrace("negotiation-queued", { relay, query });',
+            ],
+            [
+              "return transport.negotiate(relay, inventory, query);",
+              'benchTrace("negotiation-start", { relay, query });',
+            ],
+            [
+              "const common = inventory.filter",
+              'benchTrace("negotiation-complete", { relay, query, missing: [...missing] });',
+            ],
+          ])
+            code = replaceOnce(code, target, extra + "\n" + target);
+          return trace + code;
+        }
+        if (id.endsWith("/src/lib/resilientSubscription.ts")) {
+          code = replaceOnce(
+            code,
+            "const start = Math.max(now, state.nextStart);",
+            'const start = Math.max(now, state.nextStart); benchTrace("admission", { relay, waitMs: start - now, cooldown, active: state.active, rejected: cooldown > 0 || state.active >= 5 || start - now > 5000 });',
+          );
+          code = replaceOnce(
+            code,
+            "const request = operation(relayObject).subscribe(subscriber);",
+            'benchTrace("dispatch", { relay }); const request = operation(relayObject).subscribe(subscriber);',
+          );
+          return trace + code;
+        }
         if (id.endsWith("/src/lib/repositoryCache.ts")) {
           return replaceOnce(
             code,

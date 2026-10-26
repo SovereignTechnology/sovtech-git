@@ -498,6 +498,96 @@ describe("shared negotiated body downloads", () => {
     }
   });
 
+  it("lets disjoint work progress while a useful trickle delays shared residual IDs", async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = new Subject<NostrEvent>();
+      const request = vi.fn((source: string, filters: Filter[]) =>
+        source === relay
+          ? slow
+          : of(
+              ...[event(2), event(3)].filter((e) =>
+                filters[0].ids?.includes(e.id),
+              ),
+            ),
+      );
+      const download = createMissingEventDownloads(
+        () => [],
+        request,
+        () => undefined,
+      );
+      const received: string[] = [];
+      const one = firstValueFrom(
+        download(
+          relay,
+          [event(1).id, event(2).id],
+          accepts,
+          downloadOptions,
+        ).pipe(toArray()),
+      );
+      const two = download(
+        other,
+        [event(1).id, event(2).id, event(3).id],
+        accepts,
+        downloadOptions,
+      ).subscribe((e) => received.push(e.id));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(received).toEqual([event(3).id]);
+      expect(request.mock.calls).toEqual([
+        [relay, [{ ids: [event(1).id, event(2).id] }]],
+        [other, [{ ids: [event(3).id] }]],
+      ]);
+      // This is an inactivity deadline, not a maximum age for each pending ID.
+      await vi.advanceTimersByTimeAsync(14_000);
+      slow.next(event(1));
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(request).toHaveBeenCalledTimes(2);
+      slow.next(event(1)); // A duplicate cannot extend the remaining ID's wait.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await one).toEqual([event(1), event(2)]);
+      expect(received).toEqual([event(3).id, event(1).id, event(2).id]);
+      expect(request.mock.calls[2]).toEqual([other, [{ ids: [event(2).id] }]]);
+      expect(two.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses an independently cached body when a stalled active batch expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const cached: NostrEvent[] = [];
+      const request = vi.fn(() => NEVER);
+      const receipt = vi.fn();
+      const download = createMissingEventDownloads(
+        () => cached,
+        request,
+        receipt,
+      );
+      let completed = false;
+      const result = firstValueFrom(
+        download(relay, [event(1).id], accepts, downloadOptions).pipe(
+          toArray(),
+        ),
+      ).then((events) => {
+        completed = true;
+        return events;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      cached.push(event(1));
+      // Active transfers currently have no store-arrival wake-up. Characterise
+      // that boundary separately from the next-source network failover policy.
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toEqual([event(1)]);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(receipt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries capped partial responses and reuses store arrivals after admission waits", async () => {
     const bodies = [event(1), event(2), event(3)];
     const request = vi.fn((_source: string, filters: Filter[]) =>

@@ -60,13 +60,26 @@ async function run(control) {
     );
   if (config.entrySuffix && !["/prs", "/issues"].includes(config.entrySuffix))
     throw Error("Unsupported list entry route");
+  if (
+    config.transferFault &&
+    (!["slow", "trickle", "stall"].includes(config.transferFault.mode) ||
+      !/^wss:\/\//.test(config.transferFault.relay))
+  )
+    throw Error("Invalid transfer fault");
+  const checkpoints = config.diagnosticCheckpointsMs ?? [];
+  if (
+    !Array.isArray(checkpoints) ||
+    checkpoints.some((t) => !Number.isFinite(t) || t <= 0 || t > 120000)
+  )
+    throw Error("Invalid diagnostic checkpoints");
   const context = await control
     .context()
     .browser()
     .newContext({ viewport: config.viewport ?? { width: 1440, height: 900 } });
   const errors = [],
     requests = [],
-    deliveries = [];
+    deliveries = [],
+    faults = [];
   let pending = 0;
   let updatesReleased = !config.journey;
   const heldIds = new Set(fixture.journey?.updateIds ?? []);
@@ -195,12 +208,36 @@ async function run(control) {
       if (m[0] !== "REQ") return;
       active.set(m[1], m.slice(2));
       requests.push({ at: Date.now(), url: ws.url(), filters: m.slice(2) });
+      const fault =
+        config.transferFault?.relay === ws.url() &&
+        m
+          .slice(2)
+          .every(
+            (f) =>
+              f.ids?.length &&
+              f.ids.every(
+                (id) => !fixture.cases.some((item) => item.id === id),
+              ),
+          )
+          ? config.transferFault
+          : null;
+      if (fault)
+        faults.push({
+          at: Date.now(),
+          relay: ws.url(),
+          subscription: m[1],
+          mode: fault.mode,
+          ids: m.slice(2).flatMap((f) => f.ids),
+        });
+      if (fault?.mode === "stall") return;
       pending++;
       // This delay models transport latency; it is not a readiness wait.
       const delay = m.slice(2).some((f) => f["#E"])
         ? (config.commentLatencyMs ?? config.latencyMs ?? 20)
         : (config.latencyMs ?? 20);
-      await page.waitForTimeout(delay).catch(() => {});
+      await page
+        .waitForTimeout(delay + (fault?.mode === "slow" ? 2000 : 0))
+        .catch(() => {});
       pending--;
       if (!active.has(m[1])) return;
       const found = new Map();
@@ -209,8 +246,15 @@ async function run(control) {
           .filter((e) => available(e, ws.url()) && matches(e, f))
           .slice(0, Math.min(f.limit ?? config.cap ?? 100, config.cap ?? 100)))
           found.set(e.id, e);
-      for (const e of found.values())
+      let sent = 0;
+      for (const e of found.values()) {
+        // Model a useful but slow stream; cancellation must stop the fixture too.
+        if (fault?.mode === "trickle" && sent % 10 === 0)
+          await page.waitForTimeout(1000).catch(() => {});
+        if (!active.has(m[1])) return;
         ws.send(JSON.stringify(["EVENT", m[1], e]));
+        sent++;
+      }
       ws.send(JSON.stringify(["EOSE", m[1]]));
       deliveries.push({ at: Date.now(), count: found.size });
     });
@@ -270,6 +314,41 @@ async function run(control) {
         gate: false,
         transitions: { repository: [], detail: [], list: [] },
       });
+      b.traceRows = [];
+      b.traceDropped = 0;
+      b.trace = (stage, value) => {
+        if (!config.stageDiagnostics) return;
+        if (b.traceRows.length >= 100000) {
+          b.traceDropped++;
+          return;
+        }
+        b.traceRows.push({ at: performance.now(), stage, value });
+      };
+      b.checkpoints = [];
+      b.checkpointCount = (config.diagnosticCheckpointsMs ?? []).length;
+      for (const target of config.diagnosticCheckpointsMs ?? [])
+        setTimeout(
+          () => {
+            b.checkpoints.push({
+              target,
+              at: performance.now(),
+              ids: [...b.events].sort(),
+              coverage: Object.fromEntries(
+                Object.entries(b.coverage).map(([key, c]) => [
+                  key,
+                  [...c.missing],
+                ]),
+              ),
+              marks: { ...b.marks },
+              eventBytes: b.eventBytes,
+              longTaskMs: b.longTasks.reduce((sum, t) => sum + t.ms, 0),
+              frameMax: Math.max(...b.frames.map((f) => f.ms)),
+              repository: b.transitions.repository.at(-1),
+              detail: b.transitions.detail.at(-1),
+            });
+          },
+          Math.max(0, target - performance.now() + 1),
+        );
       b.record = (name, value) => {
         const rows = b.transitions[name];
         if (
@@ -397,6 +476,12 @@ async function run(control) {
             if (typeof data !== "string") return;
             try {
               const m = JSON.parse(data);
+              b.trace("wire-receive", {
+                relay: this.url,
+                type: m[0],
+                subscription: m[1],
+                id: m[0] === "EVENT" ? m[2].id : undefined,
+              });
               if (m[0] === "EVENT") {
                 b.events.add(m[2].id);
                 for (const coverage of Object.values(b.coverage)) {
@@ -418,6 +503,17 @@ async function run(control) {
         send(data) {
           try {
             const m = JSON.parse(data);
+            b.trace("wire-send", {
+              relay: this.url,
+              type: m[0],
+              subscription: m[1],
+              filters:
+                m[0] === "REQ"
+                  ? m.slice(2)
+                  : m[0] === "NEG-OPEN"
+                    ? [m[2]]
+                    : undefined,
+            });
             if (m[0] === "REQ")
               b.requests.push({
                 at: performance.now(),
@@ -550,10 +646,22 @@ async function run(control) {
         config.observationMs ?? 12000,
         { timeout: (config.observationMs ?? 12000) + 10000 },
       );
+    if (checkpoints.length)
+      await page.waitForFunction(
+        (target) =>
+          performance.now() >= target &&
+          window.__detailBench.checkpoints.length ===
+            window.__detailBench.checkpointCount,
+        Math.max(...checkpoints),
+        { timeout: Math.max(...checkpoints) + 10000 },
+      );
     report = await page.evaluate(() => {
       const b = window.__detailBench;
       return {
         observedUntil: performance.now(),
+        checkpoints: b.checkpoints,
+        trace: b.traceRows,
+        traceDropped: b.traceDropped,
         marks: b.marks,
         coverage: Object.fromEntries(
           Object.entries(b.coverage).map(([name, c]) => [
@@ -741,6 +849,9 @@ async function run(control) {
       failure: String(e),
       body: await page.locator("body").innerText(),
       finalState: await page.evaluate(() => ({
+        checkpoints: window.__detailBench?.checkpoints,
+        trace: window.__detailBench?.traceRows,
+        traceDropped: window.__detailBench?.traceDropped,
         store: window.__detailBench?.inspectStore?.(),
         ids: [...(window.__detailBench?.events ?? [])],
         transitions: window.__detailBench?.transitions,
@@ -761,6 +872,8 @@ async function run(control) {
           errors,
           requestCount: requests.length,
           transportRequests: requests,
+          faults,
+          deliveries,
           negotiationCount,
           negotiationBytes,
           pending,

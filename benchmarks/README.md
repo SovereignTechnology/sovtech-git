@@ -772,6 +772,61 @@ follow-up. Diagnostic allocations add overhead, so leave these options off for
 ordinary performance comparisons. A later recovery establishes delay, not that
 the original user-facing latency was acceptable.
 
+### Diagnosing negotiated transfers
+
+`transfer-diagnostics-suite.json` compares six alternating cold-navigation pairs,
+two pairs each for reload/return, and capped reloads with healthy, slow, trickling
+and stalled body sources. Use the captured corpus and revision runner described
+above. These are diagnostic comparisons, not a new performance gate.
+
+To isolate coordination while retaining unrelated current changes, build the
+control with `BENCH_TRANSFER_CONTROL_REF=607f3668 node
+benchmarks/direct-entry-browser-build.mjs`; this substitutes **only**
+`src/lib/reconciledHistory.ts` from that revision. Build the candidate without
+that variable. Preserve the two bundles separately, serve control/candidate on
+4193/4192, and copy their metadata to `diagnostic-before-meta.json` and
+`diagnostic-after-meta.json` in `perf-reports/direct-entry/`. Metadata records
+the resolved override commit, path and source hash; this control is not the
+complete historical application. Source instrumentation fails if its targets
+change. Neither the override nor tracing affects release builds.
+
+`stageDiagnostics` records negotiation enqueue/start/completion, admission
+reservations/refusals, shared download demand/batches/delivery, and WebSocket
+send/receive timestamps. Join these with existing store/model/UI observations.
+The trace stops retaining rows at 100,000 and reports `traceDropped`; truncated
+traces cannot establish absence of activity. Admission records include refused
+reservations, so do not count every proposed wait as time actually spent queued.
+
+`diagnosticCheckpointsMs` records exact wire IDs, missing expected IDs, model
+state, comment marks, bytes and responsiveness at common elapsed deadlines.
+Each checkpoint includes its actual sampling time: a busy event loop can delay
+sampling. Return journeys release held updates as their phases advance, so
+compare phase-relative correctness there rather than assuming equal elapsed
+time means identical available data. Wire coverage is not cache or rendered
+membership. Failed journeys
+retain diagnostic state, and later completion does not erase an earlier deficit.
+
+`transferFault` names one exact relay URL and a mode: `slow` adds two seconds,
+`trickle` sends ten bodies per second, and `stall` sends no response. It affects
+exact-ID requests containing no issue/PR roots; ordinary filters, root discovery
+and negotiations stay healthy. Requests may originate outside reconciliation:
+join fault subscription IDs with the trace and confirm negotiated demand before
+attributing effects to the shared coordinator. Fault records prove application;
+a zero-fault run is not evidence of resilience. Cancellation stops fixture
+responses. These deliberately asymmetric, mirrored-corpus fixtures do not model
+real relay availability, geographic latency, Git traffic or private relays.
+
+Run `node benchmarks/transfer-diagnostics-summary.mjs <reports...>` to summarize
+coverage, admission and body timing without dropping incomplete outcomes.
+Negotiation wait estimates pair identical filters FIFO; cancelled overlapping
+owners can leave unmatched enqueues, so inspect the raw trace before attributing
+a delay. First ID request to first receipt also includes caps and retries; it is
+not a pure network-latency measurement. Keep
+raw reports and generated summaries under ignored `perf-reports/`; put conclusions
+and representative evidence in the commit message. Diagnostic allocation and
+trace serialization add overhead, so compare identically instrumented builds
+and avoid treating these absolute timings as live production predictions.
+
 ### Repository cache storage comparison
 
 With the captured-data direct-entry fixture server running on port 4190 and an

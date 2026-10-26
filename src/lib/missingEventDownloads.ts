@@ -132,7 +132,9 @@ export function createMissingEventDownloads(
       // bodies before trying another advertiser. This is a client failover policy,
       // not proof of absence: a slow healthy source may be replaced. Only useful
       // bodies reset it; arbitrary/duplicate traffic cannot keep a
-      // stalled source alive. The next source still uses normal relay admission.
+      // stalled source alive. This bounds inactivity for the batch, not total
+      // waiting time for each ID: a useful trickle can keep residual IDs waiting.
+      // The next source still uses normal relay admission.
       batch.timer = setTimeout(
         () => finish(batch, new MissingEventDownloadError()),
         15_000,
@@ -169,6 +171,8 @@ export function createMissingEventDownloads(
     try {
       // Reuse bodies arriving from live subscriptions or unrelated queries,
       // including while a failed source was being tried. Reads stay bounded.
+      // Active batches do not observe store arrivals; a body obtained elsewhere
+      // is reused here only after that batch finishes or times out.
       const waiting = [...entries.values()].filter((entry) => !entry.batch);
       for (let offset = 0; offset < waiting.length; offset += 500) {
         for (const event of read(

@@ -194,6 +194,11 @@ export function createReconciledHistory(
               );
             // Cold stores use regular coverage requests; set reconciliation saves
             // transfer only when we already possess some of the matching bodies.
+            // One cached match is enough to select NEG: a focused root arriving
+            // before broad repository history can change this path. Evaluate
+            // admission delay and foreground readiness alongside duplicate-body
+            // savings when tuning this choice; see
+            // benchmarks/transfer-diagnostics-suite.json.
             if (disabled.has(relay) || inventory.length === 0)
               return fallback();
             status("loading");
