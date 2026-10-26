@@ -27,6 +27,10 @@ import {
 } from "./resilientSubscription";
 import { RelayEventPresence, relayEventPresence } from "./relayEventPresence";
 import { normalizeUrl } from "./url";
+import {
+  createMissingEventDownloads,
+  MissingEventDownloadError,
+} from "./missingEventDownloads";
 
 export interface HistoryTransport {
   negotiate: (
@@ -51,8 +55,15 @@ export function createReconciledHistory(
     request: (relay, filters) => resilientHistoryRequest(pool, relay, filters),
   },
 ) {
+  // Sharing is confined to this pool/store scope. Public history is configured
+  // with a privacy-filtered store; private transports do not join this owner.
+  const download = createMissingEventDownloads(
+    (ids) => store.getByFilters({ ids }),
+    (relay, filters) => transport.request(relay, filters),
+    (event, relay) => presence.observe(event.id, relay),
+  );
   const disabled = new Set<string>();
-  // Keep negotiations serialized until their resulting downloads are coordinated.
+  // Keep negotiation admission separate from download coordination changes.
   // Two-concurrent NEG experiments with separate start budgets, query priorities
   // and queue aging advanced cached history faster but did not protect foreground
   // readiness. Even the tighter policy delayed navigation comments (3.09 -> 4.77s
@@ -60,9 +71,10 @@ export function createReconciledHistory(
   // not proof that parallel negotiation is intrinsically worse on every relay.
   // See `git show a156687a` for both policies, benefits, regressions and limitations;
   // rerun benchmarks/negotiation-admission-suite.json using benchmarks/README.md.
-  // Revisit after shared missing-ID download ownership/fallback, a different
-  // workload, or transport changes reduce the competing work. Compare accurate
-  // repository convergence, foreground readiness and responsiveness together;
+  // Shared missing-ID ownership now reduces overlapping transfers, but does not
+  // by itself validate more parallel negotiation. Revisit with a new comparison
+  // when coordination, workload or transport changes competing work. Compare
+  // accurate repository convergence, foreground readiness and responsiveness together;
   // neither fewer missing events nor lower long-task totals alone is sufficient.
   const queues = new Map<
     string,
@@ -186,73 +198,33 @@ export function createReconciledHistory(
               return fallback();
             status("loading");
             const have = new Set<string>();
-            // This missing set belongs to one relay/filter snapshot: simultaneous
-            // owners can download the same body. A future coordinator could share
-            // in-flight ID batches, reuse bodies arriving elsewhere, and fall back
-            // to another advertising relay on refusal, omission or bounded stall.
-            // Start useful transfers before all negotiations finish. Keep relay
-            // membership evidence independent of the relay serving the body, and
-            // preserve cancellation/cooldowns and incomplete-history reporting.
-            // This is an untested proposal, not the demonstrated cause of every
-            // latency regression in the scheduling experiment noted above.
-            const transfer = (): Observable<NostrEvent> =>
-              defer(() => {
-                if (missing.size === 0) return EMPTY;
-                const ids = [...missing].slice(0, options.limit);
-                const requested = new Set(ids);
-                let progress = false;
-                return admissionRetry(
-                  defer(() => {
-                    // Recheck each batch, including admission retries: live
-                    // subscriptions or other histories may have supplied bodies
-                    // since this immutable negotiation inventory was captured.
-                    const reused = store.getByFilters({ ids }).filter(matches);
-                    const reusedIds = reused.map((event) => event.id);
-                    for (const id of reusedIds) {
-                      missing.delete(id);
-                      received.add(id);
-                    }
-                    presence.confirm(relay, reusedIds, started);
-                    const remaining = ids.filter((id) => missing.has(id));
-                    if (reused.length) progress = true;
-                    return from(reused).pipe(
-                      concatWith(
-                        defer(() =>
-                          remaining.length
-                            ? transport
-                                .request(relay, [{ ids: remaining }])
-                                .pipe(
-                                  tap((event) => {
-                                    if (
-                                      requested.has(event.id) &&
-                                      matches(event)
-                                    )
-                                      observe(event);
-                                  }),
-                                )
-                            : EMPTY,
-                        ),
-                      ),
-                    );
-                  }),
-                ).pipe(
-                  concatMap((event) => {
-                    if (!requested.has(event.id) || !matches(event))
-                      return EMPTY;
-                    progress = true;
-                    return [event];
-                  }),
-                  concatWith(
-                    defer(() => {
-                      if (!progress)
-                        return throwError(
-                          () => new Error("Relay omitted negotiated event IDs"),
-                        );
-                      return transfer();
-                    }),
-                  ),
-                );
-              });
+            // Prefer detail closures, then classification/PR-update evidence,
+            // roots, and broad discussion. A shared mixed batch inherits its most
+            // urgent consumer; the coordinator ages waiting work to prevent starvation.
+            const priority = !filter.kinds
+              ? 0
+              : filter.kinds.some((kind) =>
+                    [5, 1619, 1630, 1631, 1632, 1633, 1985, 1624].includes(
+                      kind,
+                    ),
+                  )
+                ? 1
+                : filter.kinds.some((kind) => [1617, 1618, 1621].includes(kind))
+                  ? 2
+                  : 3;
+            const transfer = () =>
+              download(relay, [...missing], matches, {
+                limit: options.limit,
+                priority,
+              }).pipe(
+                tap((event) => {
+                  received.add(event.id);
+                  missing.delete(event.id);
+                  // Body delivery is shared, but each completed negotiation owns
+                  // its membership evidence. Never turn reuse into a fresh receipt.
+                  presence.confirm(relay, [event.id], started);
+                }),
+              );
             return serialize(relay, () =>
               admissionRetry(
                 defer(() => {
@@ -299,11 +271,13 @@ export function createReconciledHistory(
                   return EMPTY;
                 }),
               ),
-              catchError(() => {
-                // A refusal disables further NEG work for this session, including
+              catchError((error: unknown) => {
+                // A negotiation refusal disables further NEG work for this session, including
                 // internal rounds whose pacing belongs to the dependency. Cooldown
                 // remains in the shared ledger; fallback cannot bypass it.
-                disabled.add(relay);
+                // Failed body delivery does not disprove NIP-77 support.
+                if (!(error instanceof MissingEventDownloadError))
+                  disabled.add(relay);
                 return fallback();
               }),
             );

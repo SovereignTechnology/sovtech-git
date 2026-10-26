@@ -1,13 +1,22 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EventStore } from "applesauce-core";
 import { RelayPool } from "applesauce-relay";
-import { firstValueFrom, tap, timeout, toArray } from "rxjs";
+import {
+  firstValueFrom,
+  tap,
+  timeout,
+  toArray,
+  ReplaySubject,
+  take,
+  switchMap,
+} from "rxjs";
 import type { NostrEvent } from "nostr-tools";
 import { createReconciledHistory } from "@/lib/reconciledHistory";
 import { RelayEventPresence } from "@/lib/relayEventPresence";
 import {
   isHistoryTerminalError,
   resilientHistoryRequest,
+  resilientNegentropy,
 } from "@/lib/resilientSubscription";
 import {
   GraspServer,
@@ -122,5 +131,101 @@ describeIfGrasp("relay reconciliation against real GRASP", () => {
         warmEvents: 0,
       }),
     );
+  }, 60000);
+  it("shares signed missing bodies across overlapping filters on separate relay connections", async () => {
+    // Two URLs reach the same controlled GRASP dataset through independent
+    // sockets. This tests transfer sharing, not heterogeneous relay behaviour.
+    const urls = [server.relayUrl, `${server.relayUrl}?overlap=1`];
+    const scopedStore = new EventStore();
+    const scopedPresence = new RelayEventPresence();
+    events.slice(0, 8).forEach((event) => scopedStore.add(event));
+    const ids = events.slice(8).map((event) => event.id);
+    let bodyFrames = 0;
+    const observations = urls.map((url) =>
+      pool.relay(url).message$.subscribe((message: unknown) => {
+        if (Array.isArray(message) && message[0] === "EVENT") bodyFrames++;
+      }),
+    );
+    try {
+      await Promise.all(
+        urls.map((url) =>
+          firstValueFrom(
+            resilientHistoryRequest(pool, url, [{ ids }]).pipe(
+              timeout(15000),
+              toArray(),
+            ),
+          ),
+        ),
+      );
+      expect(bodyFrames).toBe(24);
+      const unsharedFrames = bodyFrames;
+      bodyFrames = 0;
+      let negotiations = 0;
+      const bothNegotiated = new ReplaySubject<void>(1);
+      const load = createReconciledHistory(pool, scopedStore, scopedPresence, {
+        negotiate: (url, inventory, filter) =>
+          resilientNegentropy(pool, url, inventory, filter).pipe(
+            tap({
+              complete: () => {
+                if (++negotiations === 2) bothNegotiated.next();
+              },
+            }),
+          ),
+        // An observable barrier guarantees overlapping demand before delivery.
+        // It is test-only: production never waits for every relay to negotiate.
+        request: (url, filters) =>
+          bothNegotiated.pipe(
+            take(1),
+            switchMap(() => resilientHistoryRequest(pool, url, filters)),
+          ),
+      });
+      const completion: boolean[] = [];
+      const options = {
+        limit: 5,
+        isTerminalError: isHistoryTerminalError,
+        onComplete: (covered: boolean) => completion.push(covered),
+      };
+      const results = await Promise.all([
+        firstValueFrom(
+          load(urls[0], [{ kinds: [1621], "#a": [coordinate] }], options).pipe(
+            tap((e) => scopedStore.add(e)),
+            timeout(30000),
+            toArray(),
+          ),
+        ),
+        firstValueFrom(
+          load(
+            urls[1],
+            [{ kinds: [1621], authors: [events[0].pubkey] }],
+            options,
+          ).pipe(
+            tap((e) => scopedStore.add(e)),
+            timeout(30000),
+            toArray(),
+          ),
+        ),
+      ]);
+      for (const result of results)
+        expect(new Set(result.map((e) => e.id))).toEqual(
+          new Set(events.map((e) => e.id)),
+        );
+      expect(completion).toEqual([true, true]);
+      expect(bodyFrames).toBe(12);
+      for (const url of urls)
+        expect(
+          events.every((event) => scopedPresence.has(event.id, [url])),
+        ).toBe(true);
+      console.log(
+        JSON.stringify({
+          unsharedFrames,
+          sharedFrames: bodyFrames,
+          uniqueMissing: 12,
+        }),
+      );
+      bothNegotiated.complete();
+    } finally {
+      observations.forEach((sub) => sub.unsubscribe());
+      scopedStore.dispose();
+    }
   }, 60000);
 });

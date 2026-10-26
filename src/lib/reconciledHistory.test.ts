@@ -9,6 +9,8 @@ import { RelayPool, RelayClosedError } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
 import {
   EMPTY,
+  Observable,
+  finalize,
   NEVER,
   Subject,
   firstValueFrom,
@@ -21,6 +23,10 @@ import {
   createReconciledHistory,
   type HistoryTransport,
 } from "./reconciledHistory";
+import {
+  createMissingEventDownloads,
+  MissingEventDownloadError,
+} from "./missingEventDownloads";
 import { RelayEventPresence } from "./relayEventPresence";
 import {
   getRateLimitCooldownRemaining,
@@ -192,6 +198,26 @@ describe("receive-only reconciled history", () => {
     expect(mismatch.presence.has(event(4).id, [relay])).toBe(false);
   });
 
+  it("shares cross-filter bodies while retaining independent relay membership revisions", async () => {
+    const response = new Subject<NostrEvent>();
+    const request = vi.fn(() => response);
+    const { load, presence } = setup([event(1)], {
+      negotiate: () => of({ have: [], need: [event(2).id] }),
+      request,
+    });
+    const other = "wss://other.test";
+    const one = collect(load(relay, [{ kinds: [1621] }], options()));
+    const two = collect(load(other, [{ "#a": ["repo"] }], options()));
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    presence.reconcile(other, [event(2).id], new Set(), presence.begin());
+    response.next(event(2));
+    expect((await one).map((e) => e.id)).toEqual([event(1).id, event(2).id]);
+    expect((await two).map((e) => e.id)).toEqual([event(1).id, event(2).id]);
+    expect(presence.has(event(2).id, [relay])).toBe(true);
+    expect(presence.has(event(2).id, [other])).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("does not call an omitted negotiated ID complete even when fallback is empty", async () => {
     const missing = event(2);
     const request = vi.fn(() => EMPTY);
@@ -302,5 +328,295 @@ describe("relay membership evidence", () => {
     presence.reconcile(relay, [id], new Set(), later);
     presence.reconcile(relay, [id], new Set([id]), earlier);
     expect(presence.has(id, [relay])).toBe(false);
+  });
+});
+
+describe("shared negotiated body downloads", () => {
+  const other = "wss://other.test";
+  const accepts = (e: NostrEvent) => e.kind === 1621;
+  const downloadOptions = { limit: 2, priority: 1 };
+  const result = (stream: Observable<NostrEvent>) =>
+    firstValueFrom(stream.pipe(timeout(3000), toArray()));
+
+  it("shares overlapping IDs across filters/relays while still batching distinct IDs", async () => {
+    const a = new Subject<NostrEvent>();
+    const b = new Subject<NostrEvent>();
+    const request = vi.fn((source: string, _filters: Filter[]) =>
+      source === relay ? a : b,
+    );
+    const receipt = vi.fn();
+    const download = createMissingEventDownloads(() => [], request, receipt);
+    const one = result(
+      download(relay, [event(1).id, event(2).id], accepts, downloadOptions),
+    );
+    const two = result(
+      download(other, [event(2).id, event(3).id], accepts, downloadOptions),
+    );
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls).toEqual([
+      [relay, [{ ids: [event(1).id, event(2).id] }]],
+      [other, [{ ids: [event(3).id] }]],
+    ]);
+    a.next(event(1));
+    a.next(event(2));
+    b.next(event(3));
+    expect((await one).map((e) => e.id)).toEqual([event(1).id, event(2).id]);
+    expect((await two).map((e) => e.id)).toEqual([event(2).id, event(3).id]);
+    expect(receipt).toHaveBeenCalledTimes(3);
+  });
+
+  it("retains replacement demand created synchronously during delivery", async () => {
+    const response = new Subject<NostrEvent>();
+    const request = vi.fn(() => response);
+    let cached: NostrEvent[] = [];
+    const download = createMissingEventDownloads(
+      () => cached,
+      request,
+      () => undefined,
+    );
+    let replacement: Promise<NostrEvent[]> | undefined;
+    const first = download(
+      relay,
+      [event(1).id],
+      accepts,
+      downloadOptions,
+    ).subscribe(() => {
+      cached = [event(1)];
+      second.unsubscribe();
+      replacement = result(
+        download(other, [event(1).id], accepts, downloadOptions),
+      );
+    });
+    const second = download(
+      other,
+      [event(1).id],
+      accepts,
+      downloadOptions,
+    ).subscribe();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    response.next(event(1));
+    expect(replacement).toBeDefined();
+    expect(await replacement).toEqual([event(1)]);
+    expect(request).toHaveBeenCalledTimes(1);
+    first.unsubscribe();
+  });
+
+  it("keeps a shared request when one consumer leaves and cancels it when the last leaves", async () => {
+    const response = new Subject<NostrEvent>();
+    const closed = vi.fn();
+    const request = vi.fn(() => response.pipe(finalize(closed)));
+    const download = createMissingEventDownloads(
+      () => [],
+      request,
+      () => undefined,
+    );
+    const one = download(
+      relay,
+      [event(1).id],
+      accepts,
+      downloadOptions,
+    ).subscribe();
+    const two = download(
+      other,
+      [event(1).id],
+      accepts,
+      downloadOptions,
+    ).subscribe();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    one.unsubscribe();
+    expect(closed).not.toHaveBeenCalled();
+    two.unsubscribe();
+    expect(closed).toHaveBeenCalledTimes(1);
+    const three = result(
+      download(other, [event(1).id], accepts, downloadOptions),
+    );
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    response.next(event(1));
+    expect(await three).toEqual([event(1)]);
+  });
+
+  it.each(["omission", "refusal"])(
+    "falls back to another advertiser after %s",
+    async (mode) => {
+      const response = new Subject<NostrEvent>();
+      const request = vi.fn((source: string) =>
+        source === relay ? response : of(event(1)),
+      );
+      const download = createMissingEventDownloads(
+        () => [],
+        request,
+        () => undefined,
+      );
+      const one = result(
+        download(relay, [event(1).id], accepts, downloadOptions),
+      );
+      const two = result(
+        download(other, [event(1).id], accepts, downloadOptions),
+      );
+      await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      if (mode === "omission") response.complete();
+      else response.error(new Error("rate-limited"));
+      expect(await one).toEqual([event(1)]);
+      expect(await two).toEqual([event(1)]);
+      expect(request.mock.calls.map(([source]) => source)).toEqual([
+        relay,
+        other,
+      ]);
+    },
+  );
+
+  it("falls back after bounded inactivity and cancels the stalled request", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancelled = vi.fn();
+      const request = vi.fn((source: string) =>
+        source === relay ? NEVER.pipe(finalize(cancelled)) : of(event(1)),
+      );
+      const download = createMissingEventDownloads(
+        () => [],
+        request,
+        () => undefined,
+      );
+      const one = firstValueFrom(
+        download(relay, [event(1).id], accepts, downloadOptions).pipe(
+          toArray(),
+        ),
+      );
+      const two = firstValueFrom(
+        download(other, [event(1).id], accepts, downloadOptions).pipe(
+          toArray(),
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await one).toEqual([event(1)]);
+      expect(await two).toEqual([event(1)]);
+      expect(cancelled).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries capped partial responses and reuses store arrivals after admission waits", async () => {
+    const bodies = [event(1), event(2), event(3)];
+    const request = vi.fn((_source: string, filters: Filter[]) =>
+      of(...bodies.filter((e) => filters[0].ids?.includes(e.id)).slice(0, 1)),
+    );
+    const download = createMissingEventDownloads(
+      () => [],
+      request,
+      () => undefined,
+    );
+    expect(
+      await result(
+        download(
+          relay,
+          bodies.map((e) => e.id),
+          accepts,
+          downloadOptions,
+        ),
+      ),
+    ).toEqual(bodies);
+    expect(request).toHaveBeenCalledTimes(3);
+
+    vi.useFakeTimers();
+    try {
+      let cached: NostrEvent[] = [];
+      const paused = vi.fn(() => {
+        cached = [event(1)];
+        return throwError(() => new HistoryAdmissionError(Date.now() + 100));
+      });
+      const retry = createMissingEventDownloads(
+        () => cached,
+        paused,
+        () => undefined,
+      );
+      const output = firstValueFrom(
+        retry(relay, [event(1).id], accepts, downloadOptions).pipe(toArray()),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await output).toEqual(cached);
+      expect(paused).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prioritizes queued consumers and promotes aged background work", async () => {
+    vi.useFakeTimers();
+    const subscriptions: { unsubscribe: () => void }[] = [];
+    try {
+      const responses: Subject<NostrEvent>[] = [];
+      const request = vi.fn((_relay: string, _filters: Filter[]) => {
+        const response = new Subject<NostrEvent>();
+        responses.push(response);
+        return response;
+      });
+      const download = createMissingEventDownloads(
+        () => [],
+        request,
+        () => undefined,
+      );
+      subscriptions.push(
+        download(relay, [event(1).id], accepts, {
+          limit: 1,
+          priority: 3,
+        }).subscribe(),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      for (const [id, priority] of [
+        [2, 3],
+        [3, 1],
+        [4, 2],
+        [5, 0],
+      ]) {
+        subscriptions.push(
+          download(relay, [event(id).id], accepts, {
+            limit: 1,
+            priority,
+          }).subscribe(),
+        );
+      }
+      responses[0].next(event(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request.mock.calls[1][1]).toEqual([{ ids: [event(5).id] }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      responses[1].next(event(5));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request.mock.calls[2][1]).toEqual([{ ids: [event(2).id] }]);
+    } finally {
+      subscriptions.forEach((sub) => sub.unsubscribe());
+      await vi.advanceTimersByTimeAsync(0);
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not share across store/privacy scopes or accept a body outside a consumer's filter", async () => {
+    const request = vi.fn(() => of(event(1)));
+    const a = createMissingEventDownloads(
+      () => [],
+      request,
+      () => undefined,
+    );
+    const b = createMissingEventDownloads(
+      () => [],
+      request,
+      () => undefined,
+    );
+    await Promise.all([
+      result(a(relay, [event(1).id], accepts, downloadOptions)),
+      result(b(relay, [event(1).id], accepts, downloadOptions)),
+    ]);
+    expect(request).toHaveBeenCalledTimes(2);
+    const valid = result(a(relay, [event(1).id], accepts, downloadOptions));
+    const invalid = result(
+      a(other, [event(1).id], () => false, downloadOptions),
+    );
+    const rejected = expect(invalid).rejects.toBeInstanceOf(
+      MissingEventDownloadError,
+    );
+    expect(await valid).toEqual([event(1)]);
+    await rejected;
   });
 });
