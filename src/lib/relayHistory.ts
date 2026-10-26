@@ -48,6 +48,11 @@ export function historyLiveFilter(
     !policy.hasInventory(filter)
   )
     return filter;
+  // Any matching inventory suppresses the initial historical snapshot, even a
+  // single root fetched by a detail page. Arrival order can therefore move most
+  // work into queued reconciliation. Classify benchmarks by this initial REQ
+  // shape, not just by whether a later negotiation ran (it can run after a full
+  // ordinary snapshot too). A smaller wire count alone does not prove readiness.
   return { ...filter, since: Math.floor(Date.now() / 1000) };
 }
 

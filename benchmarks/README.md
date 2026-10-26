@@ -790,7 +790,8 @@ the resolved override commit, path and source hash; this control is not the
 complete historical application. Source instrumentation fails if its targets
 change. Neither the override nor tracing affects release builds.
 
-`stageDiagnostics` records negotiation enqueue/start/completion, admission
+`stageDiagnostics` records history-path choices and matching inventory size,
+negotiation enqueue/start/completion, admission
 reservations/refusals, shared download demand/batches/delivery, and WebSocket
 send/receive timestamps. Join these with existing store/model/UI observations.
 The trace stops retaining rows at 100,000 and reports `traceDropped`; truncated
@@ -818,6 +819,14 @@ real relay availability, geographic latency, Git traffic or private relays.
 
 Run `node benchmarks/transfer-diagnostics-summary.mjs <reports...>` to summarize
 coverage, admission and body timing without dropping incomplete outcomes.
+Summaries report the initial root REQ as `initial-snapshot` or `live-only`
+(and mixed modes across relays), separately from later reconciliation choices.
+A full ordinary snapshot can populate the inventory before NEG starts: a later
+negotiation with hundreds of cached roots is not equivalent to one starting
+with a single focused root. Compare like-for-like groups and also report their
+frequencies; do not silently discard a path or infer causality from an aggregate
+median when the groups do not overlap.
+
 Negotiation wait estimates pair identical filters FIFO; cancelled overlapping
 owners can leave unmatched enqueues, so inspect the raw trace before attributing
 a delay. First ID request to first receipt also includes caps and retries; it is

@@ -190,7 +190,11 @@ await build({
         if (id.endsWith("/src/lib/reconciledHistory.ts")) {
           for (const [target, extra] of [
             [
-              "return serialize(relay, () =>",
+              "if (disabled.has(relay) || inventory.length === 0)",
+              'benchTrace("history-choice", { relay, query, inventoryCount: inventory.length, mode: disabled.has(relay) || inventory.length === 0 ? "ordinary" : "negentropy" });',
+            ],
+            [
+              "return serialize(",
               'benchTrace("negotiation-queued", { relay, query });',
             ],
             [

@@ -20,6 +20,8 @@ const rows = process.argv.slice(2).map((path) => {
   const advertised = new Map(),
     requested = new Map(),
     received = new Map();
+  const rootChoices = new Map();
+  const rootRequests = new Map();
   let admissionRefusals = 0;
   const admission = [],
     batches = [],
@@ -27,6 +29,26 @@ const rows = process.argv.slice(2).map((path) => {
   const negotiationQueue = new Map(),
     negotiationWait = [];
   for (const { at, stage, value: v } of trace) {
+    if (stage === "wire-send" && v.type === "REQ") {
+      const root = v.filters.find((f) => f.kinds?.includes(1621) && f["#a"]);
+      if (root && !rootRequests.has(v.relay))
+        rootRequests.set(v.relay, {
+          at,
+          mode: root.since === undefined ? "initial-snapshot" : "live-only",
+          filter: root,
+        });
+    }
+    if (
+      stage === "history-choice" &&
+      v.query.kinds?.includes(1621) &&
+      v.query["#a"] &&
+      !rootChoices.has(v.relay)
+    )
+      rootChoices.set(v.relay, {
+        at,
+        mode: v.mode,
+        inventoryCount: v.inventoryCount,
+      });
     // FIFO matching by filter is an estimate: identical cancelled owners can
     // leave an unmatched enqueue. Inspect raw traces before assigning causality.
     if (stage === "negotiation-queued" || stage === "negotiation-start") {
@@ -75,6 +97,18 @@ const rows = process.argv.slice(2).map((path) => {
   }
   return {
     path,
+    rootRequests: Object.fromEntries(rootRequests),
+    rootRequestMode: rootRequests.size
+      ? [...new Set([...rootRequests.values()].map((v) => v.mode))]
+          .sort()
+          .join("+")
+      : "unobserved",
+    rootChoices: Object.fromEntries(rootChoices),
+    rootMode: rootChoices.size
+      ? [...new Set([...rootChoices.values()].map((v) => v.mode))]
+          .sort()
+          .join("+")
+      : "unobserved",
     label: raw.config.label,
     failure: r.failure ?? r.journey?.failure ?? null,
     errors: raw.errors,

@@ -76,6 +76,10 @@ export function createReconciledHistory(
   // when coordination, workload or transport changes competing work. Compare
   // accurate repository convergence, foreground readiness and responsiveness together;
   // neither fewer missing events nor lower long-task totals alone is sufficient.
+  // Priority-only ordering with unchanged concurrency/admission also delayed
+  // uncached legacy replies in capped reloads. Keep FIFO until a policy protects
+  // background completeness as well as detail readiness; see the commit titled
+  // "bench: distinguish initial snapshots from queued reconciliation".
   const queues = new Map<
     string,
     { active: boolean; pending: (() => void)[] }
