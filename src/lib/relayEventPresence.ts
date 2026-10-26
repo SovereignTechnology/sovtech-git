@@ -72,6 +72,13 @@ export class RelayEventPresence {
     if (changed) this.changes$.next(new Set([id]));
   }
 
+  /** A completed negotiation advertised these IDs; the bodies may come from
+   * another relay. Preserve newer evidence rather than recording a fresh receipt.
+   */
+  confirm(relay: string, ids: readonly string[], started: number): void {
+    this.reconcile(relay, ids, new Set(ids), started);
+  }
+
   /** inventory is the immutable local set supplied to this negotiation, not a
    * later store query. Do not overwrite evidence learned after it began.
    */

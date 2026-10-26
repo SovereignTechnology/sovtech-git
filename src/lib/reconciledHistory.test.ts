@@ -24,6 +24,7 @@ import {
 import { RelayEventPresence } from "./relayEventPresence";
 import {
   getRateLimitCooldownRemaining,
+  HistoryAdmissionError,
   resilientNegentropy,
 } from "./resilientSubscription";
 
@@ -107,6 +108,88 @@ describe("receive-only reconciled history", () => {
     ).toBe(true);
     expect(events.every((e) => presence.has(e.id, [relay]))).toBe(true);
     expect(opts.onComplete).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("reuses bodies arriving during negotiation without inventing fresh relay receipts", async () => {
+    const rounds = new Subject<{ have: string[]; need: string[] }>();
+    const request = vi.fn(() => EMPTY);
+    const { store, load, presence } = setup([event(1)], {
+      negotiate: () => rounds,
+      request,
+    });
+    const result = collect(load(relay, [{ kinds: [1621] }], options()));
+    store.add(event(2));
+    store.add(event(3));
+    // A newer absence check must win over this older negotiation's evidence.
+    presence.reconcile(relay, [event(3).id], new Set(), presence.begin());
+    rounds.next({ have: [], need: [event(2).id, event(3).id] });
+    rounds.complete();
+    expect((await result).map((e) => e.id)).toEqual([
+      event(1).id,
+      event(2).id,
+      event(3).id,
+    ]);
+    expect(request).not.toHaveBeenCalled();
+    expect(presence.has(event(2).id, [relay])).toBe(true);
+    expect(presence.has(event(3).id, [relay])).toBe(false);
+  });
+
+  it("rechecks cached bodies after a local admission refusal", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn(() => {
+        store.add(event(2));
+        return throwError(() => new HistoryAdmissionError(Date.now() + 100));
+      });
+      const setupResult = setup([event(1)], {
+        negotiate: () => of({ have: [], need: [event(2).id] }),
+        request,
+      });
+      const store = setupResult.store;
+      const result = collect(
+        setupResult.load(relay, [{ kinds: [1621] }], options()),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await result).map((e) => e.id)).toEqual([
+        event(1).id,
+        event(2).id,
+      ]);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks later batches but never reuses bodies outside the negotiated filter", async () => {
+    const request = vi.fn((_relay: string, filters: Filter[]) => {
+      if (filters[0].ids?.includes(event(2).id)) {
+        store.add(event(3));
+        return of(event(2));
+      }
+      return EMPTY;
+    });
+    const setupResult = setup([event(1)], {
+      negotiate: () => of({ have: [], need: [event(2).id, event(3).id] }),
+      request,
+    });
+    const store = setupResult.store;
+    const result = await collect(
+      setupResult.load(relay, [{ kinds: [1621] }], { ...options(), limit: 1 }),
+    );
+    expect(result.map((e) => e.id)).toEqual([
+      event(1).id,
+      event(2).id,
+      event(3).id,
+    ]);
+    expect(request).toHaveBeenCalledTimes(1);
+    const mismatch = setup([event(1), { ...event(4), kind: 1 }], {
+      negotiate: () => of({ have: [], need: [event(4).id] }),
+      request: () => EMPTY,
+    });
+    const opts = options();
+    await collect(mismatch.load(relay, [{ kinds: [1621] }], opts));
+    expect(opts.onComplete).toHaveBeenCalledExactlyOnceWith(false);
+    expect(mismatch.presence.has(event(4).id, [relay])).toBe(false);
   });
 
   it("does not call an omitted negotiated ID complete even when fallback is empty", async () => {

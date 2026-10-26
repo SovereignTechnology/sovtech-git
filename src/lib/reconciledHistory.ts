@@ -202,13 +202,44 @@ export function createReconciledHistory(
                 const requested = new Set(ids);
                 let progress = false;
                 return admissionRetry(
-                  defer(() => transport.request(relay, [{ ids }])),
+                  defer(() => {
+                    // Recheck each batch, including admission retries: live
+                    // subscriptions or other histories may have supplied bodies
+                    // since this immutable negotiation inventory was captured.
+                    const reused = store.getByFilters({ ids }).filter(matches);
+                    const reusedIds = reused.map((event) => event.id);
+                    for (const id of reusedIds) {
+                      missing.delete(id);
+                      received.add(id);
+                    }
+                    presence.confirm(relay, reusedIds, started);
+                    const remaining = ids.filter((id) => missing.has(id));
+                    if (reused.length) progress = true;
+                    return from(reused).pipe(
+                      concatWith(
+                        defer(() =>
+                          remaining.length
+                            ? transport
+                                .request(relay, [{ ids: remaining }])
+                                .pipe(
+                                  tap((event) => {
+                                    if (
+                                      requested.has(event.id) &&
+                                      matches(event)
+                                    )
+                                      observe(event);
+                                  }),
+                                )
+                            : EMPTY,
+                        ),
+                      ),
+                    );
+                  }),
                 ).pipe(
                   concatMap((event) => {
                     if (!requested.has(event.id) || !matches(event))
                       return EMPTY;
                     progress = true;
-                    observe(event);
                     return [event];
                   }),
                   concatWith(
