@@ -52,6 +52,18 @@ export function createReconciledHistory(
   },
 ) {
   const disabled = new Set<string>();
+  // Keep negotiations serialized until their resulting downloads are coordinated.
+  // Two-concurrent NEG experiments with separate start budgets, query priorities
+  // and queue aging advanced cached history faster but did not protect foreground
+  // readiness. Even the tighter policy delayed navigation comments (3.09 -> 4.77s
+  // median) and increased EVENT traffic. These were two-pair captured replays,
+  // not proof that parallel negotiation is intrinsically worse on every relay.
+  // See `git show a156687a` for both policies, benefits, regressions and limitations;
+  // rerun benchmarks/negotiation-admission-suite.json using benchmarks/README.md.
+  // Revisit after shared missing-ID download ownership/fallback, a different
+  // workload, or transport changes reduce the competing work. Compare accurate
+  // repository convergence, foreground readiness and responsiveness together;
+  // neither fewer missing events nor lower long-task totals alone is sufficient.
   const queues = new Map<
     string,
     { active: boolean; pending: (() => void)[] }
@@ -174,6 +186,15 @@ export function createReconciledHistory(
               return fallback();
             status("loading");
             const have = new Set<string>();
+            // This missing set belongs to one relay/filter snapshot: simultaneous
+            // owners can download the same body. A future coordinator could share
+            // in-flight ID batches, reuse bodies arriving elsewhere, and fall back
+            // to another advertising relay on refusal, omission or bounded stall.
+            // Start useful transfers before all negotiations finish. Keep relay
+            // membership evidence independent of the relay serving the body, and
+            // preserve cancellation/cooldowns and incomplete-history reporting.
+            // This is an untested proposal, not the demonstrated cause of every
+            // latency regression in the scheduling experiment noted above.
             const transfer = (): Observable<NostrEvent> =>
               defer(() => {
                 if (missing.size === 0) return EMPTY;

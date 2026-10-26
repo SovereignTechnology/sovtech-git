@@ -2019,6 +2019,16 @@ export function resilientHistoryRequest(
 /** Receive-only negotiation. ID transfers must use resilientHistoryRequest.
  * The caller serializes negotiations and disables them after a relay refusal;
  * the dependency owns internal NEG-MSG rounds, not our request scheduler.
+ *
+ * Shared start pacing is a conservative client policy, not a NIP-77 requirement
+ * or a model of every relay's quotas. Relays can budget NEG-MSG continuations
+ * separately from REQ/NEG-OPEN starts while also imposing a total message cap.
+ * A generic refusal cannot safely tell us which allowance remains available,
+ * so cooldowns stay shared. Start admission does not pace internal continuations.
+ * Do not remove spacing solely because a server advertises NIP-77: the parallel
+ * scheduling experiment in a156687a increased history progress but regressed
+ * foreground readiness. See createReconciledHistory's queue rationale and rerun
+ * its benchmark when changing admission or transfer coordination.
  */
 export function resilientNegentropy(
   pool: RelayPool,

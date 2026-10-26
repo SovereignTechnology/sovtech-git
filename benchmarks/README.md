@@ -733,7 +733,11 @@ work before interpreting resource totals as equivalent workloads.
 
 `negotiation-admission-suite.json` provides a bounded NIP-77 scheduling
 comparison: two alternating pairs each for a seeded-cache conversation reload,
-navigation during loading, and a return with new activity. Serve the before/after
+navigation during loading, and a return with new activity. The JSON is scenario
+configuration, not a self-contained benchmark: it uses the existing revision
+runner, instrumented production builds, a browser-session lease, and the fixture
+server on 4190 loaded with the captured corpus via `BENCH_CORPUS`. The corpus
+and raw reports are not committed. Serve the before/after
 bundles on 4193/4192 and preserve their build metadata as
 `perf-reports/direct-entry/before-meta.json` and `after-meta.json`. Run it with
 the revision runner above. The selected conversation ID belongs to the captured
