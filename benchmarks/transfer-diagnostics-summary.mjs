@@ -34,7 +34,12 @@ const rows = process.argv.slice(2).map((path) => {
       if (root && !rootRequests.has(v.relay))
         rootRequests.set(v.relay, {
           at,
-          mode: root.since === undefined ? "initial-snapshot" : "live-only",
+          mode:
+            root.since !== undefined
+              ? "live-only"
+              : root.limit === undefined
+                ? "initial-snapshot"
+                : "bounded-snapshot",
           filter: root,
         });
     }

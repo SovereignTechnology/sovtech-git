@@ -790,6 +790,13 @@ the resolved override commit, path and source hash; this control is not the
 complete historical application. Source instrumentation fails if its targets
 change. Neither the override nor tracing affects release builds.
 
+For initial-snapshot policy experiments, use `BENCH_SNAPSHOT_CONTROL_REF=<commit>`
+instead. This substitutes `src/lib/relayHistory.ts` and its policy registration
+in `src/services/nostr.ts` together, retaining their matching interface. Inspect
+both files' differences first: this is a two-file control, not a selective
+function replacement. The two override variables are mutually exclusive;
+metadata records every substituted source and hash.
+
 `stageDiagnostics` records history-path choices and matching inventory size,
 negotiation enqueue/start/completion, admission
 reservations/refusals, shared download demand/batches/delivery, and WebSocket
@@ -819,7 +826,8 @@ real relay availability, geographic latency, Git traffic or private relays.
 
 Run `node benchmarks/transfer-diagnostics-summary.mjs <reports...>` to summarize
 coverage, admission and body timing without dropping incomplete outcomes.
-Summaries report the initial root REQ as `initial-snapshot` or `live-only`
+Summaries report the initial root REQ as `initial-snapshot`, `bounded-snapshot`
+(a REQ limit without `since`), or `live-only`
 (and mixed modes across relays), separately from later reconciliation choices.
 A full ordinary snapshot can populate the inventory before NEG starts: a later
 negotiation with hundreds of cached roots is not equivalent to one starting

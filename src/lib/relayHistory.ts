@@ -53,6 +53,11 @@ export function historyLiveFilter(
   // work into queued reconciliation. Classify benchmarks by this initial REQ
   // shape, not just by whether a later negotiation ran (it can run after a full
   // ordinary snapshot too). A smaller wire count alone does not prove readiness.
+  // A bounded root bootstrap also feeds essentials/comment fan-out. A 20-root
+  // experiment reduced the empty-cache burst but did not beat the sparse-cache
+  // live-only path, and delayed discussion versus a full snapshot. Revisit sizing
+  // alongside queue/coverage changes; see the comparison in the commit titled
+  // "bench: evaluate bounded repository root snapshots".
   return { ...filter, since: Math.floor(Date.now() / 1000) };
 }
 

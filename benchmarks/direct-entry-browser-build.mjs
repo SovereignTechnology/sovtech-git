@@ -5,27 +5,34 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-const overrideRef = process.env.BENCH_TRANSFER_CONTROL_REF;
+const snapshotRef = process.env.BENCH_SNAPSHOT_CONTROL_REF;
+const transferRef = process.env.BENCH_TRANSFER_CONTROL_REF;
+if (snapshotRef && transferRef)
+  throw Error("Choose one benchmark control override");
+const overrideRef = snapshotRef ?? transferRef;
 const overrideCommit = overrideRef
   ? execFileSync("git", ["rev-parse", "--verify", `${overrideRef}^{commit}`], {
       encoding: "utf8",
     }).trim()
   : null;
-const overridePath = "src/lib/reconciledHistory.ts";
-const overrideSource = overrideCommit
-  ? execFileSync("git", ["show", `${overrideCommit}:${overridePath}`], {
-      encoding: "utf8",
-    })
-  : null;
-const sourceOverrides = overrideCommit
-  ? [
-      {
-        path: overridePath,
-        commit: overrideCommit,
-        sha256: createHash("sha256").update(overrideSource).digest("hex"),
-      },
-    ]
-  : [];
+const overridePaths = snapshotRef
+  ? ["src/lib/relayHistory.ts", "src/services/nostr.ts"]
+  : ["src/lib/reconciledHistory.ts"];
+const overrides = new Map(
+  overrideCommit
+    ? overridePaths.map((file) => [
+        path.resolve(file),
+        execFileSync("git", ["show", `${overrideCommit}:${file}`], {
+          encoding: "utf8",
+        }),
+      ])
+    : [],
+);
+const sourceOverrides = [...overrides].map(([file, source]) => ({
+  path: path.relative(process.cwd(), file),
+  commit: overrideCommit,
+  sha256: createHash("sha256").update(source).digest("hex"),
+}));
 mkdirSync("perf-reports/direct-entry", { recursive: true });
 writeFileSync(
   "perf-reports/direct-entry/build-meta.json",
@@ -158,8 +165,7 @@ await build({
       name: "direct-entry-experiment",
       enforce: "pre",
       load(id) {
-        if (overrideSource && id === path.resolve(overridePath))
-          return overrideSource;
+        return overrides.get(id);
       },
       transform(code, id) {
         const trace = `function benchTrace(stage: string, value: unknown) {
