@@ -42,6 +42,8 @@
 
 ### Fixed
 
+- Upgrade React Router to version 7 for current redirect and URL-handling security fixes while retaining the existing declarative routes.
+
 - Update compatible JavaScript dependencies for upstream security fixes, including Capacitor navigation guards, Vite development-server protections, React Router redirects and fflate ZIP parsing. Refresh affected build-tool dependencies while preserving the Applesauce patch.
 
 - Load author profiles from configured fallback relays as well as profile indexes, so issue names and avatars can appear without visiting each user's profile page.
