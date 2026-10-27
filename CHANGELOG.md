@@ -42,6 +42,8 @@
 
 ### Fixed
 
+- Update Zod to version 4 with compatible form resolvers for upstream collection-validation security fixes; preserve existing draft and repository-selection schemas.
+
 - Upgrade React Router to version 7 for current redirect and URL-handling security fixes while retaining the existing declarative routes.
 
 - Update compatible JavaScript dependencies for upstream security fixes, including Capacitor navigation guards, Vite development-server protections, React Router redirects and fflate ZIP parsing. Refresh affected build-tool dependencies while preserving the Applesauce patch.

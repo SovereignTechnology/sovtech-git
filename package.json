@@ -32,7 +32,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@fontsource-variable/inter": "^5.2.8",
-    "@hookform/resolvers": "^3.10.0",
+    "@hookform/resolvers": "^5.9.2",
     "@noble/hashes": "^2.0.1",
     "@primer/octicons-react": "^19.40.0",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -114,7 +114,7 @@
     "vaul": "^0.9.9",
     "window.nostrdb.js": "^0.5.1",
     "yet-another-react-lightbox": "^3.32.2",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.3",
