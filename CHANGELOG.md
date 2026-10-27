@@ -12,6 +12,12 @@
 
 ### Changed
 
+- Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, and XML dependencies for the build tools.
+
+- Update CI publication tools to ngit 3.0.4 and Netlify CLI 27.14.2, using patched Nix native libraries for ngit and refreshed Netlify runtime dependencies.
+
+- Update the GRASP integration fixture to 3.0.9 with refreshed certificate verification and root certificates.
+
 - Upgrade Vitest to version 4 for patched test-server dependencies and adapt browser-observer mocks to its constructor semantics.
 
 - Update the Nix development and CI environment to Node.js 24.22.1 with its native security fixes and pinned certificate bundle, align shell pnpm with CI, and refresh the matching Playwright browser tooling. Remove the unsupported Intel macOS shell target; Linux and Apple Silicon targets remain.
