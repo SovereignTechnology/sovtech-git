@@ -41,14 +41,16 @@ let
     hash = "sha256-eYjtBxsqB5AOLscV/KFcarcrzm20M68wH6f6fpQHvSQ=";
     defaultJava = pkgs.jdk21;
   };
-  netlify = pkgs.netlify-cli.overrideAttrs (final: previous: {
-    version = "26.2.0";
+  netlify = (pkgs.netlify-cli.override { nodejs = node; }).overrideAttrs (final: previous: {
+    version = "27.14.2";
     src = pkgs.fetchFromGitHub {
       owner = "netlify";
       repo = "cli";
-      tag = "v26.2.0";
-      sha256 = "1jkzmw801bq1hnj7rl1grmrcaqiqn33ld0rgn765ipdgh1711c22";
+      tag = "v27.14.2";
+      sha256 = "sha256-j0ULbsyKpk5eQ5fnVkVW78lB/EculuPmsOkBs1oHAVg=";
     };
+    # Keep the security updates narrow until upstream refreshes its lockfile.
+    patches = (previous.patches or [ ]) ++ [ ./netlify-security.patch ];
     # Upstream's lock omits download metadata for some exact-version entries.
     # Restore them before both cache fetching and offline installation. The
     # vendored metadata and cache hash pin all bytes without resolving versions.
@@ -58,9 +60,9 @@ let
     # overrideAttrs must also update the format expected by npmConfigHook.
     env = (previous.env or { }) // { NIX_NPM_FETCHER_VERSION = 2; };
     npmDeps = pkgs.fetchNpmDeps {
-      inherit (final) src postPatch;
+      inherit (final) src patches postPatch;
       fetcherVersion = 2;
-      hash = "sha256-pZuZvYGANJ5S9BQLomTz9DKrGkahw2mzj8rrWFsn45c=";
+      hash = "sha256-30iSjkHfYo59MuZTWrMtjYDEj5fJQQyjui7m2W7vNzI=";
     };
   });
   # Only dependency inputs affect this cache, not application source changes.
