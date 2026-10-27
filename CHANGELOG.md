@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Upgrade Vitest to version 4 for patched test-server dependencies and adapt browser-observer mocks to its constructor semantics.
+
 - Update the Nix development and CI environment to Node.js 24.22.1 with its native security fixes and pinned certificate bundle, align shell pnpm with CI, and refresh the matching Playwright browser tooling. Remove the unsupported Intel macOS shell target; Linux and Apple Silicon targets remain.
 
 - Restore cached repository items with their known statuses before relay refresh, and cache new collaboration events only after repository-relay confirmation.

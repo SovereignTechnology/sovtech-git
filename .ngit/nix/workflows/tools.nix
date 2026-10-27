@@ -77,7 +77,7 @@ let
       ];
     };
     fetcherVersion = 3;
-    hash = "sha256-nl0KVfCtXSmqWplmdWftYTRTqNhGYxsZu+BEl+WqeTY=";
+    hash = "sha256-azghlOyY+urz6x9py8E0YUDmKZ7nEITM5yznr1+iDZs=";
   };
 in {
   inherit node pnpm ngit gradle netlify dependencies;
