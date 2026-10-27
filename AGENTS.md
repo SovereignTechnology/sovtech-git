@@ -59,6 +59,15 @@ shadcn/ui primitives live in `@/components/ui`. List the directory (`ls src/comp
 - **Use `pnpm` when available and working.** npm is supported as a fallback (`npm ci`, `npm run dev`, `npm run pre-commit`). Nix is optional; `nix develop` only provides a pinned Node/pnpm/e2e-test toolchain. For dependency updates, use pnpm first so `pnpm-lock.yaml` remains the source of truth, then refresh and commit `package-lock.json` for npm fresh clones (for example, `npm install --package-lock-only`).
 - **Prefer patching upstream over working around bugs.** When a dependency has a bug or missing feature, use the package manager's patch workflow and commit the resulting patch files/configuration rather than wrapping or duplicating logic in our codebase.
 
+### Dependency updates
+
+When available, consult the local [dependency update runbook](work/dependency-updates.md)
+for dependency changes and security reports. This Git-ignored file is optional
+and is not distributed with the repository. Keep its watchlist focused on active
+findings and upgrade constraints; remove resolved items. If it is absent,
+proceed with the normal dependency checks. Keep private watchlist details out of
+public documentation, commits, and PRs.
+
 ## Android
 
 Android builds and the branding-regeneration script are documented in `docs/andriod.md`.
