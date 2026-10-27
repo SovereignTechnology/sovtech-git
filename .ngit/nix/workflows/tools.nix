@@ -18,15 +18,15 @@ let
   };
   ngit = pkgs.stdenvNoCC.mkDerivation {
     pname = "ngit";
-    version = "3.0.3";
+    version = "3.0.4";
     # Static musl release, pinned to the signed release asset's SHA-256.
     src = pkgs.fetchurl {
       urls = [
-        "https://blossom.primal.net/d0022122370c8e3982fce0b4c185b060139fc1a74de1637e7c005ffffcaab024"
-        "https://github.com/DanConwayDev/ngit-cli/releases/download/v3.0.3/ngit-v3.0.3-x86_64-unknown-linux-musl.tar.gz"
+        "https://blossom.primal.net/733f6e34db8d0edc5fba5850924b3d5ec7e7b6f12d0b10815b8ca9faddde2a1b"
+        "https://github.com/DanConwayDev/ngit-cli/releases/download/v3.0.4/ngit-v3.0.4-x86_64-unknown-linux-musl.tar.gz"
       ];
-      sha256 = "d0022122370c8e3982fce0b4c185b060139fc1a74de1637e7c005ffffcaab024";
-      name = "ngit-3.0.3.tar.gz";
+      sha256 = "733f6e34db8d0edc5fba5850924b3d5ec7e7b6f12d0b10815b8ca9faddde2a1b";
+      name = "ngit-3.0.4.tar.gz";
     };
     sourceRoot = ".";
     installPhase = ''
