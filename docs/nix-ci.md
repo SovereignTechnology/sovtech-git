@@ -28,6 +28,12 @@ job state, while each command establishes its own process environment.
 
 ## Cache dependencies, check the current source
 
+Development and CI use pnpm 10.34.9, matching `packageManager` in
+`package.json`. Its `pnpm.allowBuilds` and npm `allowScripts` configurations
+permit the esbuild and SWC install scripts; the Applesauce patch remains in
+`pnpm.patchedDependencies` and is also applied for npm installs by the shared
+postinstall script.
+
 The `ci-dependencies` Nix package includes Node and pnpm alongside a store using only
 `package.json`, `pnpm-lock.yaml`, and `patches/`. Its fixed hash verifies the
 downloaded dependency contents, including the prepared JavaScript for the

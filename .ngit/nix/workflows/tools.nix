@@ -3,10 +3,10 @@ let
   node = pkgs.nodejs_24;
   pnpm = pkgs.stdenvNoCC.mkDerivation {
     pname = "pnpm";
-    version = "9.15.9";
+    version = "10.34.9";
     src = pkgs.fetchurl {
-      url = "https://registry.npmjs.org/pnpm/-/pnpm-9.15.9.tgz";
-      sha256 = "19r89bfc8ymcx7ffk4vdrh574487fffx19l689fkj1j4fsnsg1ng";
+      url = "https://registry.npmjs.org/pnpm/-/pnpm-10.34.9.tgz";
+      hash = "sha256-foqUYQjnuqsRnlHSfCTWF4tGVFQiZD28keNOLx7jLg8=";
     };
     passthru.nodejs-slim = node;
     nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -78,7 +78,7 @@ let
       ];
     };
     fetcherVersion = 3;
-    hash = "sha256-fE8rn7jvFnIHE0M6f10VlTKgj9J3WMs41qFkCJbnrnU=";
+    hash = "sha256-m0iCbsj+/MsmHCufI6ZWMYJ9Q0iBf1TpY2Znyb5JxTQ=";
   };
 in {
   inherit node pnpm ngit gradle netlify dependencies;

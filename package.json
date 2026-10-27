@@ -2,7 +2,7 @@
   "name": "gitworkshop",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@10.34.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -147,7 +147,15 @@
     "vitest": "^4.1.12",
     "vitest-websocket-mock": "0.5.0"
   },
+  "allowScripts": {
+    "@swc/core": true,
+    "esbuild": true
+  },
   "pnpm": {
+    "allowBuilds": {
+      "@swc/core": true,
+      "esbuild": true
+    },
     "patchedDependencies": {
       "applesauce-core@7.0.1": "patches/applesauce-core@7.0.1.patch"
     },
