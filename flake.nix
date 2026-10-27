@@ -10,7 +10,10 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ (import ./nix/node-security-overlay.nix) ];
+          overlays = [
+            (import ./nix/node-security-overlay.nix)
+            (import ./nix/jdk-security-overlay.nix)
+          ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
         };
