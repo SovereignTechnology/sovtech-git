@@ -100,7 +100,11 @@ async function runCacheComparison(page, bundle) {
               const timings = [];
               const read = async (filters) => {
                 const at = performance.now();
-                const out = await client.filters(filters);
+                const query =
+                  typeof client.query === "function"
+                    ? client.query
+                    : client.filters;
+                const out = await query.call(client, filters);
                 timings.push({ ms: performance.now() - at, count: out.length });
                 return out;
               };
