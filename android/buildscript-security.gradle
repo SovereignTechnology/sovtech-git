@@ -1,0 +1,29 @@
+// Apply before each project evaluates its buildscript, including Capacitor plugins.
+// These constraints update build tools without changing Android app dependencies.
+gradle.beforeProject { project ->
+    project.buildscript.configurations.named('classpath') {
+        withDependencies { dependencies ->
+            if (dependencies.any { it.group == 'com.android.tools.build' && it.name == 'gradle' }) {
+                dependencies.add(project.buildscript.dependencies.platform('io.netty:netty-bom:4.1.139.Final'))
+            }
+        }
+    }
+    project.buildscript.dependencies {
+        constraints {
+            ['bcprov-jdk18on', 'bcpkix-jdk18on', 'bcutil-jdk18on'].each { module ->
+                classpath("org.bouncycastle:${module}:1.86") {
+                    because 'Keep the build tool cryptography modules on the patched release'
+                }
+            }
+            classpath('org.apache.commons:commons-compress:1.28.0') {
+                because 'Use the patched archive parsers in Android build tools'
+            }
+            classpath('org.bitbucket.b_c:jose4j:0.9.7') {
+                because 'Use bounded compressed JWE handling in bundletool'
+            }
+            classpath('org.jdom:jdom2:2.0.6.1') {
+                because 'Use the patched XML parser in Jetifier'
+            }
+        }
+    }
+}
