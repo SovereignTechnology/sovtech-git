@@ -13,6 +13,7 @@
           overlays = [
             (import ./nix/node-security-overlay.nix)
             (import ./nix/jdk-security-overlay.nix)
+            (import ./nix/npm-security-overlay.nix)
           ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;

@@ -34,6 +34,13 @@ permit the esbuild and SWC install scripts; the Applesauce patch remains in
 `pnpm.patchedDependencies` and is also applied for npm installs by the shared
 postinstall script.
 
+The Nix Node distribution uses npm 11.21.1 for the supported npm fallback.
+`nix/npm-security-overlay.nix` retains the compiled Node runtime and nixpkgs
+integration while replacing npm's bundled `undici` with 6.29.1 and
+`ip-address` with 10.7.4. These hash-pinned, compatible replacements are
+temporary; remove them once upstream npm includes those fixes, and remove
+the overlay once the pinned Nixpkgs distribution supplies a patched bundle.
+
 The `ci-dependencies` Nix package includes Node and pnpm alongside a store using only
 `package.json`, `pnpm-lock.yaml`, and `patches/`. Its fixed hash verifies the
 downloaded dependency contents, including the prepared JavaScript for the

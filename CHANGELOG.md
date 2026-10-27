@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Patch the Nix npm fallback and its bundled HTTP dependencies while preserving the Node runtime.
+
 - Update development and CI to pnpm 10.34.9 for package-install security fixes, with explicit esbuild and SWC build-script approvals.
 
 - Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, and XML dependencies for the build tools.
