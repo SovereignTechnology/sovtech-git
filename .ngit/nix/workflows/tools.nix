@@ -16,24 +16,23 @@ let
       makeWrapper ${node}/bin/node "$out/bin/pnpm" --add-flags "$out/lib/pnpm/bin/pnpm.cjs"
     '';
   };
-  ngit = pkgs.stdenvNoCC.mkDerivation {
+  ngit = pkgs.rustPlatform.buildRustPackage rec {
     pname = "ngit";
     version = "3.0.4";
-    # Static musl release, pinned to the signed release asset's SHA-256.
-    src = pkgs.fetchurl {
-      urls = [
-        "https://blossom.primal.net/733f6e34db8d0edc5fba5850924b3d5ec7e7b6f12d0b10815b8ca9faddde2a1b"
-        "https://github.com/DanConwayDev/ngit-cli/releases/download/v3.0.4/ngit-v3.0.4-x86_64-unknown-linux-musl.tar.gz"
-      ];
-      sha256 = "733f6e34db8d0edc5fba5850924b3d5ec7e7b6f12d0b10815b8ca9faddde2a1b";
-      name = "ngit-3.0.4.tar.gz";
+    src = pkgs.fetchFromGitHub {
+      owner = "DanConwayDev";
+      repo = "ngit-cli";
+      rev = "71a63ef5cee474275deb4a47ce571b9a2abd2706";
+      hash = "sha256-GwuaGF6PS8EAfisfMMbwiQUoyE63b34pPFKHzPJ6p7o=";
     };
-    sourceRoot = ".";
-    installPhase = ''
-      mkdir -p "$out/bin"
-      find . -type f -name ngit -exec install -m755 {} "$out/bin/ngit" \;
-      test -x "$out/bin/ngit"
-    '';
+    cargoLock.lockFile = "${src}/Cargo.lock";
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = [ pkgs.openssl pkgs.libssh2 pkgs.dbus ];
+    # Keep TLS and SSH on Nixpkgs' patched native libraries.
+    OPENSSL_NO_VENDOR = 1;
+    LIBSSH2_SYS_USE_PKG_CONFIG = 1;
+    # Upstream integration tests need Git fixtures and local relay services.
+    doCheck = false;
     meta.platforms = [ "x86_64-linux" ];
   };
   # Nixpkgs patches the native libraries embedded in Gradle's JARs.
