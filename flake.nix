@@ -19,20 +19,30 @@
         };
         tools = import ./.ngit/nix/workflows/tools.nix { inherit pkgs; };
         caBundle = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-        # The e2e harness needs a reproducible ngit-grasp binary. Build the
-        # published crate directly and leave its live-relay tests to the
-        # application's e2e suite.
-        ngit-grasp-pkg = pkgs.rustPlatform.buildRustPackage rec {
+        # Pin the v3.0.9 release.
+        ngitGraspRevision = "053ee62610e0af37c73c1e3016d12cba4ab28e07";
+        # The pinned repository contains Gitlinks without .gitmodules entries.
+        # Nix 2.34 and 2.35 disagree about whether their empty directories are
+        # retained in a flake Git input, producing different NAR hashes for the
+        # same commit. fetchgit gives us a stable tracked-file checkout instead.
+        ngitGraspSource = pkgs.fetchgit {
+          url = "https://gitnostr.com/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit-grasp.git";
+          rev = ngitGraspRevision;
+          hash = "sha256-5i4fRkCHy/bAlsPccK9qa9SwVVyVW6YQS64PVicotJQ=";
+          fetchSubmodules = false;
+        };
+        ngit-grasp-pkg = pkgs.rustPlatform.buildRustPackage {
           pname = "ngit-grasp";
-          version = "3.0.0";
-          src = pkgs.fetchCrate {
-            inherit pname version;
-            hash = "sha256-t14USfeuoXGKws1ueVXqQk+hjE2mGf1zjXMzHrTax58=";
-          };
-          NGIT_BUILD_REVISION = "bce30ef039ecbc8c2371008e1bd00eedd79bbccf";
-          cargoHash = "sha256-MACPKCWuUuMe37dE84AoWeWH2S4EIp/LFqihvwBzSiY=";
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
+          version = "3.0.9";
+          src = ngitGraspSource;
+          NGIT_BUILD_REVISION = ngitGraspRevision;
+          cargoLock.lockFile = "${ngitGraspSource}/Cargo.lock";
+          cargoBuildFlags = [ "-p" "ngit-grasp" ];
+          nativeBuildInputs = with pkgs; [ pkg-config git ];
+          buildInputs = with pkgs; [ openssl ];
+          # The upstream library tests require Git and other ambient state that
+          # is unavailable in the build sandbox. The application integration suite
+          # exercises the resulting binary instead.
           doCheck = false;
         };
         # Headless Chromium for browser automation (benchmarks/). The npm
