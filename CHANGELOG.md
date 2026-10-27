@@ -40,6 +40,8 @@
 
 ### Fixed
 
+- Update compatible JavaScript dependencies for upstream security fixes, including Capacitor navigation guards, Vite development-server protections, React Router redirects and fflate ZIP parsing. Refresh affected build-tool dependencies while preserving the Applesauce patch.
+
 - Load author profiles from configured fallback relays as well as profile indexes, so issue names and avatars can appear without visiting each user's profile page.
 
 - Remember the five most recently used decrypted private Git service list versions per account and share concurrent decrypt requests to avoid repeated signer prompts after reloads.
