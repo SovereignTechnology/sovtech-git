@@ -38,8 +38,8 @@ let
   };
   # Nixpkgs patches the native libraries embedded in Gradle's JARs.
   gradle = pkgs.gradle-packages.mkGradle {
-    version = "8.14.3";
-    hash = "sha256-vXEQIhNJMGCVbsIp2Ua+7lcVjb2J0OYrkbyg+ixfNTE=";
+    version = "8.14.6";
+    hash = "sha256-eYjtBxsqB5AOLscV/KFcarcrzm20M68wH6f6fpQHvSQ=";
     defaultJava = pkgs.jdk21;
   };
   netlify = pkgs.netlify-cli.overrideAttrs (final: previous: {
