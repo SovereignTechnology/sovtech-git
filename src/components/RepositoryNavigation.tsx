@@ -14,7 +14,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { RelayCurationMode } from "@/services/settings";
+import type {
+  RelayCurationMode,
+  RelayCurationPreference,
+} from "@/services/settings";
 import { cn } from "@/lib/utils";
 
 export interface RepositoryTab {
@@ -60,29 +63,36 @@ function RelayContents({ mode }: { mode: RelayCurationMode }) {
 }
 
 function RelayViewMenuItems({
-  mode,
+  preference,
+  defaultMode,
   onChange,
 }: {
-  mode: RelayCurationMode;
-  onChange: (mode: RelayCurationMode) => void;
+  preference: RelayCurationPreference;
+  defaultMode: RelayCurationMode;
+  onChange: (mode: RelayCurationPreference) => void;
 }) {
   return (
     <>
       <DropdownMenuLabel>Repository view</DropdownMenuLabel>
       <DropdownMenuRadioGroup
-        value={mode}
+        value={preference}
         onValueChange={(value) => {
-          if (value === "repo" || value === "outbox") onChange(value);
+          if (value === "default" || value === "repo" || value === "outbox")
+            onChange(value);
         }}
       >
+        <DropdownMenuRadioItem value="default">
+          Default ({defaultMode === "repo" ? "Curated" : "Expanded relays"})
+        </DropdownMenuRadioItem>
         <DropdownMenuRadioItem value="repo">Curated</DropdownMenuRadioItem>
         <DropdownMenuRadioItem value="outbox">
           Expanded relays
         </DropdownMenuRadioItem>
       </DropdownMenuRadioGroup>
       <p className="max-w-64 px-2 py-2 text-xs text-muted-foreground">
-        Expanded relays may include spam or content excluded by repository
-        curation.
+        Default follows your global setting. Other choices are saved for this
+        repository in this browser. Expanded relays may include spam or content
+        excluded by repository curation.
       </p>
     </>
   );
@@ -96,7 +106,9 @@ export function RepositoryNavigation({
   tabs: RepositoryTab[];
   relayView?: {
     mode: RelayCurationMode;
-    onChange: (mode: RelayCurationMode) => void;
+    preference: RelayCurationPreference;
+    defaultMode: RelayCurationMode;
+    onChange: (mode: RelayCurationPreference) => void;
   };
 }) {
   const container = useRef<HTMLDivElement>(null);

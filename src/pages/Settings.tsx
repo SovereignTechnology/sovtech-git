@@ -29,7 +29,8 @@ import {
   defaultNostrConnectRelays,
   nostrConnectRelaysCustomised$,
   DEFAULT_NOSTR_CONNECT_RELAYS,
-  type RelayCurationMode,
+  DEFAULT_RELAY_CURATION_MODE,
+  type RelayCurationPreference,
 } from "@/services/settings";
 import {
   graspServiceAddressToRelayUrl,
@@ -82,11 +83,18 @@ import {
 } from "lucide-react";
 
 const CURATION_OPTIONS: {
-  value: RelayCurationMode;
+  value: RelayCurationPreference;
   icon: React.ReactNode;
   title: string;
   description: string;
 }[] = [
+  {
+    value: "default",
+    icon: <RotateCcw className="h-5 w-5" />,
+    title: `Default (${DEFAULT_RELAY_CURATION_MODE === "repo" ? "Curated" : "Expanded relays"})`,
+    description:
+      "Follow the app’s default repository view, including future changes to that default.",
+  },
   {
     value: "repo",
     icon: <Shield className="h-5 w-5" />,
@@ -111,13 +119,13 @@ function RelayCurationSection() {
       <CardHeader>
         <CardTitle>Default Repository View</CardTitle>
         <CardDescription>
-          Controls which relay sources supply repository items and discussion.
-          You can switch between Curated and Expanded relays on the repository
-          page without reloading.
+          Sets the view for repositories without a saved override. Default
+          follows the app’s default view. Choices made on a repository page are
+          saved for that repository in this browser.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {CURATION_OPTIONS.map((opt) => {
             const selected = mode === opt.value;
             return (
@@ -125,6 +133,7 @@ function RelayCurationSection() {
                 key={opt.value}
                 type="button"
                 onClick={() => relayCurationMode.next(opt.value)}
+                aria-pressed={selected}
                 className={cn(
                   "relative flex flex-col gap-2 rounded-lg border p-4 text-left transition-all duration-150",
                   "hover:border-pink-500/50 hover:bg-pink-500/5",

@@ -188,7 +188,7 @@ export const gitIndexRelaysCustomised$ = isCustomised$(
  * - "repo"   (default): Repo Relay Event Curation — only query the relays
  *   declared in the repository announcement. Collaboration views require
  *   current-session receipt or reconciliation evidence from those relays.
- *   A repository's on-page control can temporarily expand this view.
+ *   Repository controls can save a local override of this global preference.
  *
  * - "outbox": Full Nostr Outbox Model — additionally follows each maintainer's
  *   NIP-65 outbox and inbox relays when fetching issues, patches, and comments.
@@ -196,17 +196,25 @@ export const gitIndexRelaysCustomised$ = isCustomised$(
  */
 export type RelayCurationMode = "repo" | "outbox";
 
-const DEFAULT_RELAY_CURATION_MODE: RelayCurationMode = "repo";
+export type RelayCurationPreference = "default" | RelayCurationMode;
 
-export const relayCurationMode = new BehaviorSubject<RelayCurationMode>(
-  DEFAULT_RELAY_CURATION_MODE,
+export const DEFAULT_RELAY_CURATION_MODE: RelayCurationMode = "repo";
+
+export function resolveRelayCurationMode(
+  preference: RelayCurationPreference,
+): RelayCurationMode {
+  return preference === "default" ? DEFAULT_RELAY_CURATION_MODE : preference;
+}
+
+export const relayCurationMode = new BehaviorSubject<RelayCurationPreference>(
+  "default",
 );
 
 // Persist the relay curation mode to localStorage
 persist(relayCurationMode, "relayCurationMode", {
   serialize: (v) => v,
-  deserialize: (v) => (v === "outbox" ? "outbox" : "repo"),
-  defaultValue: DEFAULT_RELAY_CURATION_MODE,
+  deserialize: (v) => (v === "outbox" || v === "repo" ? v : "default"),
+  defaultValue: "default",
 });
 
 // ---------------------------------------------------------------------------
