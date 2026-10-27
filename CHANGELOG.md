@@ -42,6 +42,8 @@
 
 ### Fixed
 
+- Update the browser event-cache adapter to remove unused lookup dependencies with upstream security findings, retaining existing cache backend selection and support for legacy injected providers.
+
 - Update Zod to version 4 with compatible form resolvers for upstream collection-validation security fixes; preserve existing draft and repository-selection schemas.
 
 - Upgrade React Router to version 7 for current redirect and URL-handling security fixes while retaining the existing declarative routes.

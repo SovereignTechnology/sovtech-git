@@ -563,7 +563,7 @@ async function run(control) {
         cachePopulation = await page.evaluate(async () => ({
           observedUntil: performance.now(),
           events: (
-            await window.nostrdb.filters([
+            await window.nostrdb.query([
               {
                 kinds: [
                   1617, 1618, 1621, 1619, 1630, 1631, 1632, 1633, 1985, 1624, 5,
@@ -601,7 +601,7 @@ async function run(control) {
           .map((event) => event.id);
         await page.waitForFunction(
           async (ids) => {
-            const roots = await window.nostrdb.filters([
+            const roots = await window.nostrdb.query([
               { kinds: [1617, 1618, 1621] },
             ]);
             const found = new Set(roots.map((event) => event.id));

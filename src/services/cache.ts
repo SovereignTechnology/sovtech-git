@@ -11,13 +11,24 @@ import {
 const DELETION_PERSIST_TIMEOUT_MS = 5_000;
 const DELETION_PERSIST_POLL_MS = 25;
 
+// Browser extensions and native hosts may still expose the legacy filters API.
+function queryDatabase(filters: Filter[]): Promise<NostrEvent[]> {
+  const database: {
+    query?: (filters: Filter[]) => Promise<NostrEvent[]>;
+    filters?: (filters: Filter[]) => Promise<NostrEvent[]>;
+  } = window.nostrdb;
+  if (typeof database.query === "function") return database.query(filters);
+  if (typeof database.filters === "function") return database.filters(filters);
+  throw new Error("The Nostr cache provider does not support filter queries");
+}
+
 /**
  * Request events from the IndexedDB cache.
  * Used by event loaders to check cache before querying relays.
  * Returns empty array if cache is not available.
  */
 async function queryCache(filters: Filter[]): Promise<NostrEvent[]> {
-  const events = await window.nostrdb.filters(filters);
+  const events = await queryDatabase(filters);
   return events.filter((event) => !isPrivateRepositoryEventId(event.id));
 }
 
@@ -110,7 +121,7 @@ export function createRepositoryCacheWriter(
 
 /** Load durable kind-5 tombstones before any cached originals are consumed. */
 export async function loadDeletionEvents(): Promise<NostrEvent[]> {
-  return window.nostrdb.filters([{ kinds: [5] }]);
+  return queryDatabase([{ kinds: [5] }]);
 }
 
 /** Persist a verified kind-5 event outside EventStore.insert$. */
