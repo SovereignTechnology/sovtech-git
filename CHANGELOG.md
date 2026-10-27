@@ -38,6 +38,8 @@
 
 ### Fixed
 
+- Load author profiles from configured fallback relays as well as profile indexes, so issue names and avatars can appear without visiting each user's profile page.
+
 - Remember the five most recently used decrypted private Git service list versions per account and share concurrent decrypt requests to avoid repeated signer prompts after reloads.
 
 - Preserve slow repository cache restores and load cached statuses before supplemental relay items, avoiding count churn when a warm cache takes more than three seconds to read.

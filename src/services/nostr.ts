@@ -672,6 +672,10 @@ export const zapsLoader = createZapsLoader(pool, {
  * their own pool.subscription so that e.g. a list of 20 issue authors produces
  * one REQ rather than 20.
  *
+ * Query configured fallback relays as well as lookup relays so an unavailable
+ * or incomplete profile index does not require visiting the user's page.
+ * Identity lookups are independent of repository relay curation.
+ *
  * The eventStore option deduplicates events that come back from relays.
  * Call-site deduplication (skip if already in store) is the responsibility of
  * the caller — see useLoadProfile / useProfilesForPubkeys.
@@ -679,6 +683,7 @@ export const zapsLoader = createZapsLoader(pool, {
 export const profileLoader = createAddressLoader(pool, {
   cacheRequest,
   eventStore,
+  extraRelays: fallbackRelays,
   lookupRelays: lookupRelays.getValue(),
   bufferTime: 200,
 });
