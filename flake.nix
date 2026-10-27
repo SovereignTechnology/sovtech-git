@@ -5,14 +5,17 @@
 
   outputs = { nixpkgs, ... }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = forAllSystems (system:
       let
         pkgs = import nixpkgs {
           inherit system;
+          overlays = [ (import ./nix/node-security-overlay.nix) ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
         };
+        tools = import ./.ngit/nix/workflows/tools.nix { inherit pkgs; };
+        caBundle = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
         # The e2e harness needs a reproducible ngit-grasp binary. Build the
         # published crate directly and leave its live-relay tests to the
         # application's e2e suite.
@@ -51,9 +54,11 @@
         ciCommands = ci.commands;
         packages = ci.packages;
         devShell = pkgs.mkShell {
+          SSL_CERT_FILE = caBundle;
+          GIT_SSL_CAINFO = caBundle;
           buildInputs = [
-            pkgs.nodejs
-            pkgs.pnpm
+            tools.node
+            tools.pnpm
             pkgs.jdk21
             android-sdk.androidsdk
             ngit-grasp-pkg
@@ -157,9 +162,11 @@ EOF
           # ordinary `nix develop` entries don't realise the ~1 GB Chromium
           # bundle that only `pnpm bench` needs.
           bench = pkgs.mkShell {
+            SSL_CERT_FILE = caBundle;
+            GIT_SSL_CAINFO = caBundle;
             buildInputs = [
-              pkgs.nodejs
-              pkgs.pnpm
+              tools.node
+              tools.pnpm
             ];
             # playwright-core downloads no browsers at install time; point it
             # at the Nix-provided bundle. Host-requirement validation checks

@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Update the Nix development and CI environment to Node.js 24.22.1 with its native security fixes and pinned certificate bundle, align shell pnpm with CI, and refresh the matching Playwright browser tooling. Remove the unsupported Intel macOS shell target; Linux and Apple Silicon targets remain.
+
 - Restore cached repository items with their known statuses before relay refresh, and cache new collaboration events only after repository-relay confirmation.
 
 - Default public repository views to relay-confirmed items and discussion, with per-event source labels and a responsive on-page menu for switching between Curated and Expanded relays without reloading. Existing explicit preferences are preserved.

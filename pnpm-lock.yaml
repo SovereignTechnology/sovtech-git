@@ -344,8 +344,8 @@ importers:
         specifier: ^26.1.0
         version: 26.1.0
       playwright-core:
-        specifier: 1.61.1
-        version: 1.61.1
+        specifier: 1.64.1
+        version: 1.64.1
       postcss:
         specifier: ^8.5.8
         version: 8.5.8
@@ -5729,12 +5729,12 @@ packages:
         integrity: sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ==,
       }
 
-  playwright-core@1.61.1:
+  playwright-core@1.64.1:
     resolution:
       {
-        integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==,
+        integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==,
       }
-    engines: { node: ">=18" }
+    engines: { node: ">=20" }
     hasBin: true
 
   plist@3.1.1:
@@ -10955,7 +10955,7 @@ snapshots:
       mlly: 1.8.1
       pathe: 2.0.3
 
-  playwright-core@1.61.1: {}
+  playwright-core@1.64.1: {}
 
   plist@3.1.1:
     dependencies:
