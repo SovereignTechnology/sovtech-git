@@ -40,6 +40,5 @@ package-lock.json
 # Benchmark run reports (committed baseline lives at benchmarks/baseline.json)
 benchmarks/results/
 
-# Optional local dependency review material
-/work/dependency-updates.md
-/work/dependency-audit/
+# Local working material
+/work/
