@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep locally submitted comments visible in Curated issue and PR threads with their publishing progress while waiting for repository relays.
+
 ### Changed
 
 - Update the development and CI GRASP integration-test server to ngit-grasp 3.0.10, including its repository-expiry cleanup fix. Use the upstream certificate dependency fixes in place of local lockfile patches.

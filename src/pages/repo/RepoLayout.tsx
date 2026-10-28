@@ -73,6 +73,7 @@ import { RepositoryCurationContext } from "@/contexts/RepositoryCurationContext"
 import { CuratedEventStore } from "@/lib/curatedEventStore";
 import { relayEventPresence } from "@/lib/relayEventPresence";
 import { eventStore as canonicalEventStore } from "@/services/nostr";
+import { outboxStore } from "@/services/outbox";
 import { EventStoreProvider } from "applesauce-react/providers";
 import { StarButton } from "@/components/StarButton";
 import { FollowRepoButton } from "@/components/FollowRepoButton";
@@ -322,7 +323,12 @@ function RepoLayoutSession({
     setMode: setCurationMode,
   } = curation;
   const curated = useMemo(
-    () => new CuratedEventStore(canonicalEventStore, relayEventPresence),
+    () =>
+      new CuratedEventStore(
+        canonicalEventStore,
+        relayEventPresence,
+        outboxStore.items$,
+      ),
     [],
   );
   useEffect(() => curated.connect(), [curated]);

@@ -5,7 +5,7 @@ import {
   getSeenRelays,
 } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
-import { Subscription } from "rxjs";
+import { Subscription, type Observable } from "rxjs";
 import { RelayEventPresence } from "./relayEventPresence";
 
 /** A disposable read projection. Relay loading, publishing and persistence
@@ -26,10 +26,12 @@ export class CuratedEventStore {
   private disposed = false;
   private pending = new Set<string>();
   private scheduled = false;
+  private localPublications = new Set<string>();
 
   constructor(
     private readonly source: IEventStore,
     private readonly presence: RelayEventPresence,
+    private readonly publications$?: Observable<readonly { id: string }[]>,
   ) {
     // Admission and verified deletion handling belong to the canonical store.
     this.view.verifyEvent = fakeVerifyEvent;
@@ -58,6 +60,20 @@ export class CuratedEventStore {
         for (const id of ids) this.enqueue(id);
       }),
     );
+    if (this.publications$) {
+      this.subscriptions.add(
+        this.publications$.subscribe((items) => {
+          const next = new Set(items.map((item) => item.id));
+          for (const id of this.localPublications) {
+            if (!next.has(id)) this.enqueue(id);
+          }
+          for (const id of next) {
+            if (!this.localPublications.has(id)) this.enqueue(id);
+          }
+          this.localPublications = next;
+        }),
+      );
+    }
     this.refresh();
     return () => {
       this.connected = false;
@@ -88,6 +104,9 @@ export class CuratedEventStore {
     // results are collaboration content and still require relay evidence.
     return (
       this.expanded ||
+      // Local outbox intent keeps optimistic writes visible, including failed
+      // deliveries that need retry. It is not evidence of relay receipt.
+      this.localPublications.has(event.id) ||
       event.kind === 0 ||
       event.kind === 3 ||
       event.kind === 5 ||
