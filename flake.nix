@@ -20,8 +20,8 @@
         };
         tools = import ./.ngit/nix/workflows/tools.nix { inherit pkgs; };
         caBundle = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-        # Pin the v3.0.9 release.
-        ngitGraspRevision = "053ee62610e0af37c73c1e3016d12cba4ab28e07";
+        # Pin the v3.0.10 release.
+        ngitGraspRevision = "9493a5a40fb59be4ba04750875b36ab815f456f7";
         # The pinned repository contains Gitlinks without .gitmodules entries.
         # Nix 2.34 and 2.35 disagree about whether their empty directories are
         # retained in a flake Git input, producing different NAR hashes for the
@@ -29,37 +29,15 @@
         ngitGraspSource = pkgs.fetchgit {
           url = "https://gitnostr.com/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit-grasp.git";
           rev = ngitGraspRevision;
-          hash = "sha256-5i4fRkCHy/bAlsPccK9qa9SwVVyVW6YQS64PVicotJQ=";
+          hash = "sha256-x0g+feOknnO49bJ2lgJ+YCOGhrQyySftas1DOdqP49I=";
           fetchSubmodules = false;
         };
-        # Keep these lock updates evaluable on every supported platform.
-        ngitGraspCargoLock = let
-          original = builtins.readFile "${ngitGraspSource}/Cargo.lock";
-          old = [
-            "name = \"rustls-webpki\"\nversion = \"0.103.15\""
-            "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
-            "webpki-roots 1.0.9"
-            "name = \"webpki-roots\"\nversion = \"1.0.9\""
-            "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
-          ];
-          updated = [
-            "name = \"rustls-webpki\"\nversion = \"0.103.16\""
-            "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
-            "webpki-roots 1.0.11"
-            "name = \"webpki-roots\"\nversion = \"1.0.11\""
-            "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
-          ];
-        in assert builtins.all (entry: pkgs.lib.hasInfix entry original) old;
-          builtins.toFile "ngit-grasp-Cargo.lock" (builtins.replaceStrings old updated original);
         ngit-grasp-pkg = pkgs.rustPlatform.buildRustPackage {
           pname = "ngit-grasp";
-          version = "3.0.9";
+          version = "3.0.10";
           src = ngitGraspSource;
           NGIT_BUILD_REVISION = ngitGraspRevision;
-          cargoLock.lockFile = ngitGraspCargoLock;
-          postPatch = ''
-            cp ${ngitGraspCargoLock} Cargo.lock
-          '';
+          cargoLock.lockFile = "${ngitGraspSource}/Cargo.lock";
           cargoBuildFlags = [ "-p" "ngit-grasp" ];
           nativeBuildInputs = with pkgs; [ pkg-config git ];
           buildInputs = with pkgs; [ openssl ];

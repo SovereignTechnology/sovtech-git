@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Update the development and CI GRASP integration-test server to ngit-grasp 3.0.10, including its repository-expiry cleanup fix. Use the upstream certificate dependency fixes in place of local lockfile patches.
+
 ## [4.3.0] - 2026-10-28
 
 **Better performance & clearer relay choices**
