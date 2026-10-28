@@ -16,7 +16,7 @@
 
 - Update development and CI to pnpm 10.34.9 for package-install security fixes, with explicit esbuild and SWC build-script approvals.
 
-- Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, and XML dependencies for the build tools.
+- Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, XML, and collection dependencies for build tools, lint, and unit-test models.
 
 - Update CI publication tools to ngit 3.0.4 and Netlify CLI 27.14.2, using patched Nix native libraries for ngit and refreshed Netlify runtime dependencies.
 
