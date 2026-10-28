@@ -1,0 +1,53 @@
+// Apply before each project evaluates its buildscript, including Capacitor plugins.
+// These constraints update build tools without changing Android app dependencies.
+gradle.beforeProject { project ->
+    project.buildscript.configurations.named('classpath') {
+        withDependencies { dependencies ->
+            if (dependencies.any { it.group == 'com.android.tools.build' && it.name == 'gradle' }) {
+                dependencies.add(project.buildscript.dependencies.platform('io.netty:netty-bom:4.1.139.Final'))
+            }
+        }
+    }
+    project.buildscript.dependencies {
+        constraints {
+            ['bcprov-jdk18on', 'bcpkix-jdk18on', 'bcutil-jdk18on'].each { module ->
+                classpath("org.bouncycastle:${module}:1.86") {
+                    because 'Keep the build tool cryptography modules on the patched release'
+                }
+            }
+            classpath('org.apache.commons:commons-compress:1.28.0') {
+                because 'Use the patched archive parsers in Android build tools'
+            }
+            classpath('org.bitbucket.b_c:jose4j:0.9.7') {
+                because 'Use bounded compressed JWE handling in bundletool'
+            }
+            classpath('com.google.guava:guava:33.7.2-jre') {
+                because 'Bound collection allocation during Java deserialization'
+            }
+            classpath('org.jdom:jdom2:2.0.6.1') {
+                because 'Use the patched XML parser in Jetifier'
+            }
+        }
+    }
+
+    // Lint resolves its own detached classpath, outside the buildscript graph.
+    project.dependencies.components.withModule('com.android.tools.lint:lint-gradle') {
+        allVariants {
+            withDependencyConstraints {
+                add('com.google.guava:guava:33.7.2-jre')
+                add('org.apache.commons:commons-compress:1.28.0')
+                add('org.apache.httpcomponents:httpclient:4.5.14')
+                ['bcprov-jdk18on', 'bcpkix-jdk18on', 'bcutil-jdk18on'].each { module ->
+                    add("org.bouncycastle:${module}:1.86")
+                }
+            }
+        }
+    }
+
+    // Lint also resolves unit-test models; keep Robolectric's libraries patched.
+    project.configurations.matching { it.name == 'testImplementation' }.configureEach { configuration ->
+        // Match the Android artifact's version directory in the offline Maven cache.
+        project.dependencies.constraints.add(configuration.name, 'com.google.guava:guava:33.7.2-android')
+        project.dependencies.constraints.add(configuration.name, 'org.bouncycastle:bcprov-jdk18on:1.86')
+    }
+}

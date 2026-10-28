@@ -10,3 +10,7 @@ android/app/src/main/assets/capacitor.plugins.json
 
 dist-perf
 perf-reports
+
+# Preserve local dependency review evidence
+/work/dependency-updates.md
+/work/dependency-audit/

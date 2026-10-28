@@ -16,7 +16,7 @@ pkgs.stdenvNoCC.mkDerivation {
   dontFixup = true;
   outputHashMode = "recursive";
   outputHashAlgo = "sha256";
-  outputHash = "sha256-tMGG0bjHNLTELK97tAA5fTjDhKocMvxJspXAFAbl4R0=";
+  outputHash = "sha256-ssDcNWjwssUVmfNxbZVwWVKqW6SP9RWw7v7quqKMLpo=";
   buildPhase = ''
     export HOME="$TMPDIR/home" GRADLE_USER_HOME="$TMPDIR/gradle"
     export JAVA_HOME=${pkgs.jdk21}

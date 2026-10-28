@@ -12,6 +12,20 @@
 
 ### Changed
 
+- Patch the Nix npm fallback and its bundled HTTP dependencies while preserving the Node runtime.
+
+- Update development and CI to pnpm 10.34.9 for package-install security fixes, with explicit esbuild and SWC build-script approvals.
+
+- Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, XML, and collection dependencies for build tools, lint, and unit-test models.
+
+- Update CI publication tools to ngit 3.0.4 and Netlify CLI 27.14.2, using patched Nix native libraries for ngit and refreshed Netlify runtime dependencies.
+
+- Update the GRASP integration fixture to 3.0.9 with refreshed certificate verification and root certificates.
+
+- Upgrade Vitest to version 4 for patched test-server dependencies and adapt browser-observer mocks to its constructor semantics.
+
+- Update the Nix development and CI environment to Node.js 24.22.1 with its native security fixes and pinned certificate bundle, align shell pnpm with CI, and refresh the matching Playwright browser tooling. Remove the unsupported Intel macOS shell target; Linux and Apple Silicon targets remain.
+
 - Restore cached repository items with their known statuses before relay refresh, and cache new collaboration events only after repository-relay confirmation.
 
 - Default public repository views to relay-confirmed items and discussion, with per-event source labels and a responsive on-page menu for switching between Curated and Expanded relays without reloading. Existing explicit preferences are preserved.
@@ -37,6 +51,14 @@
 - Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
 
 ### Fixed
+
+- Update the browser event-cache adapter to remove unused lookup dependencies with upstream security findings, retaining existing cache backend selection and support for legacy injected providers.
+
+- Update Zod to version 4 with compatible form resolvers for upstream collection-validation security fixes; preserve existing draft and repository-selection schemas.
+
+- Upgrade React Router to version 7 for current redirect and URL-handling security fixes while retaining the existing declarative routes.
+
+- Update compatible JavaScript dependencies for upstream security fixes, including Capacitor navigation guards, Vite development-server protections, React Router redirects and fflate ZIP parsing. Refresh affected build-tool dependencies while preserving the Applesauce patch.
 
 - Load author profiles from configured fallback relays as well as profile indexes, so issue names and avatars can appear without visiting each user's profile page.
 

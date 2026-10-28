@@ -5,28 +5,67 @@
 
   outputs = { nixpkgs, ... }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = forAllSystems (system:
       let
         pkgs = import nixpkgs {
           inherit system;
+          overlays = [
+            (import ./nix/node-security-overlay.nix)
+            (import ./nix/jdk-security-overlay.nix)
+            (import ./nix/npm-security-overlay.nix)
+          ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
         };
-        # The e2e harness needs a reproducible ngit-grasp binary. Build the
-        # published crate directly and leave its live-relay tests to the
-        # application's e2e suite.
-        ngit-grasp-pkg = pkgs.rustPlatform.buildRustPackage rec {
+        tools = import ./.ngit/nix/workflows/tools.nix { inherit pkgs; };
+        caBundle = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+        # Pin the v3.0.9 release.
+        ngitGraspRevision = "053ee62610e0af37c73c1e3016d12cba4ab28e07";
+        # The pinned repository contains Gitlinks without .gitmodules entries.
+        # Nix 2.34 and 2.35 disagree about whether their empty directories are
+        # retained in a flake Git input, producing different NAR hashes for the
+        # same commit. fetchgit gives us a stable tracked-file checkout instead.
+        ngitGraspSource = pkgs.fetchgit {
+          url = "https://gitnostr.com/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit-grasp.git";
+          rev = ngitGraspRevision;
+          hash = "sha256-5i4fRkCHy/bAlsPccK9qa9SwVVyVW6YQS64PVicotJQ=";
+          fetchSubmodules = false;
+        };
+        # Keep these lock updates evaluable on every supported platform.
+        ngitGraspCargoLock = let
+          original = builtins.readFile "${ngitGraspSource}/Cargo.lock";
+          old = [
+            "name = \"rustls-webpki\"\nversion = \"0.103.15\""
+            "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+            "webpki-roots 1.0.9"
+            "name = \"webpki-roots\"\nversion = \"1.0.9\""
+            "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+          ];
+          updated = [
+            "name = \"rustls-webpki\"\nversion = \"0.103.16\""
+            "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
+            "webpki-roots 1.0.11"
+            "name = \"webpki-roots\"\nversion = \"1.0.11\""
+            "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+          ];
+        in assert builtins.all (entry: pkgs.lib.hasInfix entry original) old;
+          builtins.toFile "ngit-grasp-Cargo.lock" (builtins.replaceStrings old updated original);
+        ngit-grasp-pkg = pkgs.rustPlatform.buildRustPackage {
           pname = "ngit-grasp";
-          version = "3.0.0";
-          src = pkgs.fetchCrate {
-            inherit pname version;
-            hash = "sha256-t14USfeuoXGKws1ueVXqQk+hjE2mGf1zjXMzHrTax58=";
-          };
-          NGIT_BUILD_REVISION = "bce30ef039ecbc8c2371008e1bd00eedd79bbccf";
-          cargoHash = "sha256-MACPKCWuUuMe37dE84AoWeWH2S4EIp/LFqihvwBzSiY=";
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
+          version = "3.0.9";
+          src = ngitGraspSource;
+          NGIT_BUILD_REVISION = ngitGraspRevision;
+          cargoLock.lockFile = ngitGraspCargoLock;
+          postPatch = ''
+            cp ${ngitGraspCargoLock} Cargo.lock
+          '';
+          cargoBuildFlags = [ "-p" "ngit-grasp" ];
+          nativeBuildInputs = with pkgs; [ pkg-config git ];
+          buildInputs = with pkgs; [ openssl ];
+          # The upstream library tests require Git and other ambient state that
+          # is unavailable in the build sandbox. The application integration suite
+          # exercises the resulting binary instead.
           doCheck = false;
         };
         # Headless Chromium for browser automation (benchmarks/). The npm
@@ -51,9 +90,11 @@
         ciCommands = ci.commands;
         packages = ci.packages;
         devShell = pkgs.mkShell {
+          SSL_CERT_FILE = caBundle;
+          GIT_SSL_CAINFO = caBundle;
           buildInputs = [
-            pkgs.nodejs
-            pkgs.pnpm
+            tools.node
+            tools.pnpm
             pkgs.jdk21
             android-sdk.androidsdk
             ngit-grasp-pkg
@@ -63,6 +104,8 @@
           # (../ngit-grasp/target/release/ngit-grasp), which is fine for local
           # dev but not reproducible in CI.
           shellHook = ''
+            # nix develop otherwise preserves the caller's SSL_CERT_FILE.
+            export SSL_CERT_FILE=${caBundle}
             export NGIT_GRASP_BIN=${ngit-grasp-pkg}/bin/ngit-grasp
             export JAVA_HOME=${pkgs.jdk21}
             export ANDROID_HOME=${android-sdk.androidsdk}/libexec/android-sdk
@@ -157,9 +200,14 @@ EOF
           # ordinary `nix develop` entries don't realise the ~1 GB Chromium
           # bundle that only `pnpm bench` needs.
           bench = pkgs.mkShell {
+            SSL_CERT_FILE = caBundle;
+            GIT_SSL_CAINFO = caBundle;
+            shellHook = ''
+              export SSL_CERT_FILE=${caBundle}
+            '';
             buildInputs = [
-              pkgs.nodejs
-              pkgs.pnpm
+              tools.node
+              tools.pnpm
             ];
             # playwright-core downloads no browsers at install time; point it
             # at the Nix-provided bundle. Host-requirement validation checks

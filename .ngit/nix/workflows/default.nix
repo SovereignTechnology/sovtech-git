@@ -103,7 +103,7 @@ in {
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-    inherit ngit netlify;
+    inherit node pnpm ngit netlify;
     e2e-server = ngit-grasp-pkg;
     ci-dependencies = pkgs.linkFarm "gitworkshop-web-dependencies" [
       { name = "pnpm-store"; path = dependencies; }

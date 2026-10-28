@@ -321,6 +321,12 @@ GC-sensitive snapshots. Use production builds for primary results and identical
 profiling builds for supporting attribution. Record every config and failure;
 fixed observation windows do not establish completion.
 
+The direct-entry cache probes and repository storage benchmark accept both the
+legacy `filters` method and the newer `query` method, preserving the provider's
+receiver. Use these same harness files in both checkouts when comparing cache
+dependency versions; a rejected query remains a failure and is never retried
+through the other API.
+
 ## Fixed public repository replay
 
 Supply a captured public repository snapshot with `BENCH_CORPUS`. The gzip JSON

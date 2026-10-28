@@ -209,7 +209,7 @@ it("restores cached statuses before roots and seeds the first essentials request
     releaseRoots = resolve;
   });
   const cache = vi
-    .spyOn(window.nostrdb, "filters")
+    .spyOn(window.nostrdb, "query")
     .mockImplementationOnce(() => roots)
     .mockResolvedValueOnce([status])
     .mockResolvedValueOnce([]);
