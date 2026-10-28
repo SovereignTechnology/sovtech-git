@@ -6,7 +6,7 @@ pkgs.stdenvNoCC.mkDerivation {
   src = pkgs.lib.fileset.toSource {
     root = ../../..;
     fileset = pkgs.lib.fileset.unions [
-      ../../../android ../../../package.json ../../../pnpm-lock.yaml
+      ../../../android ../../../package.json ../../../pnpm-lock.yaml ../../../pnpm-workspace.yaml
       ../../../patches ../../../scripts/apply-pnpm-patches.mjs
       ../../../capacitor.config.ts ../../../version.properties
     ];

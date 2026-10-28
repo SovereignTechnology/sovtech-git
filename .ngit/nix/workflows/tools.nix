@@ -83,7 +83,7 @@ let
     src = pkgs.lib.fileset.toSource {
       root = ../../..;
       fileset = pkgs.lib.fileset.unions [
-        ../../../package.json ../../../pnpm-lock.yaml
+        ../../../package.json ../../../pnpm-lock.yaml ../../../pnpm-workspace.yaml
         ../../../patches ../../../scripts/apply-pnpm-patches.mjs
       ];
     };
