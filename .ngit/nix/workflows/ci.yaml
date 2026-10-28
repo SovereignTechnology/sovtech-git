@@ -10,6 +10,8 @@ jobs:
   test:
     requirements:
       resources:
+        vcpus: { gte: 4 }
+        memory-mib: { gte: 8192 }
         scratch-mib: { gte: 8192 }
     steps:
       - dependencies: { build: packages.x86_64-linux.ci-dependencies }
