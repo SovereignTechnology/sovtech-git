@@ -4,12 +4,15 @@
 
 ## [4.3.0] - 2026-10-28
 
-**Smoother browsing & clearer relay choices**
+**Better performance & clearer relay choices**
 
-This release focuses on making busy repositories easier to browse. Cached issues
-and pull requests return with their known statuses, shared queries reduce repeated
-work, and improved history loading recovers older conversations that relay limits
-could previously hide.
+Performance is a major focus of this release: fewer duplicate relay queries, less
+repeated processing as events arrive, and less redundant downloading of cached
+history on relays that support reconciliation. Shared loaders, batched list and CI
+updates, and search indexing only when needed reduce background work while
+browsing busy repositories. Cached issues and pull requests return with their known
+statuses before relay refresh, while improved history loading recovers older
+conversations that relay limits could previously hide.
 
 Public repositories now default to Curated relay views, with clearer source labels
 and an Expanded option for wider discovery. Switch views without reloading and
