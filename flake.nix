@@ -104,6 +104,8 @@
           # (../ngit-grasp/target/release/ngit-grasp), which is fine for local
           # dev but not reproducible in CI.
           shellHook = ''
+            # nix develop otherwise preserves the caller's SSL_CERT_FILE.
+            export SSL_CERT_FILE=${caBundle}
             export NGIT_GRASP_BIN=${ngit-grasp-pkg}/bin/ngit-grasp
             export JAVA_HOME=${pkgs.jdk21}
             export ANDROID_HOME=${android-sdk.androidsdk}/libexec/android-sdk
@@ -200,6 +202,9 @@ EOF
           bench = pkgs.mkShell {
             SSL_CERT_FILE = caBundle;
             GIT_SSL_CAINFO = caBundle;
+            shellHook = ''
+              export SSL_CERT_FILE=${caBundle}
+            '';
             buildInputs = [
               tools.node
               tools.pnpm
