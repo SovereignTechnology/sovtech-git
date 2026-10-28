@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-10-28
+
+**Smoother browsing & clearer relay choices**
+
+This release focuses on making busy repositories easier to browse. Cached issues
+and pull requests return with their known statuses, shared queries reduce repeated
+work, and improved history loading recovers older conversations that relay limits
+could previously hide.
+
+Public repositories now default to Curated relay views, with clearer source labels
+and an Expanded option for wider discovery. Switch views without reloading and
+remember your choice per repository. Refreshed status icons, more readable PR
+stacks, and better profile loading make ongoing work easier to follow.
+
+The release also brings broad security updates across app dependencies and Android
+build tools, an Applesauce v7 upgrade, and reproducible Nix-based release workflows
+that keep Android compilation separate from signing secrets.
+
 ### Added
 
 - Remember Curated or Expanded relay choices per repository in this browser, with a Default option that inherits the global repository view setting.
@@ -51,6 +69,10 @@
 - Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
 
 ### Fixed
+
+- Keep page content from shifting sideways when navigating between pages with and without a scrollbar.
+
+- Keep cached NIP-05 routes available while refreshing expired mappings, including during transient network failures.
 
 - Update the browser event-cache adapter to remove unused lookup dependencies with upstream security findings, retaining existing cache backend selection and support for legacy injected providers.
 
