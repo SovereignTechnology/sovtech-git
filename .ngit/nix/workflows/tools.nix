@@ -36,11 +36,21 @@ let
     meta.platforms = [ "x86_64-linux" ];
   };
   # Nixpkgs patches the native libraries embedded in Gradle's JARs.
-  gradle = pkgs.gradle-packages.mkGradle {
+  gradle = (pkgs.gradle-packages.mkGradle {
     version = "8.14.6";
     hash = "sha256-eYjtBxsqB5AOLscV/KFcarcrzm20M68wH6f6fpQHvSQ=";
     defaultJava = pkgs.jdk21;
-  };
+  }).overrideAttrs (previous: {
+    # Preserve Gradle's module classpath filename while replacing the library.
+    # Remove this replacement when the distribution bundles patched Guava.
+    installPhase = previous.installPhase + ''
+      test -f "$gradleLibexec/lib/guava-33.4.6-jre.jar"
+      cp ${pkgs.fetchurl {
+        url = "https://repo.maven.apache.org/maven2/com/google/guava/guava/33.7.2-jre/guava-33.7.2-jre.jar";
+        hash = "sha256-tTCUIlf7k1+LLPql+Otb1ZxVX9jo0BuM6YkS4HfqYGw=";
+      }} "$gradleLibexec/lib/guava-33.4.6-jre.jar"
+    '';
+  });
   netlify = (pkgs.netlify-cli.override { nodejs = node; }).overrideAttrs (final: previous: {
     version = "27.14.2";
     src = pkgs.fetchFromGitHub {
