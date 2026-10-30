@@ -17,7 +17,7 @@
  *   { kinds: [30617], search: query } against the public indexes, while private
  *   services receive an authenticated paginated announcement query that is
  *   matched locally. Simultaneously
- *   searches four NIP-50 profile relays for kind:0 candidates, validates and
+ *   searches three NIP-50 profile relays for kind:0 candidates, validates and
  *   ranks their current EventStore winners, then fetches repositories for the
  *   newly matched authors in bounded, relay-settled requests.
  *   Results are pushed into a per-session BehaviorSubject so the UI always
@@ -87,7 +87,6 @@ import {
 
 const PROFILE_SEARCH_RELAYS = [
   "wss://relay.ditto.pub",
-  "wss://relay.nostr.band",
   "wss://nostr.wine",
   "wss://search.nos.today",
 ];

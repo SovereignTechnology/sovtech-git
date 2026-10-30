@@ -417,16 +417,6 @@
         "eventFramesReceived": 0,
         "eoseFrames": 4
       },
-      "wss://relay.nostr.band": {
-        "sockets": 1,
-        "reqFrames": 0,
-        "reqFilterBytes": 0,
-        "closeFrames": 0,
-        "eventFramesSent": 0,
-        "otherFramesSent": 0,
-        "eventFramesReceived": 0,
-        "eoseFrames": 0
-      },
       "wss://nostr-01.yakihonne.com": {
         "sockets": 1,
         "reqFrames": 9,
