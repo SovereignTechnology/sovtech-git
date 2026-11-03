@@ -1,6 +1,6 @@
 { pkgs, system, android-sdk, ngit-grasp-pkg, playwright-browsers }:
 let
-  inherit (import ./tools.nix { inherit pkgs; }) node pnpm ngit gradle netlify dependencies;
+  inherit (import ./tools.nix { inherit pkgs; }) node pnpm ngit gradle dependencies;
   android-dependencies = import ./android-dependencies.nix {
     inherit pkgs node pnpm gradle dependencies android-sdk;
   };
@@ -77,7 +77,6 @@ in {
     '';
     preview.preview.publish = command "preview" [ ngit ] (builtins.readFile ./preview.sh);
     production = {
-      netlify.publish = command "netlify" [ netlify ] (builtins.readFile ./netlify.sh);
       nsite.publish = command "nsite" [ ngit ] (builtins.readFile ./nsite.sh);
     };
     android-release = {
@@ -103,7 +102,7 @@ in {
     };
   };
   packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-    inherit node pnpm ngit netlify;
+    inherit node pnpm ngit;
     e2e-server = ngit-grasp-pkg;
     ci-dependencies = pkgs.linkFarm "gitworkshop-web-dependencies" [
       { name = "pnpm-store"; path = dependencies; }

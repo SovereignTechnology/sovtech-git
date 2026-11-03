@@ -10,14 +10,12 @@ export REAL_GIT
 REAL_GIT=$(command -v git)
 export NGIT_CI_INPUTS="$fixture/inputs" NGIT_CI_SECRETS_DIR="$fixture/secrets"
 export TEST_MARKER="$fixture/published"
-for tool in ngit netlify; do
-  cat > "$fixture/bin/$tool" <<'STUB'
+cat > "$fixture/bin/ngit" <<'STUB'
 #!/usr/bin/env bash
 touch "$TEST_MARKER"
 exit 91
 STUB
-  chmod +x "$fixture/bin/$tool"
-done
+chmod +x "$fixture/bin/ngit"
 export PATH="$fixture/bin:$PATH"
 printf 'APP_VERSION=4.2.1\n' > "$fixture/checkout/version.properties"
 
@@ -36,12 +34,10 @@ reject() {
   fi
   test ! -e "$TEST_MARKER"
 }
-for publisher in netlify nsite; do
-  reject "$publisher" pull_request
-  reject "$publisher" manual refs/heads/main
-  reject "$publisher" push refs/heads/stable
-  reject "$publisher" push refs/tags/v4.2.1
-done
+reject nsite pull_request
+reject nsite manual refs/heads/main
+reject nsite push refs/heads/stable
+reject nsite push refs/tags/v4.2.1
 run_script release manual > "$fixture/log"
 grep -q 'publication skipped' "$fixture/log"
 test ! -e "$TEST_MARKER"

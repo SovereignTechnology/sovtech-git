@@ -51,30 +51,6 @@ let
       }} "$gradleLibexec/lib/guava-33.4.6-jre.jar"
     '';
   });
-  netlify = (pkgs.netlify-cli.override { nodejs = node; }).overrideAttrs (final: previous: {
-    version = "27.14.2";
-    src = pkgs.fetchFromGitHub {
-      owner = "netlify";
-      repo = "cli";
-      tag = "v27.14.2";
-      sha256 = "sha256-j0ULbsyKpk5eQ5fnVkVW78lB/EculuPmsOkBs1oHAVg=";
-    };
-    # Keep the security updates narrow until upstream refreshes its lockfile.
-    patches = (previous.patches or [ ]) ++ [ ./netlify-security.patch ];
-    # Upstream's lock omits download metadata for some exact-version entries.
-    # Restore them before both cache fetching and offline installation. The
-    # vendored metadata and cache hash pin all bytes without resolving versions.
-    postPatch = (previous.postPatch or "") + ''
-      ${pkgs.nodejs_24}/bin/node ${./repair-netlify-lock.cjs} ${./netlify-lock-metadata.json}
-    '';
-    # overrideAttrs must also update the format expected by npmConfigHook.
-    env = (previous.env or { }) // { NIX_NPM_FETCHER_VERSION = 2; };
-    npmDeps = pkgs.fetchNpmDeps {
-      inherit (final) src patches postPatch;
-      fetcherVersion = 2;
-      hash = "sha256-30iSjkHfYo59MuZTWrMtjYDEj5fJQQyjui7m2W7vNzI=";
-    };
-  });
   # Only dependency inputs affect this cache, not application source changes.
   dependencies = pkgs.fetchPnpmDeps {
     pname = "gitworkshop";
@@ -91,5 +67,5 @@ let
     hash = "sha256-m0iCbsj+/MsmHCufI6ZWMYJ9Q0iBf1TpY2Znyb5JxTQ=";
   };
 in {
-  inherit node pnpm ngit gradle netlify dependencies;
+  inherit node pnpm ngit gradle dependencies;
 }

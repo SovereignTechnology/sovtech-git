@@ -13,18 +13,6 @@ needs-workflows:
   ci: ci.yaml
 
 jobs:
-  # Keep publishing for DNS rollback through at least 2026-10-21 13:30 UTC.
-  # Retire this job and its secrets only after maintainer review; keep nsite.
-  netlify:
-    steps:
-      - tools: { build: packages.x86_64-linux.netlify }
-      - publish
-    cancellation: { grace: 10m }
-    needs: [ci.test]
-    concurrency:
-      group: production-netlify
-      cancel-in-progress: false
-    secrets: [NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID]
   nsite:
     steps:
       - tools: { build: packages.x86_64-linux.ngit }

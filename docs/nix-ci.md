@@ -84,7 +84,7 @@ Android dependencies change, update `android-dependencies.nix`'s hash using
 `pkgs.lib.fakeHash` and `nix build .#android-dependencies`. A missing dependency
 fails instead of silently consulting Google Maven or Maven Central.
 
-Publisher jobs begin with a `tools` build of their pinned ngit or Netlify package,
+Publisher jobs begin with a `tools` build of their pinned ngit package,
 so those runtime closures can also be cached. No publisher credentials are exposed
 during these builds. JVM, Gradle and Android homes and temporary files use writable
 job scratch, including Java's explicit home/tmp overrides.
@@ -118,7 +118,7 @@ same peeled commit.
 | ---------------------- | -------------------- | --------------------------------------- |
 | `ci.yaml`              | Push or pull request | Checks and web artifacts                |
 | `preview.yaml`         | Pull request         | Disposable nsite preview                |
-| `production.yaml`      | Push to `main`       | Netlify and production nsite            |
+| `production.yaml`      | Push to `main`       | Production nsite                        |
 | `android-release.yaml` | Tag `v*`             | Unsigned build, signing, NIP-82 release |
 
 The test job produces the ordinary website. Android lint builds the versioned
@@ -129,7 +129,7 @@ Android packages use archive transport. The
 provider artifact limits must accommodate the site and APK/AAB files.
 
 Publishing workflows use `reuse: never`, so rollback pushes publish again.
-Production destinations have separate concurrency groups with
+Production publishing uses a dedicated concurrency group with
 `cancel-in-progress: false`. Production and release publishers allow ten
 minutes after cancellation: before publication they can stop, but once the
 publisher starts their TERM handler waits for it to finish. Force or the
@@ -139,7 +139,6 @@ grace deadline can still kill the job; ordinary steps need not wait that long.
 
 Grant credentials only to the jobs that use them:
 
-- Netlify: `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`.
 - Production nsite and release: `NGIT_PUBLISHER_NBUNKSEC`.
 - Android signing: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
   `ANDROID_KEY_ALIAS`.
@@ -161,7 +160,7 @@ gateway availability before reporting the signed preview URL.
 ## Local validation
 
 Build an individual command without executing it, for example
-`nix build .#ngit-ci.commands.x86_64-linux.production.netlify.publish`.
+`nix build .#ngit-ci.commands.x86_64-linux.production.nsite.publish`.
 Use `nix build .#ci-dependencies .#e2e-server` for the test job's pure
 build steps. Do not run publishing or signing commands merely to validate
 their definitions.
@@ -171,8 +170,3 @@ checks real APK/AAB signing using synthetic credentials. The pre-commit hook
 validates the application; CI runs both script checks as explicit steps.
 Only the initial Maven dependency fetch needs Maven access; ordinary Android
 commands use the pinned local repository.
-
-Netlify's upstream lock omits some registry metadata. The pinned
-`netlify-lock-metadata.json` and `repair-netlify-lock.cjs` restore missing fields
-without changing versions. Update the metadata and dependency hash together
-when updating Netlify. This uses the existing Node toolchain, not Python.
