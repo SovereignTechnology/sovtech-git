@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Load secondary routes and repository views on demand, then warm unused pages one at a time during quiet periods in relay traffic and browser activity.
+
 - Update the development and CI GRASP integration-test server to ngit-grasp 3.0.10, including its repository-expiry cleanup fix. Use the upstream certificate dependency fixes in place of local lockfile patches.
 
 ### Removed

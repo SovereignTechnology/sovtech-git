@@ -16,17 +16,6 @@ import { AppFooter } from "./components/AppFooter";
 
 import Index from "./pages/Index";
 import { LandingPage } from "./pages/LandingPage";
-import RepositoriesPage from "./pages/RepositoriesPage";
-import NotificationDiagnosticsPage from "./pages/NotificationDiagnosticsPage";
-import NotificationsPage from "./pages/NotificationsPage";
-import RelayPage from "./pages/RelayPage";
-import CICoordinatorPage from "./pages/CICoordinatorPage";
-import CIProviderPage from "./pages/CIProviderPage";
-import Settings from "./pages/Settings";
-import OutboxPage from "./pages/OutboxPage";
-import { NIP19Page } from "./pages/NIP19Page";
-import About from "./pages/About";
-import OgImagePreview from "./pages/OgImagePreview";
 import NotFound from "./pages/NotFound";
 import { MaintainerAcceptanceMonitor } from "./components/MaintainerAcceptanceMonitor";
 import { useRepoPath } from "./hooks/useRepoPath";
@@ -34,6 +23,12 @@ import { REPO_KIND } from "./lib/nip34";
 import { getGitWorkshopPath } from "./lib/gitworkshopUrl";
 import { parseRepoRoute } from "./lib/routeUtils";
 import { preloadMarkdownContent } from "./lib/markdownContentLoader";
+import {
+  deferredModule,
+  queuePreload,
+  startBackgroundPreloads,
+} from "./lib/backgroundPreload";
+import { pool } from "./services/nostr";
 import { DOCUMENTATION_URLS } from "./lib/documentation";
 
 interface DocumentationRedirect {
@@ -58,17 +53,68 @@ const DOCUMENTATION_REDIRECTS: readonly DocumentationRedirect[] = [
   { path: "/docs/*", destination: DOCUMENTATION_URLS.gitworkshop },
 ] as const;
 
-let repositoryRoutePromise:
-  | Promise<typeof import("./pages/repo/RepoLayout")>
-  | undefined;
+const repositoryModule = deferredModule(() =>
+  import("./pages/repo/RepoLayout").then((module) => {
+    // The layout registers its views first: warm likely repository navigation
+    // before administrative pages, while keeping Markdown near the front.
+    for (const task of secondaryModules) queuePreload(task);
+    return module;
+  }),
+);
+const markdownModule = deferredModule(preloadMarkdownContent);
+const loadRepositoryRoute = repositoryModule.load;
 
-function loadRepositoryRoute() {
-  repositoryRoutePromise ??= Promise.all([
-    import("./pages/repo/RepoLayout"),
-    preloadMarkdownContent(),
-  ]).then(([repoLayout]) => repoLayout);
-  return repositoryRoutePromise;
-}
+const RepositoriesPageModule = deferredModule(
+  () => import("./pages/RepositoriesPage"),
+);
+const RepositoriesPage = lazy(RepositoriesPageModule.load);
+const NotificationDiagnosticsPageModule = deferredModule(
+  () => import("./pages/NotificationDiagnosticsPage"),
+);
+const NotificationDiagnosticsPage = lazy(
+  NotificationDiagnosticsPageModule.load,
+);
+const NotificationsPageModule = deferredModule(
+  () => import("./pages/NotificationsPage"),
+);
+const NotificationsPage = lazy(NotificationsPageModule.load);
+const RelayPageModule = deferredModule(() => import("./pages/RelayPage"));
+const RelayPage = lazy(RelayPageModule.load);
+const CICoordinatorPageModule = deferredModule(
+  () => import("./pages/CICoordinatorPage"),
+);
+const CICoordinatorPage = lazy(CICoordinatorPageModule.load);
+const CIProviderPageModule = deferredModule(
+  () => import("./pages/CIProviderPage"),
+);
+const CIProviderPage = lazy(CIProviderPageModule.load);
+const SettingsModule = deferredModule(() => import("./pages/Settings"));
+const Settings = lazy(SettingsModule.load);
+const OutboxPageModule = deferredModule(() => import("./pages/OutboxPage"));
+const OutboxPage = lazy(OutboxPageModule.load);
+const AboutModule = deferredModule(() => import("./pages/About"));
+const About = lazy(AboutModule.load);
+const OgImagePreviewModule = deferredModule(
+  () => import("./pages/OgImagePreview"),
+);
+const OgImagePreview = lazy(OgImagePreviewModule.load);
+const nip19Module = deferredModule(() =>
+  import("./pages/NIP19Page").then((module) => ({ default: module.NIP19Page })),
+);
+const NIP19Page = lazy(nip19Module.load);
+const secondaryModules = [
+  RepositoriesPageModule,
+  NotificationDiagnosticsPageModule,
+  NotificationsPageModule,
+  RelayPageModule,
+  CICoordinatorPageModule,
+  CIProviderPageModule,
+  SettingsModule,
+  OutboxPageModule,
+  AboutModule,
+  OgImagePreviewModule,
+  nip19Module,
+];
 
 function ExternalRedirect({
   destination,
@@ -107,59 +153,30 @@ function isRepositoryLink(anchor: HTMLAnchorElement): boolean {
   return parseRepoRoute(url.pathname.slice(1)) !== undefined;
 }
 
-/**
- * Warm the repository route after the current page loads, or sooner when a
- * repository link receives pointer/keyboard intent. This does not hold up the
- * initial non-repository render, but makes the repository and dedicated
- * Markdown bundles available before most navigations.
- */
+/** Warm routes in the background without competing with active relay snapshots. */
 function RepositoryRoutePreloader() {
   useEffect(() => {
-    let idleHandle: number | undefined;
-    let fallbackHandle: ReturnType<typeof setTimeout> | undefined;
+    queuePreload(repositoryModule);
+    queuePreload(markdownModule);
+    return startBackgroundPreloads(pool);
+  }, []);
 
-    const preload = () => {
-      // A speculative failure should not become an unhandled rejection. The
-      // same rejected promise is still surfaced by React if navigation later
-      // needs the route, where the app-level error boundary can handle it.
-      void loadRepositoryRoute().catch(() => undefined);
-    };
-
-    const scheduleIdlePreload = () => {
-      if ("requestIdleCallback" in window) {
-        idleHandle = window.requestIdleCallback(preload);
-      } else {
-        fallbackHandle = setTimeout(preload);
-      }
-    };
-
+  useEffect(() => {
     const preloadFromIntent = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       const anchor = target.closest("a[href]");
       if (anchor instanceof HTMLAnchorElement && isRepositoryLink(anchor)) {
-        preload();
+        queuePreload(repositoryModule, true);
       }
     };
-
     document.addEventListener("pointerover", preloadFromIntent);
     document.addEventListener("focusin", preloadFromIntent);
-
-    if (document.readyState === "complete") {
-      scheduleIdlePreload();
-    } else {
-      window.addEventListener("load", scheduleIdlePreload, { once: true });
-    }
-
     return () => {
       document.removeEventListener("pointerover", preloadFromIntent);
       document.removeEventListener("focusin", preloadFromIntent);
-      window.removeEventListener("load", scheduleIdlePreload);
-      if (idleHandle !== undefined) window.cancelIdleCallback(idleHandle);
-      if (fallbackHandle !== undefined) clearTimeout(fallbackHandle);
     };
   }, []);
-
   return null;
 }
 
@@ -168,7 +185,7 @@ function RepositoryRouteFallback() {
     <div
       className="container max-w-screen-xl flex-1 space-y-6 px-4 py-8 md:px-8"
       role="status"
-      aria-label="Loading repository"
+      aria-label="Loading page"
     >
       <div className="h-8 w-64 max-w-full animate-pulse rounded bg-muted" />
       <div className="h-10 w-full animate-pulse rounded bg-muted" />
@@ -176,7 +193,7 @@ function RepositoryRouteFallback() {
         <div className="h-64 animate-pulse rounded-xl bg-muted" />
         <div className="h-40 animate-pulse rounded-xl bg-muted" />
       </div>
-      <span className="sr-only">Loading repository…</span>
+      <span className="sr-only">Loading page…</span>
     </div>
   );
 }
@@ -543,59 +560,61 @@ function AppRouter() {
       <div className="flex flex-col min-h-screen">
         <AppHeader />
         <main className="flex-1 flex flex-col">
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/landing" element={<LandingPage />} />
-            <Route path="/search" element={<RepositoriesPage />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/outbox" element={<OutboxPage />} />
-            <Route
-              path="/notifications/diagnostics"
-              element={<NotificationDiagnosticsPage />}
-            />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            {/* Portable documentation redirects — these run in Netlify, static
+          <Suspense fallback={<RepositoryRouteFallback />}>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/landing" element={<LandingPage />} />
+              <Route path="/search" element={<RepositoriesPage />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/outbox" element={<OutboxPage />} />
+              <Route
+                path="/notifications/diagnostics"
+                element={<NotificationDiagnosticsPage />}
+              />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              {/* Portable documentation redirects — these run in Netlify, static
                 builds, nsites, and native builds after the SPA fallback. */}
-            {DOCUMENTATION_REDIRECTS.map(
-              ({ path, destination, fragmentDestinations }) => (
-                <Route
-                  key={path}
-                  path={path}
-                  element={
-                    <ExternalRedirect
-                      destination={destination}
-                      fragmentDestinations={fragmentDestinations}
-                    />
-                  }
-                />
-              ),
-            )}
-            <Route path="/about" element={<About />} />
-            <Route path="/og-preview" element={<OgImagePreview />} />
-            {/* /relay/:relaySegment — browse repos on a specific relay.
+              {DOCUMENTATION_REDIRECTS.map(
+                ({ path, destination, fragmentDestinations }) => (
+                  <Route
+                    key={path}
+                    path={path}
+                    element={
+                      <ExternalRedirect
+                        destination={destination}
+                        fragmentDestinations={fragmentDestinations}
+                      />
+                    }
+                  />
+                ),
+              )}
+              <Route path="/about" element={<About />} />
+              <Route path="/og-preview" element={<OgImagePreview />} />
+              {/* /relay/:relaySegment — browse repos on a specific relay.
                  The segment uses the same format as relay hints: wss:// is stripped,
                  ws:// uses a slash-free encoded scheme. e.g. /relay/relay.ngit.dev
                  Must be declared before /:nip19 to avoid being swallowed. */}
-            <Route path="/relay/:relaySegment" element={<RelayPage />} />
-            {/* Coordinator service profiles use an explicit prefix so npub
+              <Route path="/relay/:relaySegment" element={<RelayPage />} />
+              {/* Coordinator service profiles use an explicit prefix so npub
                 identifiers remain distinct from ordinary user profiles. */}
-            <Route
-              path="/coordinator/:coordinatorIdentifier"
-              element={<CICoordinatorPage />}
-            />
-            <Route
-              path="/provider/:providerIdentifier"
-              element={<CIProviderPage />}
-            />
-            {/* NIP-19 route for single-segment bech32 identifiers:
+              <Route
+                path="/coordinator/:coordinatorIdentifier"
+                element={<CICoordinatorPage />}
+              />
+              <Route
+                path="/provider/:providerIdentifier"
+                element={<CIProviderPage />}
+              />
+              {/* NIP-19 route for single-segment bech32 identifiers:
                 npub1…, nprofile1…, note1…, nevent1…, naddr1… */}
-            <Route path="/:nip19" element={<NIP19Page />} />
-            {/* Multi-segment paths: legacy redirects are checked first, then
+              <Route path="/:nip19" element={<NIP19Page />} />
+              {/* Multi-segment paths: legacy redirects are checked first, then
                 repo routes (/:npub/:repoId, /:nip05/:repoId, etc.) */}
-            <Route path="/*" element={<LegacyRedirect />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+              <Route path="/*" element={<LegacyRedirect />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
         </main>
         <AppFooter />
       </div>

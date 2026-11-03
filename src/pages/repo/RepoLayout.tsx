@@ -1,28 +1,13 @@
 import type { ComponentProps } from "react";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import { useErrorRetry, type ErrorRetryState } from "@/hooks/useErrorRetry";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams, useLocation } from "react-router-dom";
 import { useActiveAccount } from "applesauce-react/hooks";
 import {
   useResolvedRepository,
   type ResolvedRepository,
 } from "@/hooks/useResolvedRepository";
-import RepoIssuesPage from "./RepoIssuesPage";
-import RepoPRsPage from "./RepoPRsPage";
-import RepoCodePage from "./RepoCodePage";
-import RepoAboutPage from "./RepoAboutPage";
-import RepoSettingsPage from "./RepoSettingsPage";
-import RepoCommitsPage from "./RepoCommitsPage";
-import RepoCommitPage from "./RepoCommitPage";
-import RepoBranchesPage from "./RepoBranchesPage";
-import RepoTagsPage from "./RepoTagsPage";
-import RepoComparePage from "./RepoComparePage";
-import RepoActionsPage from "./RepoActionsPage";
-import RepoCoordinatorsPage from "./RepoCoordinatorsPage";
-import RepoReleasesPage from "./RepoReleasesPage";
-import IssuePage from "@/pages/IssuePage";
-import PRPage from "@/pages/PRPage";
 import { useIssues } from "@/hooks/useIssues";
 import { usePRs } from "@/hooks/usePRs";
 import { useNip34RepoLoader } from "@/hooks/useNip34RepoLoader";
@@ -101,6 +86,80 @@ import { useGitPool } from "@/hooks/useGitPool";
 import { usePrivateGitRelays } from "@/hooks/usePrivateGitRelays";
 import { BuzzRepositoryContext } from "@/contexts/BuzzRepositoryContext";
 import { formatDistanceToNow } from "date-fns";
+
+import { deferredModule, queuePreload } from "@/lib/backgroundPreload";
+
+const RepoIssuesPageModule = deferredModule(() => import("./RepoIssuesPage"));
+const RepoIssuesPage = lazy(RepoIssuesPageModule.load);
+const RepoPRsPageModule = deferredModule(() => import("./RepoPRsPage"));
+const RepoPRsPage = lazy(RepoPRsPageModule.load);
+const RepoCodePageModule = deferredModule(() => import("./RepoCodePage"));
+const RepoCodePage = lazy(RepoCodePageModule.load);
+const RepoAboutPageModule = deferredModule(() => import("./RepoAboutPage"));
+const RepoAboutPage = lazy(RepoAboutPageModule.load);
+const RepoSettingsPageModule = deferredModule(
+  () => import("./RepoSettingsPage"),
+);
+const RepoSettingsPage = lazy(RepoSettingsPageModule.load);
+const RepoCommitsPageModule = deferredModule(() => import("./RepoCommitsPage"));
+const RepoCommitsPage = lazy(RepoCommitsPageModule.load);
+const RepoCommitPageModule = deferredModule(() => import("./RepoCommitPage"));
+const RepoCommitPage = lazy(RepoCommitPageModule.load);
+const RepoBranchesPageModule = deferredModule(
+  () => import("./RepoBranchesPage"),
+);
+const RepoBranchesPage = lazy(RepoBranchesPageModule.load);
+const RepoTagsPageModule = deferredModule(() => import("./RepoTagsPage"));
+const RepoTagsPage = lazy(RepoTagsPageModule.load);
+const RepoComparePageModule = deferredModule(() => import("./RepoComparePage"));
+const RepoComparePage = lazy(RepoComparePageModule.load);
+const RepoActionsPageModule = deferredModule(() => import("./RepoActionsPage"));
+const RepoActionsPage = lazy(RepoActionsPageModule.load);
+const RepoCoordinatorsPageModule = deferredModule(
+  () => import("./RepoCoordinatorsPage"),
+);
+const RepoCoordinatorsPage = lazy(RepoCoordinatorsPageModule.load);
+const RepoReleasesPageModule = deferredModule(
+  () => import("./RepoReleasesPage"),
+);
+const RepoReleasesPage = lazy(RepoReleasesPageModule.load);
+const IssuePageModule = deferredModule(() => import("@/pages/IssuePage"));
+const IssuePage = lazy(IssuePageModule.load);
+const PRPageModule = deferredModule(() => import("@/pages/PRPage"));
+const PRPage = lazy(PRPageModule.load);
+const repositoryPages = [
+  RepoIssuesPageModule,
+  RepoPRsPageModule,
+  IssuePageModule,
+  PRPageModule,
+  RepoCodePageModule,
+  RepoAboutPageModule,
+  RepoSettingsPageModule,
+  RepoCommitsPageModule,
+  RepoCommitPageModule,
+  RepoBranchesPageModule,
+  RepoTagsPageModule,
+  RepoComparePageModule,
+  RepoActionsPageModule,
+  RepoCoordinatorsPageModule,
+  RepoReleasesPageModule,
+];
+
+// Warming the layout also queues its views, without mounting their data owners.
+for (const module of repositoryPages) queuePreload(module);
+
+function RepositoryPageFallback() {
+  return (
+    <div
+      className="container space-y-6 px-4 py-8 md:px-8"
+      role="status"
+      aria-label="Loading page"
+    >
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // RepoLayout
@@ -1000,53 +1059,55 @@ function RepoLayoutSession({
               <GitCommitLinkContext.Provider value={gitCommitLinkCtxValue}>
                 <EventStoreProvider eventStore={repositoryStore}>
                   <RepoContext.Provider value={ctxValue}>
-                    {isPrivate &&
-                    (subPage === "actions" ||
-                      subPage === "action-coordinators" ||
-                      subPage === "releases" ||
-                      subPage === "settings" ||
-                      subPage === "edit") ? (
-                      <PrivateFeatureUnavailable />
-                    ) : subPage === "code" ? (
-                      <RepoCodePage />
-                    ) : subPage === "commits" ? (
-                      <RepoCommitsPage />
-                    ) : subPage === "commit" ? (
-                      <RepoCommitPage />
-                    ) : subPage === "branches" ? (
-                      <RepoBranchesPage />
-                    ) : subPage === "tags" ? (
-                      <RepoTagsPage />
-                    ) : subPage === "compare" ? (
-                      <RepoComparePage />
-                    ) : subPage === "actions" ? (
-                      <RepoActionsPage />
-                    ) : subPage === "action-coordinators" ? (
-                      <RepoCoordinatorsPage
-                        coordinatorIdentifier={coordinatorIdentifier}
-                      />
-                    ) : subPage === "releases" ? (
-                      <RepoReleasesPage
-                        eventId={releaseId}
-                        view={releaseView ?? "releases"}
-                      />
-                    ) : subPage === "issue" ? (
-                      <IssuePage />
-                    ) : subPage === "issues" ? (
-                      <RepoIssuesPage />
-                    ) : subPage === "pr" ? (
-                      <PRPage />
-                    ) : subPage === "pr-commit" ? (
-                      <PRPage />
-                    ) : subPage === "prs" ? (
-                      <RepoPRsPage />
-                    ) : subPage === "about" ? (
-                      <RepoAboutPage />
-                    ) : subPage === "edit" ? (
-                      <Navigate to={`${basePath}/settings`} replace />
-                    ) : subPage === "settings" ? (
-                      <RepoSettingsPage />
-                    ) : null}
+                    <Suspense fallback={<RepositoryPageFallback />}>
+                      {isPrivate &&
+                      (subPage === "actions" ||
+                        subPage === "action-coordinators" ||
+                        subPage === "releases" ||
+                        subPage === "settings" ||
+                        subPage === "edit") ? (
+                        <PrivateFeatureUnavailable />
+                      ) : subPage === "code" ? (
+                        <RepoCodePage />
+                      ) : subPage === "commits" ? (
+                        <RepoCommitsPage />
+                      ) : subPage === "commit" ? (
+                        <RepoCommitPage />
+                      ) : subPage === "branches" ? (
+                        <RepoBranchesPage />
+                      ) : subPage === "tags" ? (
+                        <RepoTagsPage />
+                      ) : subPage === "compare" ? (
+                        <RepoComparePage />
+                      ) : subPage === "actions" ? (
+                        <RepoActionsPage />
+                      ) : subPage === "action-coordinators" ? (
+                        <RepoCoordinatorsPage
+                          coordinatorIdentifier={coordinatorIdentifier}
+                        />
+                      ) : subPage === "releases" ? (
+                        <RepoReleasesPage
+                          eventId={releaseId}
+                          view={releaseView ?? "releases"}
+                        />
+                      ) : subPage === "issue" ? (
+                        <IssuePage />
+                      ) : subPage === "issues" ? (
+                        <RepoIssuesPage />
+                      ) : subPage === "pr" ? (
+                        <PRPage />
+                      ) : subPage === "pr-commit" ? (
+                        <PRPage />
+                      ) : subPage === "prs" ? (
+                        <RepoPRsPage />
+                      ) : subPage === "about" ? (
+                        <RepoAboutPage />
+                      ) : subPage === "edit" ? (
+                        <Navigate to={`${basePath}/settings`} replace />
+                      ) : subPage === "settings" ? (
+                        <RepoSettingsPage />
+                      ) : null}
+                    </Suspense>
                   </RepoContext.Provider>
                 </EventStoreProvider>
               </GitCommitLinkContext.Provider>

@@ -9,10 +9,15 @@ let loadedModule: MarkdownContentModule | undefined;
 let modulePromise: Promise<MarkdownContentModule> | undefined;
 
 export function loadMarkdownContent(): Promise<MarkdownContentModule> {
-  modulePromise ??= import("@/components/MarkdownContent").then((module) => {
-    loadedModule = module;
-    return module;
-  });
+  modulePromise ??= import("@/components/MarkdownContent")
+    .then((module) => {
+      loadedModule = module;
+      return module;
+    })
+    .catch((error: unknown) => {
+      modulePromise = undefined;
+      throw error;
+    });
   return modulePromise;
 }
 
