@@ -6,6 +6,8 @@
 
 - Fetch Nostr-announced commits even when Git servers have moved to a newer tip, instead of incorrectly reporting them as unavailable. Give servers advertising the expected tip a three-second head start before trying others, while allowing slow requests to finish.
 
+- Show "authorization required" for git servers that answer HTTP 401/403, instead of reporting them as unreachable.
+
 - Keep locally submitted comments visible in Curated issue and PR threads with their publishing progress while waiting for repository relays.
 
 ### Changed
