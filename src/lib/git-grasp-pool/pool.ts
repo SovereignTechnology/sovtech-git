@@ -51,7 +51,7 @@ import {
   PROVISIONING_BACKOFF_MAX_MS,
   StateEventManager,
   stateEventInputsEqual,
-  orderStateCommitUrls,
+  groupStateCommitUrls,
 } from "./state-event";
 import {
   pushRefUpdateToGraspServers,
@@ -70,6 +70,9 @@ import {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_EVICTION_GRACE_MS = 60_000;
+
+/** Give likely servers a head start without cancelling slow successful fetches. */
+const STATE_COMMIT_FALLBACK_DELAY_MS = 3_000;
 
 /**
  * How many commits to walk when verifying that the state head is an ancestor
@@ -1650,31 +1653,72 @@ export class GitGraspPool {
     readmeContent: string | null;
     readmeFilename: string | null;
   } | null> {
-    // Rank servers whose advertised HEAD matches the announced commit first, but keep
-    // the rest in the attempt: a state commit that another maintainer has built on is
-    // no longer a tip, yet the server still serves it by SHA. Filtering those out was
-    // what turned a reachable commit into "not found on any git server".
-    const orderedUrls = orderStateCommitUrls(urls, commitHash, (url) =>
-      this.cache.peekInfoRefs(url),
+    const { preferred, fallback } = groupStateCommitUrls(
+      urls,
+      commitHash,
+      (url) => this.cache.peekInfoRefs(url),
     );
 
-    if (orderedUrls.length === 0) return null;
+    if (signal.aborted || urls.length === 0) return null;
 
-    try {
-      return await Promise.any(
-        orderedUrls.map(async (url) => {
+    const controller = new AbortController();
+    const requestSignal = AbortSignal.any([signal, controller.signal]);
+    const fetchGroup = (group: string[]) =>
+      Promise.any(
+        group.map(async (url) => {
           const result = await this.http.fetchCommit(
             url,
             commitHash,
             true,
-            signal,
+            requestSignal,
           );
-          if (!result) throw new Error("not found");
+          if (!result || requestSignal.aborted) throw new Error("not found");
           return result;
         }),
       );
+
+    let startFallback = () => {};
+    const fallbackReady = new Promise<void>((resolve) => {
+      startFallback = resolve;
+    });
+    let onAbort = () => {};
+    const aborted = new Promise<null>((resolve) => {
+      onAbort = () => {
+        startFallback();
+        resolve(null);
+      };
+      requestSignal.addEventListener("abort", onAbort, { once: true });
+      if (requestSignal.aborted) onAbort();
+    });
+    const timer =
+      preferred.length > 0 && fallback.length > 0
+        ? setTimeout(startFallback, STATE_COMMIT_FALLBACK_DELAY_MS)
+        : undefined;
+
+    try {
+      const preferredRequest = fetchGroup(preferred);
+      // No preferred servers, or all failed: skip the grace period.
+      void preferredRequest.catch(startFallback);
+      const requests = [preferredRequest];
+      if (fallback.length > 0) {
+        requests.push(
+          fallbackReady.then(() => {
+            if (requestSignal.aborted) throw new Error("aborted");
+            return fetchGroup(fallback);
+          }),
+        );
+      }
+
+      // After the grace period both groups race; slow preferred requests remain
+      // eligible to win even if every fallback server has already failed.
+      const result = await Promise.race([aborted, Promise.any(requests)]);
+      return signal.aborted ? null : result;
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      requestSignal.removeEventListener("abort", onAbort);
     }
   }
 

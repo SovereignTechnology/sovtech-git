@@ -175,29 +175,29 @@ export class StateEventManager {
 }
 
 // ---------------------------------------------------------------------------
-// State-commit fetch ordering
+// State-commit fetch groups
 // ---------------------------------------------------------------------------
 
-/** The subset of a server's cached infoRefs the ordering decision needs. */
+/** The subset of a server's cached infoRefs the grouping decision needs. */
 export interface CachedInfoRefs {
   symrefs: Record<string, string>;
   refs: Record<string, string>;
 }
 
 /**
- * Order servers for a fetch of the commit named by the state event.
+ * Group servers for a fetch of the commit named by the state event.
  *
  * The announced commit need not be a branch tip: one maintainer can announce a
  * commit that another has since built on, and the server still holds that object.
- * A server whose advertised HEAD differs is therefore ranked *below* one that
- * agrees, but it must stay in the attempt - filtering it out turns a reachable
- * ancestor into "announced commit not found on any git server".
+ * Servers with matching or unknown HEADs are tried first. Servers with different
+ * HEADs join after a short grace period, or when all preferred servers fail:
+ * a HEAD mismatch does not prove that the announced commit is unavailable.
  */
-export function orderStateCommitUrls(
+export function groupStateCommitUrls(
   urls: string[],
   commitHash: string,
   peekInfoRefs: (url: string) => CachedInfoRefs | undefined,
-): string[] {
+): { preferred: string[]; fallback: string[] } {
   const agreeing: string[] = [];
   const rest: string[] = [];
 
@@ -223,5 +223,5 @@ export function orderStateCommitUrls(
     rest.push(url);
   }
 
-  return [...agreeing, ...rest];
+  return { preferred: agreeing, fallback: rest };
 }

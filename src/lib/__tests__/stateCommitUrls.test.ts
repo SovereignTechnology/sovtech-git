@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  orderStateCommitUrls,
+  groupStateCommitUrls,
   type CachedInfoRefs,
 } from "@/lib/git-grasp-pool/state-event";
 
@@ -22,20 +22,23 @@ function refs(
   };
 }
 
-describe("orderStateCommitUrls", () => {
-  it("puts a server whose HEAD matches the announced commit first", () => {
+describe("groupStateCommitUrls", () => {
+  it("prefers a server whose HEAD matches the announced commit", () => {
     const peek = refs({
       "https://behind.example": NEWER,
       "https://agreeing.example": ANNOUNCED,
     });
 
     expect(
-      orderStateCommitUrls(
+      groupStateCommitUrls(
         ["https://behind.example", "https://agreeing.example"],
         ANNOUNCED,
         peek,
       ),
-    ).toEqual(["https://agreeing.example", "https://behind.example"]);
+    ).toEqual({
+      preferred: ["https://agreeing.example"],
+      fallback: ["https://behind.example"],
+    });
   });
 
   it("keeps a server whose HEAD has moved on, because the announced commit is still an ancestor it can serve by SHA", () => {
@@ -45,24 +48,24 @@ describe("orderStateCommitUrls", () => {
     const peek = refs({ "https://moved-on.example": NEWER });
 
     expect(
-      orderStateCommitUrls(["https://moved-on.example"], ANNOUNCED, peek),
-    ).toEqual(["https://moved-on.example"]);
+      groupStateCommitUrls(["https://moved-on.example"], ANNOUNCED, peek),
+    ).toEqual({ preferred: [], fallback: ["https://moved-on.example"] });
   });
 
   it("keeps servers with no cached infoRefs", () => {
     const peek = refs({});
 
     expect(
-      orderStateCommitUrls(["https://unknown.example"], ANNOUNCED, peek),
-    ).toEqual(["https://unknown.example"]);
+      groupStateCommitUrls(["https://unknown.example"], ANNOUNCED, peek),
+    ).toEqual({ preferred: ["https://unknown.example"], fallback: [] });
   });
 
   it("keeps servers whose cached infoRefs advertise no HEAD at all", () => {
     const peek = refs({ "https://empty.example": null });
 
     expect(
-      orderStateCommitUrls(["https://empty.example"], ANNOUNCED, peek),
-    ).toEqual(["https://empty.example"]);
+      groupStateCommitUrls(["https://empty.example"], ANNOUNCED, peek),
+    ).toEqual({ preferred: ["https://empty.example"], fallback: [] });
   });
 
   it("falls back to the first advertised ref when HEAD is not a symref", () => {
@@ -72,20 +75,23 @@ describe("orderStateCommitUrls", () => {
     });
 
     expect(
-      orderStateCommitUrls(["https://plain.example"], ANNOUNCED, peek),
-    ).toEqual(["https://plain.example"]);
+      groupStateCommitUrls(["https://plain.example"], ANNOUNCED, peek),
+    ).toEqual({ preferred: ["https://plain.example"], fallback: [] });
   });
 
   it("matches on a shared prefix in either direction", () => {
     const peek = refs({ "https://short.example": ANNOUNCED.slice(0, 12) });
 
     expect(
-      orderStateCommitUrls(["https://short.example"], ANNOUNCED, peek),
-    ).toEqual(["https://short.example"]);
+      groupStateCommitUrls(["https://short.example"], ANNOUNCED, peek),
+    ).toEqual({ preferred: ["https://short.example"], fallback: [] });
   });
 
-  it("returns an empty list for no servers", () => {
-    expect(orderStateCommitUrls([], ANNOUNCED, refs({}))).toEqual([]);
+  it("returns empty groups for no servers", () => {
+    expect(groupStateCommitUrls([], ANNOUNCED, refs({}))).toEqual({
+      preferred: [],
+      fallback: [],
+    });
   });
 
   it("preserves the input order within each group", () => {
@@ -97,7 +103,7 @@ describe("orderStateCommitUrls", () => {
     });
 
     expect(
-      orderStateCommitUrls(
+      groupStateCommitUrls(
         [
           "https://a.example",
           "https://b.example",
@@ -107,11 +113,9 @@ describe("orderStateCommitUrls", () => {
         ANNOUNCED,
         peek,
       ),
-    ).toEqual([
-      "https://b.example",
-      "https://d.example",
-      "https://a.example",
-      "https://c.example",
-    ]);
+    ).toEqual({
+      preferred: ["https://b.example", "https://d.example"],
+      fallback: ["https://a.example", "https://c.example"],
+    });
   });
 });
