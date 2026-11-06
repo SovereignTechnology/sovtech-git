@@ -1,3 +1,4 @@
+import { confirmLocalNetworkAccess } from "@/lib/localNetwork";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { ManualRetryAction } from "@/components/ErrorRetryAction";
 // NOTE: This file is stable and usually should not be modified.
@@ -337,14 +338,21 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
     setErrors((prev) => ({ ...prev, bunker: undefined }));
 
     try {
-      await login.bunker(bunkerUri);
+      const relayUrls = new URL(bunkerUri.trim()).searchParams.getAll("relay");
+      for (const relay of relayUrls) {
+        if (!(await confirmLocalNetworkAccess(relay, "signer"))) return;
+      }
+      await login.bunker(bunkerUri.trim());
       onLogin();
       onClose();
       setBunkerUri("");
-    } catch {
+    } catch (error) {
       setErrors((prev) => ({
         ...prev,
-        bunker: "Failed to connect to bunker. Please check the URI.",
+        bunker:
+          error instanceof Error
+            ? error.message
+            : "Failed to connect to bunker. Please check the URI.",
       }));
     } finally {
       setIsLoading(false);

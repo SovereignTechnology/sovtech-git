@@ -1,3 +1,9 @@
+import {
+  isInternalDestination,
+  InsecurePublicTransportError,
+  LocalNetworkAccessError,
+} from "@/lib/localNetwork";
+
 /**
  * git-grasp-pool — CORS proxy management
  *
@@ -43,6 +49,23 @@ export class CorsProxyManager {
       : DEFAULT_KNOWN_CORS_BLOCKED_ORIGINS;
   }
 
+  /** Local destinations and embedded credentials must never go to the proxy.
+   * Known CORS hosts are a routing optimization, not a public-host allowlist.
+   * Authenticated pools disable the proxy at construction. */
+  canProxyUrl(url: string): boolean {
+    if (!this.proxyBase || isInternalDestination(url)) return false;
+    try {
+      const parsed = new URL(url);
+      return (
+        ["http:", "https:"].includes(parsed.protocol) &&
+        !parsed.username &&
+        !parsed.password
+      );
+    } catch {
+      return false;
+    }
+  }
+
   /** Whether the CORS proxy is enabled at all */
   get enabled(): boolean {
     return this.proxyBase !== null;
@@ -53,6 +76,8 @@ export class CorsProxyManager {
    * Distinct from network-level failures where the server is simply unreachable.
    */
   isCorsLikeError(err: unknown): boolean {
+    if (err instanceof LocalNetworkAccessError) return false;
+    if (err instanceof InsecurePublicTransportError) return true;
     const msg =
       err instanceof Error
         ? err.message
@@ -71,7 +96,7 @@ export class CorsProxyManager {
    * (either hardcoded or learned at runtime).
    */
   originNeedsProxy(url: string): boolean {
-    if (!this.proxyBase) return false;
+    if (!this.canProxyUrl(url)) return false;
     try {
       const hostname = new URL(url).hostname;
       if (this.knownBlocked.has(hostname)) return true;
@@ -95,7 +120,7 @@ export class CorsProxyManager {
    *   → "https://cors.isomorphic-git.org/example.com/repo.git"
    */
   toProxyUrl(url: string): string {
-    if (!this.proxyBase) return url;
+    if (!this.canProxyUrl(url)) return url;
     return `${this.proxyBase}/${url.replace(/^https?:\/\//, "")}`;
   }
 

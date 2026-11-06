@@ -1,3 +1,5 @@
+import { confirmLocalNetworkAccess, localEndpoint } from "@/lib/localNetwork";
+import { LocalNetworkSettings } from "@/components/LocalNetworkControls";
 import type React from "react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
@@ -483,6 +485,8 @@ function GraspRelaysSection() {
 
       if (!address || !isValidGraspServiceAddress(address)) return;
 
+      // Typing is not consent to trigger a local-network permission prompt.
+      if (localEndpoint(graspServiceAddressToRelayUrl(address))) return;
       debounceRef.current = setTimeout(() => {
         void runValidation(address);
       }, 1500);
@@ -514,6 +518,14 @@ function GraspRelaysSection() {
       setValidationState("invalid");
       return;
     }
+
+    if (
+      !(await confirmLocalNetworkAccess(
+        graspServiceAddressToRelayUrl(address),
+        "relay",
+      ))
+    )
+      return;
 
     // If debounce validation is still in flight, cancel it and run immediately
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -1473,6 +1485,7 @@ export default function Settings() {
       <OutboxRelaysSection />
       <InboxRelaysSection />
       <FallbackRelaysSection />
+      <LocalNetworkSettings />
     </div>
   );
 }

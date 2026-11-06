@@ -11,6 +11,9 @@ patchedDependencies:
   applesauce-core@7.0.1:
     hash: 7f6eef720cbee2413e6e6c21c37100c1f2fe8324c521c20c3f5c67b5e6160ae1
     path: patches/applesauce-core@7.0.1.patch
+  applesauce-loaders@7.0.0:
+    hash: f872438d98bea52ebac4c14d424d7daa891fa1ee381e82674ac7f954d359dfc3
+    path: patches/applesauce-loaders@7.0.0.patch
 
 importers:
   .:
@@ -149,7 +152,7 @@ importers:
         version: 7.0.1(patch_hash=7f6eef720cbee2413e6e6c21c37100c1f2fe8324c521c20c3f5c67b5e6160ae1)(typescript@5.9.3)
       applesauce-loaders:
         specifier: ^7.0.0
-        version: 7.0.0(typescript@5.9.3)
+        version: 7.0.0(patch_hash=f872438d98bea52ebac4c14d424d7daa891fa1ee381e82674ac7f954d359dfc3)(typescript@5.9.3)
       applesauce-react:
         specifier: ^7.0.0
         version: 7.0.0(@capacitor/core@8.4.3)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
@@ -8532,7 +8535,7 @@ snapshots:
       - supports-color
       - typescript
 
-  applesauce-loaders@7.0.0(typescript@5.9.3):
+  applesauce-loaders@7.0.0(patch_hash=f872438d98bea52ebac4c14d424d7daa891fa1ee381e82674ac7f954d359dfc3)(typescript@5.9.3):
     dependencies:
       applesauce-core: 7.0.1(patch_hash=7f6eef720cbee2413e6e6c21c37100c1f2fe8324c521c20c3f5c67b5e6160ae1)(typescript@5.9.3)
       nanoid: 5.1.16

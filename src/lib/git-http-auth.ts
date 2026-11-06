@@ -1,3 +1,8 @@
+import {
+  confirmLocalNetworkAccess,
+  LocalNetworkAccessError,
+  localNetworkReady,
+} from "@/lib/localNetwork";
 import type { ISigner } from "applesauce-signers";
 import { nip98, verifyEvent } from "nostr-tools";
 import { graspServiceAddressToRelayUrl } from "@/lib/grasp";
@@ -155,6 +160,17 @@ export function createGitHttpAuthorizationProvider(
       if (!allowedRoots.has(canonicalUrl)) {
         throw new UnverifiedPrivateGitRootError(canonicalUrl);
       }
+      if (typeof window !== "undefined") {
+        await localNetworkReady();
+        if (
+          !(await confirmLocalNetworkAccess(canonicalUrl, "git", signal, false))
+        )
+          throw new LocalNetworkAccessError(
+            new URL(canonicalUrl).origin,
+            "approval",
+          );
+        throwIfAborted(signal);
+      }
       const cached = cache.get(canonicalUrl);
       if (cached && cached.expiresAt > Date.now()) {
         throwIfAborted(signal);
@@ -255,6 +271,12 @@ export async function gitAuthorizationHeaders(
 ): Promise<Record<string, string> | undefined> {
   throwIfAborted(signal);
   if (!provider) return undefined;
+  if (typeof window !== "undefined") {
+    await localNetworkReady();
+    if (!(await confirmLocalNetworkAccess(repoUrl, "git", signal, false)))
+      throw new LocalNetworkAccessError(new URL(repoUrl).origin, "approval");
+    throwIfAborted(signal);
+  }
   const authorization = await provider.getAuthorization(repoUrl, signal);
   throwIfAborted(signal);
   return { Authorization: authorization };
