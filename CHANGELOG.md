@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Explain repository local-relay access inline and resume waiting reads on approval, including relays on localhost:4869.
+
 - Fetch Nostr-announced commits even when Git servers have moved to a newer tip, instead of incorrectly reporting them as unavailable. Give servers advertising the expected tip a three-second head start before trying others, while allowing slow requests to finish.
 
 - Show "authorization required" for git servers that answer HTTP 401/403, instead of reporting them as unreachable.
@@ -11,6 +13,8 @@
 - Keep locally submitted comments visible in Curated issue and PR threads with their publishing progress while waiting for repository relays.
 
 ### Changed
+
+- Coordinate local relay discovery, bunker signers, and internal Git connections with endpoint approval and browser network permissions. Explain local connections before browser permission prompts, offer optional local caching after login, and keep public Git proxy fallback while excluding recognized internal servers.
 
 - Load secondary routes and repository views on demand, then warm unused pages one at a time during quiet periods in relay traffic and browser activity.
 

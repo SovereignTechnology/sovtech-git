@@ -1,4 +1,8 @@
-import { observeRepositoryCacheRestore } from "@/lib/repositoryCache";
+import { optionalLocalCacheRequest, queryLocalCache } from "./localCache";
+import {
+  observeRepositoryCacheRestore,
+  loadRepositoryCache,
+} from "@/lib/repositoryCache";
 import { relayEventPresence } from "@/lib/relayEventPresence";
 import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
@@ -51,6 +55,7 @@ import {
 import { MailboxesModel } from "applesauce-core/models";
 import {
   cacheRequest,
+  parallelCacheRequest,
   createRepositoryCacheWriter,
   loadDeletionEvents,
   saveDeletionEvent,
@@ -80,6 +85,7 @@ import {
   type PaginatedTagValueResponse,
 } from "@/lib/tagValuePaginatedLoader";
 import {
+  resilientRequest,
   resilientAdditiveSubscription,
   type AdditiveFilterChunk,
 } from "@/lib/resilientSubscription";
@@ -629,20 +635,31 @@ export async function publish(
  * - Checks IndexedDB cache first
  * - Queries lookup relays for missing events
  */
-export const eventLoader = createEventLoaderForStore(eventStore, pool, {
-  cacheRequest,
-  lookupRelays: lookupRelays.getValue(),
-  extraRelays: fallbackRelays,
-  followRelayHints: true,
-  bufferTime: 1000, // Batch requests within 1 second
-});
+// The optional cache runs alongside the entire SDK loading sequence, never
+// delaying disk hits or advancement from relay hints to public fallback relays.
+const loaderRelayRequest = (relays: string[], filters: Filter[]) =>
+  resilientRequest(pool, relays, filters).pipe(onlyEvents());
+
+export const eventLoader = createEventLoaderForStore(
+  eventStore,
+  loaderRelayRequest,
+  {
+    cacheRequest,
+    parallelCacheRequest: optionalLocalCacheRequest,
+    lookupRelays: lookupRelays.getValue(),
+    extraRelays: fallbackRelays,
+    followRelayHints: true,
+    bufferTime: 1000, // Batch requests within 1 second
+  },
+);
 
 /**
  * Loader for addressable events (NIP-33).
  * Used for loading articles, profiles, and other replaceable events.
  */
-export const addressLoader = createAddressLoader(pool, {
+export const addressLoader = createAddressLoader(loaderRelayRequest, {
   cacheRequest,
+  parallelCacheRequest: optionalLocalCacheRequest,
   extraRelays: fallbackRelays,
   eventStore,
   lookupRelays: lookupRelays.getValue(),
@@ -652,14 +669,14 @@ export const addressLoader = createAddressLoader(pool, {
  * Loader for reactions (kind 7).
  * Efficiently loads and caches reactions for events.
  */
-export const reactionsLoader = createReactionsLoader(pool, {
-  cacheRequest,
+export const reactionsLoader = createReactionsLoader(loaderRelayRequest, {
+  cacheRequest: parallelCacheRequest,
   eventStore,
 });
 
 /** Create loader for loading zaps for other events */
-export const zapsLoader = createZapsLoader(pool, {
-  cacheRequest,
+export const zapsLoader = createZapsLoader(loaderRelayRequest, {
+  cacheRequest: parallelCacheRequest,
   extraRelays: fallbackRelays,
   eventStore,
 });
@@ -680,8 +697,9 @@ export const zapsLoader = createZapsLoader(pool, {
  * Call-site deduplication (skip if already in store) is the responsibility of
  * the caller — see useLoadProfile / useProfilesForPubkeys.
  */
-export const profileLoader = createAddressLoader(pool, {
+export const profileLoader = createAddressLoader(loaderRelayRequest, {
   cacheRequest,
+  parallelCacheRequest: optionalLocalCacheRequest,
   eventStore,
   extraRelays: fallbackRelays,
   lookupRelays: lookupRelays.getValue(),
@@ -769,7 +787,7 @@ const CI_COMMIT_RESULTS_BUFFER = 500;
  * tradeoff vs. creating an additional singleton loader and subscription.
  */
 export const nip34EssentialsLoader = createPaginatedTagValueLoader(pool, "e", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   kinds: [
     1630,
@@ -794,7 +812,7 @@ export const nip34EssentialsLoader = createPaginatedTagValueLoader(pool, "e", {
  * land first.
  */
 export const nip34CommentsLoader = createPaginatedTagValueLoader(pool, "E", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   kinds: [1111, 1619, ...CI_EVENT_KINDS],
   bufferTime: NIP34_COMMENTS_BUFFER,
@@ -822,7 +840,7 @@ export const nip34EssentialDeletionsLoader = createPaginatedTagValueLoader(
     // Keep this targeted read to recover withdrawals missing from memory,
     // including when relays are unavailable. Root-item queries do not cover
     // deletions whose #e tag names a label or status event instead of the root.
-    cacheRequest,
+    cacheRequest: parallelCacheRequest,
     eventStore,
     kinds: [5],
     bufferTime: NIP34_ESSENTIAL_DELETIONS_BUFFER,
@@ -848,7 +866,7 @@ export const ciResultsByCommitLoader = createPaginatedTagValueLoader(
   pool,
   "c",
   {
-    cacheRequest,
+    cacheRequest: parallelCacheRequest,
     eventStore,
     kinds: [...CI_EVENT_KINDS],
     bufferTime: CI_COMMIT_RESULTS_BUFFER,
@@ -860,7 +878,7 @@ export const ciResultsByCommitLoader = createPaginatedTagValueLoader(
  * via lowercase `e` tag. No kind restriction. Only fired on detail pages.
  */
 const nip34ThreadReplyLoader = createPaginatedTagValueLoader(pool, "e", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -871,7 +889,7 @@ const nip34ThreadReplyLoader = createPaginatedTagValueLoader(pool, "e", {
  * Only fired on detail pages.
  */
 const nip34ThreadRootLoader = createPaginatedTagValueLoader(pool, "E", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -881,7 +899,7 @@ const nip34ThreadRootLoader = createPaginatedTagValueLoader(pool, "E", {
  * No kind restriction. Only fired on detail pages.
  */
 const nip34ThreadQuoteLoader = createPaginatedTagValueLoader(pool, "q", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -1634,6 +1652,16 @@ export function nip34RepoLoader(
             metaAdditions.next(repoMetaChunk(coord));
           }
           seedCachedItems(newCoords);
+          if (!privateRepository && newCoords.length > 0) {
+            subscriber.add(
+              loadRepositoryCache(newCoords, queryLocalCache).subscribe(
+                (events) => {
+                  restoreCachedEvents(events);
+                  seedCachedItems(newCoords);
+                },
+              ),
+            );
+          }
           if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
           if (roleHistoryChanged) {
             lastRoleHistoryKey = roleHistoryKey;

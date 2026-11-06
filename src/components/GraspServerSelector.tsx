@@ -1,3 +1,4 @@
+import { confirmLocalNetworkAccess } from "@/lib/localNetwork";
 import { useId, useState } from "react";
 import { Loader2, Plus, Server } from "lucide-react";
 
@@ -7,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { GraspServer } from "@/hooks/useGraspServers";
 import {
+  graspServiceAddressToRelayUrl,
   isValidGraspServiceAddress,
   normalizeGraspServiceAddress,
   uniqueGraspServiceAddresses,
@@ -81,6 +83,13 @@ export function GraspServerSelector({
       return;
     }
 
+    if (
+      !(await confirmLocalNetworkAccess(
+        graspServiceAddressToRelayUrl(address),
+        "relay",
+      ))
+    )
+      return;
     setValidatingAddress(true);
     setCustomAddressError(undefined);
     const validationError = await validateGraspServer(address, {

@@ -1,0 +1,131 @@
+diff --git a/dist/helpers/parallel-cache.js b/dist/helpers/parallel-cache.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa07b2d394073b69283a9f2863c4f84faa29ffef
+--- /dev/null
++++ b/dist/helpers/parallel-cache.js
+@@ -0,0 +1,25 @@
++import { catchError, defer, EMPTY, merge, ReplaySubject, takeUntil, tap } from "rxjs";
++
++/** An optional network-backed cache must not become a serial loading stage. */
++export function withParallelCache(primary, supplemental, matches) {
++    if (!supplemental) return primary;
++    return (pointers) => defer(() => {
++        const missing = new Set(pointers);
++        const done = new ReplaySubject(1);
++        return merge(
++            primary(pointers).pipe(tap({
++                next: (event) => {
++                    for (const pointer of missing) {
++                        if (matches(pointer, event)) missing.delete(pointer);
++                    }
++                },
++                complete: () => {
++                    // Do not occupy a batch slot waiting for a slow optional
++                    // cache when the normal sequence resolved every pointer.
++                    if (!missing.size) done.next();
++                },
++            })),
++            defer(() => supplemental(pointers)).pipe(catchError(() => EMPTY), takeUntil(done)),
++        );
++    });
++}
+diff --git a/dist/loaders/address-loader.d.ts b/dist/loaders/address-loader.d.ts
+index 7d2a58c104c400168029645c243f6546b63b8537..77211590936f3b932b9f23d1e8b0e30d8d32fb21 100644
+--- a/dist/loaders/address-loader.d.ts
++++ b/dist/loaders/address-loader.d.ts
+@@ -41,6 +41,8 @@ export type AddressLoaderOptions = Partial<{
+     eventStore?: Parameters<typeof filterDuplicateEvents>[0] | null;
+     /** A method used to load events from a local cache */
+     cacheRequest: CacheRequest;
++    /** Network-backed cache run alongside the full disk/hints/fallback sequence. */
++    parallelCacheRequest: CacheRequest;
+     /** Whether to follow relay hints ( default true ) */
+     followRelayHints: boolean;
+     /** Relays to ask for pointers the cache and relay hints didn't resolve */
+diff --git a/dist/loaders/address-loader.js b/dist/loaders/address-loader.js
+index f1c9120d2e1a1e5c2d26c872048241436fc41a62..db8f3528091f4a90da1ca5340b148347db52e054 100644
+--- a/dist/loaders/address-loader.js
++++ b/dist/loaders/address-loader.js
+@@ -1,3 +1,4 @@
++import { withParallelCache } from "../helpers/parallel-cache.js";
+ import { EventMemory, filterDuplicateEvents } from "applesauce-core";
+ import { createReplaceableAddress, getReplaceableAddress, getReplaceableIdentifier, isReplaceable, mergeRelaySets, } from "applesauce-core/helpers";
+ import { bufferTime, catchError, defer, EMPTY, identity, merge } from "rxjs";
+@@ -109,7 +110,7 @@ export function createAddressLoader(pool, opts) {
+     // buffer requests by time or size
+     bufferTime(opts?.bufferTime ?? 200, undefined, opts?.bufferSize ?? 200), 
+     // Create a loader for batching
+-    addressPointerLoadingSequence(
++    withParallelCache(addressPointerLoadingSequence(
+     // Step 1. load from cache if available
+     withStageTimeout(opts?.cacheRequest ? cacheAddressPointersLoader(opts.cacheRequest) : undefined, stageTimeout), 
+     // Step 2. load from relay hints on pointers
+@@ -122,6 +123,8 @@ export function createAddressLoader(pool, opts) {
+     withStageTimeout(opts?.lookupRelays
+         ? (pointers) => unwrap(opts.extraRelays ?? [], (extras) => relaysAddressPointersLoader(request, opts.lookupRelays, (p) => followHints && p.relays ? [...p.relays, ...extras] : extras)(pointers))
+         : undefined, stageTimeout)), 
++    opts?.parallelCacheRequest ? withStageTimeout(cacheAddressPointersLoader(opts.parallelCacheRequest), stageTimeout) : undefined,
++    (pointer, event) => event.kind === pointer.kind && event.pubkey === pointer.pubkey && (pointer.identifier === undefined || getReplaceableIdentifier(event) === pointer.identifier)),
+     // Filter resutls based on requests
+     (pointer, event) => event.kind === pointer.kind &&
+         event.pubkey === pointer.pubkey &&
+diff --git a/dist/loaders/event-loader.d.ts b/dist/loaders/event-loader.d.ts
+index 0c8da2f7c33c37316a42fb0f5bd8e4aee69e5208..35113af8acea2a69479f8d2d6638945b76b7ba30 100644
+--- a/dist/loaders/event-loader.d.ts
++++ b/dist/loaders/event-loader.d.ts
+@@ -31,6 +31,8 @@ export type EventPointerLoaderOptions = Partial<{
+     eventStore?: Parameters<typeof filterDuplicateEvents>[0] | null;
+     /** A method used to load events from a local cache */
+     cacheRequest: CacheRequest;
++    /** Network-backed cache run alongside the full disk/hints/fallback sequence. */
++    parallelCacheRequest: CacheRequest;
+     /** Whether to follow relay hints ( default true ) */
+     followRelayHints: boolean;
+     /** Relays to ask for events the cache and relay hints didn't resolve */
+diff --git a/dist/loaders/event-loader.js b/dist/loaders/event-loader.js
+index 3f6c36bbe8f5936ddda32f950847ab47aa3f08e7..a328f1c02b5dd3ba7366040d242134a1fcecca36 100644
+--- a/dist/loaders/event-loader.js
++++ b/dist/loaders/event-loader.js
+@@ -1,3 +1,4 @@
++import { withParallelCache } from "../helpers/parallel-cache.js";
+ import { EventMemory } from "applesauce-core/event-store";
+ import { filterDuplicateEvents } from "applesauce-core/observable";
+ import { bufferTime, catchError, defer, EMPTY, identity, merge, tap } from "rxjs";
+@@ -87,7 +88,7 @@ export function createEventLoader(pool, opts) {
+     // buffer requests by time or size
+     bufferTime(opts?.bufferTime ?? 200, undefined, opts?.bufferSize ?? 200), 
+     // Create a loader for batching
+-    eventLoadingSequence(
++    withParallelCache(eventLoadingSequence(
+     // Step 1. load from cache if available
+     withStageTimeout(opts?.cacheRequest ? cacheEventsLoader(opts.cacheRequest) : undefined, stageTimeout), 
+     // Step 2. load from relay hints on pointers
+@@ -96,6 +97,8 @@ export function createEventLoader(pool, opts) {
+     withStageTimeout(opts?.extraRelays
+         ? relaysEventsLoader(request, opts.extraRelays, followHints ? (p) => p.relays : undefined)
+         : undefined, stageTimeout)), 
++    opts?.parallelCacheRequest ? withStageTimeout(cacheEventsLoader(opts.parallelCacheRequest), stageTimeout) : undefined,
++    (pointer, event) => event.id === pointer.id),
+     // Filter resutls based on requests
+     (pointer, event) => event.id === pointer.id, 
+     // Pass all events through the store if provided, or use EventMemory for deduplication by default
+diff --git a/dist/loaders/unified-event-loader.js b/dist/loaders/unified-event-loader.js
+index 48ca5158fa0f0c7f29bdba65940be0354c5d7944..4f152d41f5789a2cc331a44da971e144b746d028 100644
+--- a/dist/loaders/unified-event-loader.js
++++ b/dist/loaders/unified-event-loader.js
+@@ -12,6 +12,7 @@ export function createUnifiedEventLoader(pool, opts) {
+         bufferSize: opts?.bufferSize,
+         eventStore: opts?.eventStore,
+         cacheRequest: opts?.cacheRequest,
++        parallelCacheRequest: opts?.parallelCacheRequest,
+         followRelayHints: opts?.followRelayHints,
+         extraRelays: opts?.extraRelays,
+         maxConcurrentBatches: opts?.maxConcurrentBatches,
+@@ -23,6 +24,7 @@ export function createUnifiedEventLoader(pool, opts) {
+         bufferSize: opts?.bufferSize,
+         eventStore: opts?.eventStore,
+         cacheRequest: opts?.cacheRequest,
++        parallelCacheRequest: opts?.parallelCacheRequest,
+         followRelayHints: opts?.followRelayHints,
+         extraRelays: opts?.extraRelays,
+         lookupRelays: opts?.lookupRelays,

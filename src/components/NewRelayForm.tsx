@@ -1,3 +1,4 @@
+import { confirmLocalNetworkAccess } from "@/lib/localNetwork";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ export function NewRelayForm({
   onAdd: (relay: string) => void | Promise<void>;
 }) {
   const [newRelay, setNewRelay] = useState("");
+  const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -22,13 +24,21 @@ export function NewRelayForm({
   const handleAdd = async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
     setAdding(true);
-    await onAdd(normalizeUrl(ensureWebSocketURL(newRelay.trim())));
-    setNewRelay("");
-    setAdding(false);
+    setError("");
+    try {
+      const relay = normalizeUrl(ensureWebSocketURL(newRelay.trim()));
+      if (!(await confirmLocalNetworkAccess(relay, "relay"))) return;
+      await onAdd(relay);
+      setNewRelay("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add relay");
+    } finally {
+      setAdding(false);
+    }
   };
 
   return (
-    <form className="flex w-full min-w-0 gap-2" onSubmit={handleAdd}>
+    <form className="flex w-full min-w-0 flex-wrap gap-2" onSubmit={handleAdd}>
       <Input
         type="text"
         placeholder="wss://relay.example.com"
@@ -45,6 +55,11 @@ export function NewRelayForm({
       >
         Add
       </Button>
+      {error && (
+        <p role="alert" className="w-full text-sm text-destructive">
+          {error} Edit the URL or retry Add.
+        </p>
+      )}
     </form>
   );
 }

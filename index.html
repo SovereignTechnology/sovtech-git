@@ -33,9 +33,12 @@
       name="twitter:image:alt"
       content="%APP_NAME% — git collaboration without the platform"
     />
+    <!-- Local HTTP/WS destinations are gated by localNetworkInstall before app
+         networking starts. CSP cannot express private IP ranges; see
+         docs/local-network-access.md for the security boundary and limitations. -->
     <meta
       http-equiv="content-security-policy"
-      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src 'self' https:; font-src 'self'; base-uri 'self'; manifest-src 'self'; connect-src 'self' blob: https: wss:; img-src 'self' data: blob: https:; media-src 'self' https:"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src 'self' https:; font-src 'self'; base-uri 'self'; manifest-src 'self'; connect-src 'self' blob: https: wss: http: ws:; img-src 'self' data: blob: https:; media-src 'self' https:"
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />

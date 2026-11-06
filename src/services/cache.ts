@@ -1,5 +1,9 @@
+import { markFromCache } from "applesauce-core/helpers";
+import { from, merge, mergeMap, tap } from "rxjs";
 import type { Filter, NostrEvent } from "applesauce-core/helpers";
-import "window.nostrdb.js";
+import "@/lib/localNetworkInstall";
+import { optionalLocalCacheRequest, writeLocalCache } from "./localCache";
+
 import { relayEventPresence } from "@/lib/relayEventPresence";
 import type { RelayEventPresence } from "@/lib/relayEventPresence";
 import { instrumentCacheQuery } from "@/lib/perfRuntime";
@@ -7,6 +11,12 @@ import {
   isPrivateRepositoryEvent,
   isPrivateRepositoryEventId,
 } from "@/services/privateRepositoryScope";
+
+// No local discovery before login. Injected native/extension providers remain
+// untouched; the polyfill supplies durable IndexedDB storage immediately.
+export const hasInjectedCache = window.nostrdb !== undefined;
+window.nostrdbConfig = { ...window.nostrdbConfig, localRelays: [] };
+await import("window.nostrdb.js");
 
 const DELETION_PERSIST_TIMEOUT_MS = 5_000;
 const DELETION_PERSIST_POLL_MS = 25;
@@ -28,9 +38,16 @@ function queryDatabase(filters: Filter[]): Promise<NostrEvent[]> {
  * Returns empty array if cache is not available.
  */
 async function queryCache(filters: Filter[]): Promise<NostrEvent[]> {
-  const events = await queryDatabase(filters);
-  return events.filter((event) => !isPrivateRepositoryEventId(event.id));
+  const stored = await queryDatabase(filters);
+  return stored.filter((event) => !isPrivateRepositoryEventId(event.id));
 }
+
+/** For loaders that already run cache and network branches in parallel. */
+export const parallelCacheRequest = (filters: Filter[]) =>
+  merge(
+    from(cacheRequest(filters)).pipe(mergeMap((events) => from(events))),
+    optionalLocalCacheRequest(filters),
+  ).pipe(tap((event) => markFromCache(event)));
 
 export const cacheRequest =
   // Profiling builds only: per-shape timings in `__gwPerf.report()`.
@@ -47,14 +64,12 @@ const repositoryKinds = new Set([
 
 /** Save general-purpose events; repository owners admit collaboration events. */
 export async function saveEvents(events: NostrEvent[]) {
-  await Promise.allSettled(
-    events
-      .filter(
-        (event) =>
-          !isPrivateRepositoryEvent(event) && !repositoryKinds.has(event.kind),
-      )
-      .map((event) => window.nostrdb.add(event)),
+  const admitted = events.filter(
+    (event) =>
+      !isPrivateRepositoryEvent(event) && !repositoryKinds.has(event.kind),
   );
+  await Promise.allSettled(admitted.map((event) => window.nostrdb.add(event)));
+  void writeLocalCache(admitted);
 }
 
 /** Scoped to a repository loader's lifetime. Late relay confirmation can make
@@ -67,6 +82,7 @@ export function createRepositoryCacheWriter(
   presence: RelayEventPresence = relayEventPresence,
   write: (events: NostrEvent[]) => Promise<unknown> = async (events) => {
     await Promise.all(events.map((event) => window.nostrdb.add(event)));
+    void writeLocalCache(events);
   },
 ) {
   let relays: readonly string[] = [];
@@ -140,6 +156,7 @@ export async function saveDeletionEvent(event: NostrEvent): Promise<void> {
   };
 
   await window.nostrdb.add(durableEvent);
+  void writeLocalCache([durableEvent]);
 
   // window.nostrdb.add() acknowledges its in-memory write queue, not the
   // eventual IndexedDB commit. Wait for the public exact-event read to prove

@@ -1,3 +1,9 @@
+import {
+  isInternalDestination,
+  confirmLocalNetworkAccess,
+  LocalNetworkAccessError,
+} from "@/lib/localNetwork";
+
 /**
  * git-grasp-pool — git HTTP protocol layer
  *
@@ -646,6 +652,12 @@ export class GitHttpClient {
       if (cached) return cached;
 
       try {
+        if (
+          typeof window !== "undefined" &&
+          !(await confirmLocalNetworkAccess(url, "git", waitSignal, false))
+        ) {
+          throw new LocalNetworkAccessError(new URL(url).origin, "approval");
+        }
         const info = await this.withAuthorizationRetry(
           url,
           lifecycleSignal,
@@ -712,7 +724,12 @@ export class GitHttpClient {
           throw permanent;
         }
         // Only attempt proxy fallback for CORS-like errors
-        if (!this.cors.enabled || !this.cors.isCorsLikeError(err)) throw err;
+        if (
+          isInternalDestination(url) ||
+          !this.cors.canProxyUrl(url) ||
+          !this.cors.isCorsLikeError(err)
+        )
+          throw err;
 
         const proxyUrl = this.cors.toProxyUrl(url);
         try {
