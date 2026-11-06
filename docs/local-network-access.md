@@ -11,7 +11,9 @@ permission to contact it. Browser permission and app approval are separate.
 - **Logged-in users, including restored sessions:** show a non-blocking “Allow access to local services?” notice when no discovery preference is saved, with
   **Not now / Allow**. It does not take focus or occupy the signer/server approval queue. Remember either choice in this browser. An injected
   native/extension cache provider suppresses this offer. Settings can change it. Both choices dismiss notices in other open tabs; enabling or disabling also updates their cache lifecycle. Discovery currently checks only `localhost:4869`. If the first approved check finds no relay, show “No local relay found. We’ll look again next time.” for five seconds. Later visits and other tabs retry quietly; browser denial is described separately.
-- **Bunker login / adding a relay or GRASP server:** an unapproved local origin
+- **Local signer relay:** the checkbox sits below the QR and Copy URI controls in the Remote Signer dialog. Remote relays appears first with its checkbox, hostname summary, and expandable editor in one wrapper. Local signer relay follows in a matching wrapper. Selecting it uses localhost:7777 and unchecks Remote relays. Editing a valid port updates the QR and URI immediately; invalid ports suspend the session without hiding the controls. Checking Remote relays includes them and expands their editor. These explicit transport selections approve their endpoints without a second app dialog; browser permission still applies.
+- **Bunker login:** submitting Connect approves the URI’s explicit relay endpoints. Local URLs have an inline browser-permission explanation. Browser denial is still enforced.
+- **Adding a relay or GRASP server:** an unapproved local origin
   opens “Connect to this local server?” with its address and purpose. Only
   Continue approves access, after which the original action continues. Merely
   typing, selecting or saving a draft does not approve access.

@@ -1,4 +1,7 @@
-import { confirmLocalNetworkAccess } from "@/lib/localNetwork";
+import { approveLocalEndpoint, localEndpoint } from "@/lib/localNetwork";
+import { defaultNostrConnectRelays } from "@/services/settings";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { ManualRetryAction } from "@/components/ErrorRetryAction";
 // NOTE: This file is stable and usually should not be modified.
@@ -98,6 +101,13 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
   // Relay editor state for the nostrconnect session
   const [showRelayEditor, setShowRelayEditor] = useState(false);
   const [newRelayInput, setNewRelayInput] = useState("");
+  const [localSigner, setLocalSigner] = useState(false);
+  const [localPort, setLocalPort] = useState("7777");
+  const [includeDefaults, setIncludeDefaults] = useState(true);
+  const [otherRelays, setOtherRelays] = useState(() =>
+    defaultNostrConnectRelays.getValue(),
+  );
+  const [localError, setLocalError] = useState("");
 
   // Generate a nostrconnect session (sync — just creates the ephemeral signer + URI)
   const generateConnectSession = useCallback((relays?: string[]) => {
@@ -111,17 +121,16 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
 
   // Start listening for the remote signer to connect (async)
   useEffect(() => {
-    if (!nostrConnectSession || isWaitingForConnect) return;
+    if (!nostrConnectSession || isWaitingForConnect || connectError) return;
 
     const startListening = async () => {
       setIsWaitingForConnect(true);
-      abortControllerRef.current = new AbortController();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       try {
-        await login.nostrconnect(
-          nostrConnectSession,
-          abortControllerRef.current.signal,
-        );
+        await login.nostrconnect(nostrConnectSession, controller.signal);
+        if (controller.signal.aborted) return;
         onLogin();
         onClose();
       } catch (error) {
@@ -130,7 +139,7 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
         // rather than a DOMException with name "AbortError", so we check both
         // the signal's aborted flag and the conventional name.
         const wasAborted =
-          abortControllerRef.current?.signal.aborted ||
+          controller.signal.aborted ||
           (error instanceof Error && error.name === "AbortError") ||
           (error instanceof Error && error.message === "Aborted");
         if (!wasAborted) {
@@ -138,12 +147,20 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
             error instanceof Error ? error.message : "Connection failed",
           );
         }
-        setIsWaitingForConnect(false);
+        if (abortControllerRef.current === controller)
+          setIsWaitingForConnect(false);
       }
     };
 
     startListening();
-  }, [nostrConnectSession, login, onLogin, onClose, isWaitingForConnect]);
+  }, [
+    nostrConnectSession,
+    login,
+    onLogin,
+    onClose,
+    isWaitingForConnect,
+    connectError,
+  ]);
 
   // Clean up when the dialog closes
   useEffect(() => {
@@ -169,6 +186,11 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
       setShowBunkerInput(false);
       setShowRelayEditor(false);
       setNewRelayInput("");
+      setLocalSigner(false);
+      setLocalPort("7777");
+      setIncludeDefaults(true);
+      setOtherRelays(defaultNostrConnectRelays.getValue());
+      setLocalError("");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -195,6 +217,8 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
       setShowRelayEditor(false);
       setNewRelayInput("");
     }
+    setLocalSigner(false);
+    setIncludeDefaults(true);
     setPage("landing");
     setErrors({});
   }, [page]);
@@ -207,21 +231,69 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
       setNostrConnectSession(null);
       setIsWaitingForConnect(false);
       setConnectError(null);
-      // Let state clear before generating a new session
-      setTimeout(() => generateConnectSession(relays), 0);
+      generateConnectSession(
+        relays ??
+          (nostrConnectSession
+            ? relaysFromUri(nostrConnectSession.uri)
+            : undefined),
+      );
     },
-    [generateConnectSession],
+    [generateConnectSession, nostrConnectSession],
   );
 
-  /** Regenerate the session with a modified relay list */
-  const handleRelayChange = useCallback(
-    (relays: string[]) => {
-      handleRetry(relays);
-      setShowRelayEditor(false);
-      setNewRelayInput("");
-    },
-    [handleRetry],
-  );
+  const updateSignerRelays = (
+    local: boolean,
+    port: string,
+    includeOther: boolean,
+    others = otherRelays,
+  ) => {
+    setCopied(false);
+    setLocalError("");
+    if (
+      local &&
+      (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
+    ) {
+      abortControllerRef.current?.abort();
+      setNostrConnectSession(null);
+      setIsWaitingForConnect(false);
+      setConnectError(null);
+      setLocalError("Enter a port between 1 and 65535.");
+      return;
+    }
+    const relays = [
+      ...new Set([
+        ...(local ? [`ws://localhost:${Number(port)}`] : []),
+        ...(includeOther ? others : []),
+      ]),
+    ];
+    if (!relays.length) return;
+    // Changing these controls explicitly selects the signer's transport.
+    relays.forEach((relay) => approveLocalEndpoint(relay));
+    handleRetry(relays);
+  };
+
+  const handleRelayChange = (relays: string[]) => {
+    if (!relays.length && !localSigner) return;
+    setOtherRelays(relays);
+    setNewRelayInput("");
+    updateSignerRelays(localSigner, localPort, includeDefaults, relays);
+  };
+
+  const addSignerRelay = () => {
+    try {
+      const raw = newRelayInput.trim();
+      const url = new URL(/^wss?:\/\//.test(raw) ? raw : `wss://${raw}`);
+      if (
+        !["ws:", "wss:"].includes(url.protocol) ||
+        url.username ||
+        url.password
+      )
+        throw new Error("Use a ws:// or wss:// relay URL without credentials.");
+      handleRelayChange([...new Set([...otherRelays, url.href])]);
+    } catch {
+      setLocalError("Enter a valid relay URL.");
+    }
+  };
 
   const handleCopyUri = async () => {
     if (!nostrConnectSession) return;
@@ -340,7 +412,7 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
     try {
       const relayUrls = new URL(bunkerUri.trim()).searchParams.getAll("relay");
       for (const relay of relayUrls) {
-        if (!(await confirmLocalNetworkAccess(relay, "signer"))) return;
+        approveLocalEndpoint(relay);
       }
       await login.bunker(bunkerUri.trim());
       onLogin();
@@ -604,11 +676,10 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
           {/* ── Remote Signer page ── */}
           {page === "remote-signer" && (
             <div className="space-y-4">
-              {/* nostrconnect:// section */}
               <div className="flex flex-col items-center space-y-4">
                 {connectError ? (
                   <div className="flex flex-col items-center space-y-4 py-4">
-                    <p className="text-sm text-red-500 text-center">
+                    <p className="text-sm text-destructive text-center">
                       {connectError}
                     </p>
                     <Button variant="outline" onClick={() => handleRetry()}>
@@ -617,9 +688,8 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
                   </div>
                 ) : nostrConnectSession ? (
                   <>
-                    {/* QR code — desktop only */}
                     {!isMobile && (
-                      <div className="p-4 bg-white dark:bg-white rounded-xl">
+                      <div className="p-4 bg-white rounded-xl">
                         <QRCodeCanvas
                           value={nostrConnectSession.uri}
                           size={180}
@@ -627,7 +697,6 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
                         />
                       </div>
                     )}
-
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       <span>
@@ -636,18 +705,14 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
                           : "Scan with your signer app"}
                       </span>
                     </div>
-
-                    {/* Deep-link button — mobile only */}
                     {isMobile && (
                       <Button
                         className="w-full gap-2 py-6 rounded-full"
                         onClick={handleOpenSignerApp}
                       >
-                        <ExternalLink className="w-5 h-5" />
-                        Open Signer App
+                        <ExternalLink className="w-5 h-5" /> Open Signer App
                       </Button>
                     )}
-
                     <Button
                       variant="outline"
                       size={isMobile ? "default" : "sm"}
@@ -658,127 +723,172 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
                     >
                       {copied ? (
                         <>
-                          <Check className="w-4 h-4" />
-                          Copied!
+                          <Check className="w-4 h-4" /> Copied!
                         </>
                       ) : (
                         <>
-                          <Copy className="w-4 h-4" />
-                          Copy URI
+                          <Copy className="w-4 h-4" /> Copy URI
                         </>
                       )}
                     </Button>
-
-                    {/* Relay editor — collapsible one-liner */}
-                    {(() => {
-                      const currentRelays = relaysFromUri(
-                        nostrConnectSession.uri,
-                      );
-                      return (
-                        <div className="w-full">
-                          <button
-                            type="button"
-                            onClick={() => setShowRelayEditor(!showRelayEditor)}
-                            className="flex items-center justify-center gap-1.5 w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-                          >
-                            <span>
-                              Relays:{" "}
-                              {currentRelays
-                                .map((r) => r.replace("wss://", ""))
-                                .join(", ")}
-                            </span>
-                            <ChevronDown
-                              className={`w-3 h-3 transition-transform ${showRelayEditor ? "rotate-180" : ""}`}
-                            />
-                          </button>
-
-                          {showRelayEditor && (
-                            <div className="mt-2 space-y-2 text-sm">
-                              {currentRelays.map((relay) => (
-                                <div
-                                  key={relay}
-                                  className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-1.5"
-                                >
-                                  <span className="flex-1 font-mono text-xs truncate">
-                                    {relay}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleRelayChange(
-                                        currentRelays.filter(
-                                          (r) => r !== relay,
-                                        ),
-                                      )
-                                    }
-                                    className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                                    aria-label={`Remove ${relay}`}
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ))}
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={newRelayInput}
-                                  onChange={(e) =>
-                                    setNewRelayInput(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (
-                                      e.key === "Enter" &&
-                                      newRelayInput.trim()
-                                    ) {
-                                      e.preventDefault();
-                                      const relay =
-                                        newRelayInput
-                                          .trim()
-                                          .startsWith("wss://") ||
-                                        newRelayInput.trim().startsWith("ws://")
-                                          ? newRelayInput.trim()
-                                          : `wss://${newRelayInput.trim()}`;
-                                      handleRelayChange([
-                                        ...currentRelays,
-                                        relay,
-                                      ]);
-                                    }
-                                  }}
-                                  placeholder="wss://relay.example.com"
-                                  className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!newRelayInput.trim()) return;
-                                    const relay =
-                                      newRelayInput
-                                        .trim()
-                                        .startsWith("wss://") ||
-                                      newRelayInput.trim().startsWith("ws://")
-                                        ? newRelayInput.trim()
-                                        : `wss://${newRelayInput.trim()}`;
-                                    handleRelayChange([
-                                      ...currentRelays,
-                                      relay,
-                                    ]);
-                                  }}
-                                  className="h-7 w-7 rounded-md border border-input bg-background flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                                  aria-label="Add relay"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
                   </>
                 ) : (
-                  <div className="flex items-center justify-center h-[100px]">
-                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Enter a valid relay port to update the QR code.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <section
+                  aria-label="Remote relays"
+                  className="space-y-2 rounded-lg border bg-muted/20 p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="signer-defaults"
+                      checked={includeDefaults}
+                      disabled={!localSigner}
+                      onCheckedChange={(checked) => {
+                        const include = checked === true;
+                        setIncludeDefaults(include);
+                        setShowRelayEditor(include);
+                        updateSignerRelays(localSigner, localPort, include);
+                      }}
+                    />
+                    <Label htmlFor="signer-defaults" className="cursor-pointer">
+                      Remote relays
+                    </Label>
+                    {includeDefaults && (
+                      <button
+                        type="button"
+                        aria-label="Edit remote relays"
+                        aria-expanded={showRelayEditor}
+                        className="ml-auto rounded p-1 focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => setShowRelayEditor(!showRelayEditor)}
+                      >
+                        <ChevronDown
+                          className={`size-4 ${showRelayEditor ? "rotate-180" : ""}`}
+                        />
+                      </button>
+                    )}
                   </div>
+                  {includeDefaults && !showRelayEditor && (
+                    <p className="pl-7 text-xs leading-relaxed text-muted-foreground break-words">
+                      {otherRelays
+                        .map((relay) =>
+                          relay.replace(/^wss?:\/\//, "").replace(/\/$/, ""),
+                        )
+                        .join(", ")}
+                    </p>
+                  )}
+                  {includeDefaults && showRelayEditor && (
+                    <div className="space-y-2 pl-7">
+                      {otherRelays.map((relay) => (
+                        <div
+                          key={relay}
+                          className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1"
+                        >
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                            {relay}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${relay}`}
+                            disabled={!localSigner && otherRelays.length === 1}
+                            className="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() =>
+                              handleRelayChange(
+                                otherRelays.filter((r) => r !== relay),
+                              )
+                            }
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <Input
+                          aria-label="Add signer relay URL"
+                          placeholder="wss://relay.example.com"
+                          value={newRelayInput}
+                          onChange={(event) =>
+                            setNewRelayInput(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && newRelayInput.trim()) {
+                              event.preventDefault();
+                              addSignerRelay();
+                            }
+                          }}
+                          className="min-w-0 h-8 font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="size-8 shrink-0"
+                          aria-label="Add relay"
+                          disabled={!newRelayInput.trim()}
+                          onClick={addSignerRelay}
+                        >
+                          <Plus className="size-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+                <section
+                  aria-label="Local signer relay"
+                  className="space-y-2 rounded-lg border bg-muted/20 p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="local-signer"
+                      checked={localSigner}
+                      onCheckedChange={(checked) => {
+                        const local = checked === true;
+                        setLocalSigner(local);
+                        setIncludeDefaults(!local);
+                        setShowRelayEditor(false);
+                        const others = otherRelays.length
+                          ? otherRelays
+                          : defaultNostrConnectRelays.getValue();
+                        setOtherRelays(others);
+                        updateSignerRelays(local, localPort, !local, others);
+                      }}
+                    />
+                    <Label htmlFor="local-signer" className="cursor-pointer">
+                      Local signer relay
+                    </Label>
+                  </div>
+                  {localSigner && (
+                    <div className="space-y-2 pl-7">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm text-muted-foreground">
+                          localhost:
+                        </span>
+                        <Input
+                          aria-label="Local relay port"
+                          inputMode="numeric"
+                          value={localPort}
+                          onChange={(event) => {
+                            const port = event.target.value;
+                            setLocalPort(port);
+                            updateSignerRelays(true, port, includeDefaults);
+                          }}
+                          className="min-w-0 h-8 font-mono"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Your browser may ask for permission.
+                      </p>
+                    </div>
+                  )}
+                </section>
+                {localError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {localError}
+                  </p>
                 )}
               </div>
 
@@ -831,6 +941,14 @@ const LoginDialog: React.FC<LoginDialogProps> = ({
                       )}
                     </div>
 
+                    {relaysFromUri(bunkerUri).some((relay) =>
+                      localEndpoint(relay),
+                    ) && (
+                      <p className="text-sm text-muted-foreground">
+                        This signer uses a local relay. Your browser may ask for
+                        permission when you connect.
+                      </p>
+                    )}
                     <Button
                       className="w-full rounded-full py-4"
                       variant="outline"
