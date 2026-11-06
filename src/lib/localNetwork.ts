@@ -314,6 +314,11 @@ export function approveLocalEndpoint(
     { origin, space, approved: true, pending: false },
   ];
   sessionApprovals.add(origin);
+  dismissed.delete(origin);
+  // Inline repository controls must also resume Git requests awaiting consent.
+  const callbacks = waiters.get(origin);
+  waiters.delete(origin);
+  callbacks?.forEach((callback) => callback(true));
   persist();
 }
 

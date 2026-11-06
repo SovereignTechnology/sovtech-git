@@ -1,4 +1,4 @@
-import { RepositoryLocalRelayNotice } from "@/components/LocalNetworkControls";
+import { RepositoryLocalConnectionNotice } from "@/components/LocalNetworkControls";
 import type { ComponentProps } from "react";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import { useErrorRetry, type ErrorRetryState } from "@/hooks/useErrorRetry";
@@ -987,7 +987,12 @@ function RepoLayoutSession({
             </div>
           </div>
 
-          {repo && <RepositoryLocalRelayNotice relays={repo.relays} />}
+          {repo && (
+            <RepositoryLocalConnectionNotice
+              relays={repo.relays}
+              cloneUrls={cloneUrls}
+            />
+          )}
 
           {repo && announcementsSettled && (
             <RepositoryLifecycleNotice repo={repo} />

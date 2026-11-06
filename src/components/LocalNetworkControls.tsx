@@ -45,39 +45,54 @@ const reasons = {
     "Look for local services on this device, such as a relay for faster loading.",
 };
 
-/** Repository-declared local relays need context even before the first REQ. */
-export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
+/** Explain local services declared by the current repository before connecting. */
+export function RepositoryLocalConnectionNotice({
+  relays,
+  cloneUrls,
+}: {
+  relays: string[];
+  cloneUrls: string[];
+}) {
   useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
-  const local = [
-    ...new Map(
-      relays.flatMap((url) => {
-        const endpoint = localEndpoint(url);
-        return endpoint && !localAccessAllowed(url)
-          ? [[endpoint.origin, endpoint] as const]
-          : [];
-      }),
-    ).values(),
+  const services = [
+    ...relays.map((url) => ({ url, purpose: "relay" as const })),
+    ...cloneUrls.map((url) => ({ url, purpose: "git" as const })),
   ];
-  if (!local.length) return null;
-  const localOnly = relays.every((url) => !!localEndpoint(url));
+  const local = new Map<
+    string,
+    {
+      endpoint: NonNullable<ReturnType<typeof localEndpoint>>;
+      relay: boolean;
+      git: boolean;
+    }
+  >();
+  for (const { url, purpose } of services) {
+    const endpoint = localEndpoint(url);
+    if (!endpoint || localAccessAllowed(url)) continue;
+    const entry = local.get(endpoint.origin) ?? {
+      endpoint,
+      relay: false,
+      git: false,
+    };
+    entry[purpose] = true;
+    local.set(endpoint.origin, entry);
+  }
+  if (!local.size) return null;
   return (
     <section
-      aria-label="Repository local relays"
+      aria-label="Repository local connections"
       className="container max-w-screen-xl px-4 md:px-8 mt-4"
     >
       <div className="rounded-xl border bg-background p-4 space-y-3">
         <div>
-          <h2 className="font-semibold">
-            This repository uses{" "}
-            {localOnly ? "a local relay" : "local and remote relays"}
-          </h2>
+          <h2 className="font-semibold">This repository uses local services</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {localOnly
-              ? "These local relays are listed by this repository. Connect to load content available on your device or local network."
-              : "These local relays are listed by this repository. Remote relays can load normally; connect below for content available locally."}
+            These servers are listed in this repository’s relays or clone URLs.
+            Connect to access them on your device or local network. Public
+            servers can load normally.
           </p>
         </div>
-        {local.map((endpoint) => {
+        {[...local.values()].map(({ endpoint, relay, git }) => {
           const denied = networkPermission(endpoint.space) === "denied";
           return (
             <div
@@ -86,7 +101,16 @@ export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
             >
               <div className="min-w-0">
                 <p className="font-mono text-sm break-all">
-                  {endpoint.origin.replace(/^http/, "ws")}
+                  {git
+                    ? endpoint.origin
+                    : endpoint.origin.replace(/^http/, "ws")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {relay && git
+                    ? "Nostr events and Git files"
+                    : git
+                      ? "Git files · listed in clone URLs"
+                      : "Nostr events · listed in repository relays"}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {denied
@@ -96,7 +120,7 @@ export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
               </div>
               <Button
                 size="sm"
-                variant={localOnly ? "default" : "outline"}
+                variant="outline"
                 onClick={() => {
                   if (denied)
                     void refreshNetworkPermissions().then(() => {
