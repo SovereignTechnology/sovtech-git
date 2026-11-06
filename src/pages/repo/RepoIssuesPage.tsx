@@ -1,8 +1,13 @@
+import {
+  localAccessAllowed,
+  localNetworkRevision,
+  subscribeLocalNetwork,
+} from "@/lib/localNetwork";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
-import { useMemo, useState } from "react";
+import { useSyncExternalStore, useMemo, useState } from "react";
 import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
 import {
@@ -63,6 +68,8 @@ const ISSUE_SEARCH_OPTIONS: IFuseOptions<ResolvedIssueLite> = {
 export default function RepoIssuesPage() {
   const { pubkey, repoId, resolved, issues, basePath } = useRepoContext();
   const repo = resolved?.repo;
+  useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
+  const localRelayPaused = repo?.relays.some((url) => !localAccessAllowed(url));
   const account = useActiveAccount();
   const sorting = useRepoListSortPreference(repo?.componentId, "issues");
   const repoOwnerProfile = useProfile(pubkey);
@@ -340,12 +347,16 @@ export default function RepoIssuesPage() {
             <p className="text-muted-foreground">
               {hasActiveFilters
                 ? "No issues match your filters"
-                : "No issues yet"}
+                : localRelayPaused
+                  ? "No issues loaded"
+                  : "No issues yet"}
             </p>
             <p className="text-muted-foreground/60 text-sm mt-1">
               {hasActiveFilters
                 ? "Try adjusting your filters"
-                : "Issues sent to this repository will appear here"}
+                : localRelayPaused
+                  ? "Connect to the local relay above to check for content."
+                  : "Issues sent to this repository will appear here"}
             </p>
           </div>
         ) : (

@@ -34,6 +34,13 @@
  * and callers use onlyEvents() to strip EOSE if not needed.
  */
 
+import {
+  assertLocalNetworkAccess,
+  localEndpoint,
+  localNetworkReady,
+  subscribeLocalNetwork,
+  LocalNetworkAccessError,
+} from "./localNetwork";
 import type { RelayPool, Relay } from "applesauce-relay";
 import {
   onlyEvents,
@@ -336,6 +343,42 @@ export type ResilientSubscriptionResponse = NostrEvent | "EOSE";
  * current work.
  */
 function processRelay(
+  ...args: Parameters<typeof processApprovedRelay>
+): Observable<NostrEvent> {
+  const relay = args[1];
+  if (!localEndpoint(relay)) return processApprovedRelay(...args);
+  // Keep pending reads alive without opening a socket or consuming retries.
+  // Unsubscribing on navigation removes the approval listener as well.
+  return new Observable<void>((subscriber) => {
+    let checking = false;
+    const check = () => {
+      if (subscriber.closed || checking) return;
+      checking = true;
+      try {
+        assertLocalNetworkAccess(relay);
+        subscriber.next();
+        subscriber.complete();
+      } catch (error) {
+        if (!(error instanceof LocalNetworkAccessError))
+          subscriber.error(error);
+        else if (args[3].autoClose) {
+          // One-shot hint lookups must finish so their caller can advance to
+          // public fallback relays. Only persistent subscriptions wait here.
+          args[4].error(relay);
+          args[3].onRelayError?.(relay);
+          subscriber.complete();
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const unsubscribe = subscribeLocalNetwork(check);
+    void localNetworkReady().then(check);
+    return unsubscribe;
+  }).pipe(switchMap(() => processApprovedRelay(...args)));
+}
+
+function processApprovedRelay(
   pool: RelayPool,
   relay: string,
   filters: Filter[] | (() => Filter[]),

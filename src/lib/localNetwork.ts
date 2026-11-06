@@ -347,6 +347,19 @@ export class LocalNetworkAccessError extends Error {
   }
 }
 
+/** Read permission state without registering a connection attempt. */
+export function localAccessAllowed(raw: string): boolean {
+  const endpoint = localEndpoint(raw);
+  if (!endpoint || isAppOrigin(raw)) return true;
+  const permission = permissions[endpoint.space];
+  return (
+    endpoint.approved &&
+    permission !== "denied" &&
+    ((permissionInitialized && permission !== "prompt") ||
+      sessionApprovals.has(endpoint.origin))
+  );
+}
+
 /** Synchronous so it can guard the native WebSocket constructor as well. */
 export function assertLocalNetworkAccess(
   raw: string,

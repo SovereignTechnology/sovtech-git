@@ -1,9 +1,14 @@
+import {
+  localAccessAllowed,
+  localNetworkRevision,
+  subscribeLocalNetwork,
+} from "@/lib/localNetwork";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { RepoListToolbar } from "@/components/RepoListToolbar";
 import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
 import { compareRepoItems } from "@/lib/repoListSort";
 import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
-import { useMemo } from "react";
+import { useSyncExternalStore, useMemo } from "react";
 import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
 import {
@@ -84,6 +89,8 @@ export default function RepoPRsPage() {
   const { pubkey, repoId, resolved, prs, basePath, repoState, cloneUrls } =
     useRepoContext();
   const repo = resolved?.repo;
+  useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
+  const localRelayPaused = repo?.relays.some((url) => !localAccessAllowed(url));
   const sorting = useRepoListSortPreference(repo?.componentId, "prs");
   const repoOwnerProfile = useProfile(pubkey);
   const { pool: gitPool, poolState: gitPoolState } = useGitPool(cloneUrls, {
@@ -404,12 +411,18 @@ export default function RepoPRsPage() {
         ) : visibleAcceptedItems.length === 0 ? (
           <div className="py-12 text-center">
             <p className="text-muted-foreground">
-              {hasActiveFilters ? "No PRs match your filters" : "No PRs yet"}
+              {hasActiveFilters
+                ? "No PRs match your filters"
+                : localRelayPaused
+                  ? "No PRs loaded"
+                  : "No PRs yet"}
             </p>
             <p className="text-muted-foreground/60 text-sm mt-1">
               {hasActiveFilters
                 ? "Try adjusting your filters"
-                : "PRs and patches sent to this repository will appear here"}
+                : localRelayPaused
+                  ? "Connect to the local relay above to check for content."
+                  : "PRs and patches sent to this repository will appear here"}
             </p>
           </div>
         ) : (

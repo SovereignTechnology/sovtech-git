@@ -18,6 +18,7 @@ import {
   forgetLocalEndpoint,
   localEndpoints,
   localEndpoint,
+  localAccessAllowed,
   localNetworkRevision,
   networkPermission,
   pendingLocalEndpoints,
@@ -44,6 +45,118 @@ const reasons = {
   cache:
     "Look for local services on this device, such as a relay for faster loading.",
 };
+
+// A repository notice owns its endpoints while mounted; avoid a duplicate
+// floating prompt for the same connection. Other pending endpoints stay visible.
+const contextualOrigins = new Map<string, number>();
+const contextListeners = new Set<() => void>();
+let contextRevision = 0;
+const subscribeContext = (listener: () => void) => {
+  contextListeners.add(listener);
+  return () => {
+    contextListeners.delete(listener);
+  };
+};
+const getContextRevision = () => contextRevision;
+function contextChanged() {
+  contextRevision++;
+  contextListeners.forEach((listener) => listener());
+}
+
+/** Repository-declared local relays need context even before the first REQ. */
+export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
+  useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
+  const relayKey = JSON.stringify(relays);
+  useEffect(() => {
+    const urls: string[] = JSON.parse(relayKey);
+    const origins = [
+      ...new Set(
+        urls.flatMap((url) => {
+          const endpoint = localEndpoint(url);
+          return endpoint ? [endpoint.origin] : [];
+        }),
+      ),
+    ];
+    origins.forEach((origin) =>
+      contextualOrigins.set(origin, (contextualOrigins.get(origin) ?? 0) + 1),
+    );
+    contextChanged();
+    return () => {
+      origins.forEach((origin) => {
+        const remaining = (contextualOrigins.get(origin) ?? 1) - 1;
+        if (remaining) contextualOrigins.set(origin, remaining);
+        else contextualOrigins.delete(origin);
+      });
+      contextChanged();
+    };
+  }, [relayKey]);
+  const local = [
+    ...new Map(
+      relays.flatMap((url) => {
+        const endpoint = localEndpoint(url);
+        return endpoint && !localAccessAllowed(url)
+          ? [[endpoint.origin, endpoint] as const]
+          : [];
+      }),
+    ).values(),
+  ];
+  if (!local.length) return null;
+  const localOnly = relays.every((url) => !!localEndpoint(url));
+  return (
+    <section
+      aria-label="Repository local relays"
+      className="container max-w-screen-xl px-4 md:px-8 mt-4"
+    >
+      <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+        <div>
+          <h2 className="font-semibold">
+            This repository uses{" "}
+            {localOnly ? "a local relay" : "local and remote relays"}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {localOnly
+              ? "Connect to load content from this repository’s relay on your device or local network."
+              : "Remote relays can load normally. Connect to the local relay for content available there."}
+          </p>
+        </div>
+        {local.map((endpoint) => {
+          const denied = networkPermission(endpoint.space) === "denied";
+          return (
+            <div
+              key={endpoint.origin}
+              className="flex flex-wrap items-center justify-between gap-3"
+            >
+              <div className="min-w-0">
+                <p className="font-mono text-sm break-all">
+                  {endpoint.origin.replace(/^http/, "ws")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {denied
+                    ? "Allow local access in your browser’s site settings, then check again."
+                    : "Your browser may ask for permission."}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant={localOnly ? "default" : "outline"}
+                onClick={() => {
+                  if (denied)
+                    void refreshNetworkPermissions().then(() => {
+                      if (networkPermission(endpoint.space) !== "denied")
+                        approveLocalEndpoint(endpoint.origin);
+                    });
+                  else approveLocalEndpoint(endpoint.origin);
+                }}
+              >
+                {denied ? "Check permission" : "Connect"}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 export function LocalNetworkSettings() {
   useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
@@ -82,9 +195,7 @@ export function LocalNetworkSettings() {
           </div>
         )}
         {localEndpoints()
-          .filter(
-            (e) => e.origin !== LOCAL_CACHE_ORIGIN && (e.approved || e.pending),
-          )
+          .filter((e) => e.approved || e.pending)
           .map((endpoint) => (
             <div
               key={endpoint.origin}
@@ -123,8 +234,9 @@ export function LocalNetworkControls() {
   const [cacheMessage, setCacheMessage] = useState("");
   const noticeAttempt = useRef(0);
   const prompt = connectionPrompt();
+  useSyncExternalStore(subscribeContext, getContextRevision);
   const pending = pendingLocalEndpoints().filter(
-    (e) => e.origin !== LOCAL_CACHE_ORIGIN,
+    (e) => !contextualOrigins.has(e.origin),
   );
   const endpoint = prompt && localEndpoint(prompt.origin);
   const denied = endpoint && networkPermission(endpoint.space) === "denied";

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Explain repository local-relay access inline and resume waiting reads on approval, including relays on localhost:4869.
+
 - Fetch Nostr-announced commits even when Git servers have moved to a newer tip, instead of incorrectly reporting them as unavailable. Give servers advertising the expected tip a three-second head start before trying others, while allowing slow requests to finish.
 
 - Show "authorization required" for git servers that answer HTTP 401/403, instead of reporting them as unreachable.
