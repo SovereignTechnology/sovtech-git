@@ -93,6 +93,8 @@
 @layer base {
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground)) transparent;
   }
 
   html {
@@ -101,6 +103,45 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Native scroll containers share the ScrollArea palette, including portals,
+   textareas, and horizontal code/diff scrollers. Keep this in the base layer
+   so intentional scrollbar hiding can still override it. */
+@layer base {
+  @supports not (scrollbar-width: thin) {
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 9999px;
+      background: hsl(var(--muted-foreground));
+      background-clip: padding-box;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background-color: hsl(var(--foreground));
+    }
+  }
+
+  @media (forced-colors: active) {
+    * {
+      scrollbar-color: auto;
+      scrollbar-width: auto;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background-color: ButtonText;
+    }
   }
 }
 

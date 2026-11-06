@@ -322,11 +322,7 @@ function ReleaseNavigation({
         <h2 className="mb-2 shrink-0 text-sm font-semibold">Release list</h2>
         <nav
           ref={releaseListRef}
-          className="min-h-0 overflow-y-auto overscroll-contain pr-1 [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border hover:[&::-webkit-scrollbar-thumb]:bg-border/80"
-          style={{
-            scrollbarWidth: "thin",
-            scrollbarColor: "hsl(var(--border)) transparent",
-          }}
+          className="min-h-0 overflow-y-auto overscroll-contain pr-1"
         >
           <ul className="space-y-1">
             {entries.map((entry) => {

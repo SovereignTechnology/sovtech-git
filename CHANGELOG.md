@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Theme scrollbars consistently across dialogs, sidebars, editors, and horizontal scrollers in light and dark mode.
+
 - Synchronize account and signer switches across browser tabs without restoring stale selections; synchronize logout while preserving existing signer connections.
 
 - Explain repository local-relay access inline and resume waiting reads on approval, including relays on localhost:4869.
