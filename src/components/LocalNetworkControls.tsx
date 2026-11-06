@@ -21,7 +21,6 @@ import {
   localAccessAllowed,
   localNetworkRevision,
   networkPermission,
-  pendingLocalEndpoints,
   refreshNetworkPermissions,
   showConnectionPrompt,
   subscribeLocalNetwork,
@@ -46,50 +45,9 @@ const reasons = {
     "Look for local services on this device, such as a relay for faster loading.",
 };
 
-// A repository notice owns its endpoints while mounted; avoid a duplicate
-// floating prompt for the same connection. Other pending endpoints stay visible.
-const contextualOrigins = new Map<string, number>();
-const contextListeners = new Set<() => void>();
-let contextRevision = 0;
-const subscribeContext = (listener: () => void) => {
-  contextListeners.add(listener);
-  return () => {
-    contextListeners.delete(listener);
-  };
-};
-const getContextRevision = () => contextRevision;
-function contextChanged() {
-  contextRevision++;
-  contextListeners.forEach((listener) => listener());
-}
-
 /** Repository-declared local relays need context even before the first REQ. */
 export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
   useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
-  const relayKey = JSON.stringify(relays);
-  useEffect(() => {
-    const urls: string[] = JSON.parse(relayKey);
-    const origins = [
-      ...new Set(
-        urls.flatMap((url) => {
-          const endpoint = localEndpoint(url);
-          return endpoint ? [endpoint.origin] : [];
-        }),
-      ),
-    ];
-    origins.forEach((origin) =>
-      contextualOrigins.set(origin, (contextualOrigins.get(origin) ?? 0) + 1),
-    );
-    contextChanged();
-    return () => {
-      origins.forEach((origin) => {
-        const remaining = (contextualOrigins.get(origin) ?? 1) - 1;
-        if (remaining) contextualOrigins.set(origin, remaining);
-        else contextualOrigins.delete(origin);
-      });
-      contextChanged();
-    };
-  }, [relayKey]);
   const local = [
     ...new Map(
       relays.flatMap((url) => {
@@ -107,7 +65,7 @@ export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
       aria-label="Repository local relays"
       className="container max-w-screen-xl px-4 md:px-8 mt-4"
     >
-      <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+      <div className="rounded-xl border bg-background p-4 space-y-3">
         <div>
           <h2 className="font-semibold">
             This repository uses{" "}
@@ -115,8 +73,8 @@ export function RepositoryLocalRelayNotice({ relays }: { relays: string[] }) {
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             {localOnly
-              ? "Connect to load content from this repository’s relay on your device or local network."
-              : "Remote relays can load normally. Connect to the local relay for content available there."}
+              ? "These local relays are listed by this repository. Connect to load content available on your device or local network."
+              : "These local relays are listed by this repository. Remote relays can load normally; connect below for content available locally."}
           </p>
         </div>
         {local.map((endpoint) => {
@@ -234,10 +192,6 @@ export function LocalNetworkControls() {
   const [cacheMessage, setCacheMessage] = useState("");
   const noticeAttempt = useRef(0);
   const prompt = connectionPrompt();
-  useSyncExternalStore(subscribeContext, getContextRevision);
-  const pending = pendingLocalEndpoints().filter(
-    (e) => !contextualOrigins.has(e.origin),
-  );
   const endpoint = prompt && localEndpoint(prompt.origin);
   const denied = endpoint && networkPermission(endpoint.space) === "denied";
 
@@ -324,17 +278,6 @@ export function LocalNetworkControls() {
 
   return (
     <>
-      {!prompt && pending.length > 0 && (
-        <Button
-          variant="outline"
-          size="sm"
-          className={`fixed left-4 z-40 shadow-sm ${cacheOffer ? "top-20 sm:top-auto sm:bottom-4" : "bottom-4"}`}
-          onClick={() => showConnectionPrompt(pending[0].origin)}
-        >
-          Local connection paused
-          {pending.length > 1 ? ` (${pending.length})` : ""}
-        </Button>
-      )}
       {cacheOffer && (
         <section
           aria-label="Local services"
