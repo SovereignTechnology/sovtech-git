@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Keep software application and release publication checks active after initial rendering instead of permanently reporting every relay as stopped.
+
 - Theme scrollbars consistently across dialogs, sidebars, editors, and horizontal scrollers in light and dark mode.
 
 - Synchronize account and signer switches across browser tabs without restoring stale selections; synchronize logout while preserving existing signer connections.
