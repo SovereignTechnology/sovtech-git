@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EventStore } from "applesauce-core";
 import { fakeVerifyEvent } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
@@ -42,9 +42,11 @@ it("toggles cached roots, comments and updates both ways without fetching or los
     .timeline({ kinds: [1111, 1619, 39842] })
     .subscribe((events) => changes.push(events.map((e) => e.id).sort()));
   view.setPolicy(["wss://repo.test"], true);
-  expect(changes.at(-1)).toEqual([comment.id, update.id, ci.id]);
+  await vi.waitFor(() =>
+    expect(changes.at(-1)).toEqual([comment.id, update.id, ci.id]),
+  );
   view.setPolicy(["wss://repo.test"], false);
-  expect(changes.at(-1)).toEqual([]);
+  await vi.waitFor(() => expect(changes.at(-1)).toEqual([]));
   expect(source.hasEvent(comment.id)).toBe(true);
   presence.reconcile(
     "wss://repo.test",
@@ -53,7 +55,7 @@ it("toggles cached roots, comments and updates both ways without fetching or los
     presence.begin(),
   );
   await Promise.resolve();
-  expect(changes.at(-1)).toEqual([comment.id]);
+  await vi.waitFor(() => expect(changes.at(-1)).toEqual([comment.id]));
   presence.reconcile(
     "wss://repo.test",
     [comment.id],
@@ -61,7 +63,7 @@ it("toggles cached roots, comments and updates both ways without fetching or los
     presence.begin(),
   );
   await Promise.resolve();
-  expect(changes.at(-1)).toEqual([]);
+  await vi.waitFor(() => expect(changes.at(-1)).toEqual([]));
   sub.unsubscribe();
   disconnect();
   await Promise.resolve();

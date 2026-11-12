@@ -20,6 +20,8 @@
 
 ### Changed
 
+- Update Applesauce to the 7.1 releases for batched timelines, cached failed casts, and reduced relay/loader timer churn, retaining the broad-filter and parallel-cache patches.
+
 - Coordinate local relay discovery, bunker signers, and internal Git connections with endpoint approval and browser network permissions. Explain local connections before browser permission prompts, offer optional local caching after login, and keep public Git proxy fallback while excluding recognized internal servers.
 
 - Load secondary routes and repository views on demand, then warm unused pages one at a time during quiet periods in relay traffic and browser activity.

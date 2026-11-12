@@ -113,9 +113,8 @@ describe("list model query ownership", () => {
               ["subject", `Item ${n}`],
             ]),
           );
-          // Root subscriptions deliberately audit a 100ms window.
-          await vi.advanceTimersByTimeAsync(100);
-          expect(snapshots.at(-1)).toHaveLength(n - 1);
+          // Wait through both the SDK timeline batch and our root audit window.
+          await vi.waitFor(() => expect(snapshots.at(-1)).toHaveLength(n - 1));
           if (n === 2) activeListeners = store.insert$.observers.length;
           expect(store.insert$.observers).toHaveLength(activeListeners);
         }
@@ -154,13 +153,12 @@ describe("list model query ownership", () => {
     const second = list.subscribe((value) => rows.push(value));
     try {
       store.add(event(2, 1621, [["a", coordinate]]));
-      await vi.advanceTimersByTimeAsync(100);
+      await vi.waitFor(() => expect(rows.at(-1)).toHaveLength(1));
       const active = store.insert$.observers.length;
       first.unsubscribe();
       expect(store.insert$.observers).toHaveLength(active);
       store.add(event(3, 1621, [["a", coordinate]]));
-      await vi.advanceTimersByTimeAsync(100);
-      expect(rows.at(-1)).toHaveLength(2);
+      await vi.waitFor(() => expect(rows.at(-1)).toHaveLength(2));
       expect(store.insert$.observers).toHaveLength(active);
     } finally {
       first.unsubscribe();

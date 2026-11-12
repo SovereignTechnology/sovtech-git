@@ -64,7 +64,7 @@ let
       ];
     };
     fetcherVersion = 3;
-    hash = "sha256-m0iCbsj+/MsmHCufI6ZWMYJ9Q0iBf1TpY2Znyb5JxTQ=";
+    hash = "sha256-TdFdyLf5oBId3omNsIHGW0pjPn8gSEZogpiEwlcI91w=";
   };
 in {
   inherit node pnpm ngit gradle dependencies;

@@ -4,8 +4,8 @@
     "esbuild": true
   },
   "patchedDependencies": {
-    "applesauce-core@7.0.1": "patches/applesauce-core@7.0.1.patch",
-    "applesauce-loaders@7.0.0": "patches/applesauce-loaders@7.0.0.patch"
+    "applesauce-core@7.1.2": "patches/applesauce-core@7.1.2.patch",
+    "applesauce-loaders@7.1.1": "patches/applesauce-loaders@7.1.1.patch"
   },
   "overrides": {
     "@tailwindcss/typography>postcss-selector-parser": "6.1.5"
