@@ -56,7 +56,17 @@ import type { TimelessFilter } from "applesauce-loaders";
 import type { NostrEvent } from "nostr-tools";
 import {
   EMPTY,
+  NEVER,
   Observable,
+  TimeoutError,
+  concatWith,
+  connect,
+  debounceTime,
+  endWith,
+  ignoreElements,
+  mergeMap,
+  startWith,
+  throwError,
   Subject,
   Subscription,
   bufferTime,
@@ -2080,7 +2090,22 @@ export function resilientNegentropy(
   filter: Filter,
 ) {
   return admittedHistoryOperation(pool, relay, (connection) =>
-    connection.negentropy(inventory, filter).pipe(timeout({ each: 30_000 })),
+    connection.negentropy(inventory, filter).pipe(
+      // debounceTime retains its pending check while progress moves the deadline.
+      // timeout({ each }) instead cancels/recreates a native timer every round.
+      connect((progress$) =>
+        merge(
+          progress$,
+          progress$.pipe(
+            startWith(null),
+            // Completion must cancel the watchdog, not flush the debounce.
+            concatWith(NEVER),
+            debounceTime(30_000),
+            mergeMap(() => throwError(() => new TimeoutError())),
+          ),
+        ).pipe(takeUntil(progress$.pipe(ignoreElements(), endWith(null)))),
+      ),
+    ),
   ).pipe(timeout({ first: 160_000 }));
 }
 

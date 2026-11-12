@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Reduce timer churn during repository history negotiation and event downloads while preserving inactivity deadlines and stalled-source fallback.
+
 - Keep software application and release publication checks active after initial rendering instead of permanently reporting every relay as stopped.
 
 - Theme scrollbars consistently across dialogs, sidebars, editors, and horizontal scrollers in light and dark mode.

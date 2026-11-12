@@ -163,8 +163,15 @@ export function createMissingEventDownloads(
     };
     active.set(relay, batch);
     for (const entry of selected) entry.batch = batch;
+    let stallDeadline = 0;
+    const checkStall = () => {
+      batch.timer = undefined;
+      if (batch.closed) return;
+      const remaining = stallDeadline - performance.now();
+      if (remaining <= 0) finish(batch, new MissingEventDownloadError());
+      else batch.timer = setTimeout(checkStall, remaining);
+    };
     const armStall = () => {
-      clearTimeout(batch.timer);
       // Allow the admission queue's <=5s reservation plus 10s without useful
       // bodies before trying another advertiser. This is a client failover policy,
       // not proof of absence: a slow healthy source may be replaced. Only useful
@@ -172,10 +179,10 @@ export function createMissingEventDownloads(
       // stalled source alive. This bounds inactivity for the batch, not total
       // waiting time for each ID: a useful trickle can keep residual IDs waiting.
       // The next source still uses normal relay admission.
-      batch.timer = setTimeout(
-        () => finish(batch, new MissingEventDownloadError()),
-        15_000,
-      );
+      // Useful bodies move the deadline without replacing the pending timer.
+      // Its callback checks the latest deadline and rearms only when needed.
+      stallDeadline = performance.now() + 15_000;
+      if (batch.timer === undefined) checkStall();
     };
     armStall();
     const requested = new Map(selected.map((entry) => [entry.id, entry]));
