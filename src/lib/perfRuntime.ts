@@ -61,6 +61,9 @@ const state = {
   commitMs: 0,
   renders: new Map<string, RenderAgg>(),
   timeoutCalls: 0,
+  intervalCalls: 0,
+  intervalFires: 0,
+  intervalSites: new Map<string, number>(),
   rafCalls: 0,
   timeoutSites: new Map<string, number>(),
   rafSites: new Map<string, number>(),
@@ -80,6 +83,9 @@ function resetWindow(): void {
   state.commitMs = 0;
   state.renders.clear();
   state.timeoutCalls = 0;
+  state.intervalCalls = 0;
+  state.intervalFires = 0;
+  state.intervalSites.clear();
   state.rafCalls = 0;
   state.timeoutSites.clear();
   state.rafSites.clear();
@@ -520,15 +526,23 @@ function installTimerProbe(): void {
     timeout?: number,
     ...args: unknown[]
   ) {
+    state.intervalCalls += 1;
     const rec = {
       site: callSite(new Error().stack),
       ms: Number(timeout) || 0,
       fires: 0,
     };
+    // Retain creation counts after clearInterval: RxJS one-shot timers use
+    // intervals too, and rapidly cancelled intervals disappear from liveIntervals.
+    state.intervalSites.set(
+      rec.site,
+      (state.intervalSites.get(rec.site) ?? 0) + 1,
+    );
     const wrapped: TimerHandler =
       typeof handler === "function"
         ? function (this: unknown, ...a: unknown[]) {
             rec.fires += 1;
+            state.intervalFires += 1;
             return (handler as (...x: unknown[]) => unknown).apply(this, a);
           }
         : handler;
@@ -897,6 +911,16 @@ export function runtimeReport() {
     },
     timers: {
       setTimeoutPerSec: perSec(state.timeoutCalls),
+      setIntervalPerSec: perSec(state.intervalCalls),
+      intervalFiresPerSec: perSec(state.intervalFires),
+      intervalSites: top(
+        [...state.intervalSites.entries()].map(([site, calls]) => ({
+          site,
+          calls,
+        })),
+        (s) => s.calls,
+        30,
+      ),
       rafPerSec: perSec(state.rafCalls),
       liveIntervals: top(
         [...liveIntervals.values()].map((i) => ({ ...i })),

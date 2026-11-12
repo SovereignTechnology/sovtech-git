@@ -235,6 +235,30 @@ characters rather than compressed bytes. Relay response times include network,
 server and browser delays. Heap snapshots without controlled GC do not prove
 retained-memory equivalence. NIP-77 negotiation is not currently attributed.
 
+### Timer-churn coverage
+
+The dependency store comparison explicitly uses `fakeVerifyEvent`; it measures
+index/model work, not signature verification. The query-budget scenarios measure
+traffic and tab-text stability, not CPU utilization or complete repository loading.
+`stable: true` can mean unchanged "Issues | PRs" labels before counts arrive;
+zero-count repositories also have no badges. A budget pass without observed
+content is not evidence of a representative workload. Do not infer a CPU win
+from low event/request counts in that state. Controlled browser replays record
+long tasks and frame gaps, but many short timer operations can consume CPU
+without crossing the long-task threshold. Their public-repository fixtures do
+not establish performance for signed-in private-relay or signer traffic.
+
+The profiling report now retains `setIntervalPerSec`, `intervalFiresPerSec`, and
+`intervalSites` for the whole measurement window, including intervals already
+cancelled. Previously only `liveIntervals` retained interval call sites: RxJS
+one-shot timers use intervals internally, so a busy create/cancel loop could
+vanish from the report before capture. `reset()` clears these aggregates.
+Compare creation counts alongside relay event volume and readiness, and capture
+a bounded post-load window separately from loading. These are diagnostics, not
+a new universal performance gate or proof that a particular timer caused a
+reported freeze. The probes themselves add overhead and only run in profiling
+builds.
+
 ## Controlled pagination comparisons
 
 The manual harnesses run separately from pre-commit and the query-budget suite.
