@@ -1,38 +1,43 @@
 import type { CastRefEventStore } from "applesauce-common/casts/cast";
 import type { Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
-import { combineLatest, of } from "rxjs";
-import { map } from "rxjs/operators";
+import { EMPTY, of, timer } from "rxjs";
+import { expand, map, scan, switchMap } from "rxjs/operators";
 import {
   CIProviderAdvertisement,
   isValidCIProviderAdvertisement,
+  retainProviderAdvertisements,
 } from "@/casts/CIProvider";
 import { use$ } from "@/hooks/use$";
 import { useEventStore } from "@/hooks/useEventStore";
-import { CI_NIX_PROVIDER_ADVERTISEMENT_KIND } from "@/lib/ci";
+import {
+  CI_NIX_PROVIDER_ADVERTISEMENT_KIND,
+  CI_LEGACY_PROVIDER_ADVERTISEMENT_KIND,
+} from "@/lib/ci";
 import { ciIdentityEnrichment$ } from "@/services/ciQueries";
 
-export interface CIProviderAdvertisementState {
-  advertisement: CIProviderAdvertisement | undefined;
+export interface CIProviderAdvertisements {
+  advertisements: CIProviderAdvertisement[];
+  now: number;
+}
+
+export interface CIProviderAdvertisementState extends CIProviderAdvertisements {
   settled: boolean;
   partial: boolean;
 }
 
-/** Discover a provider's latest signed capability advertisement. */
+/** Discover every offering from this provider through the shared identity query. */
 export function useCIProviderAdvertisement(
   pubkey: string | undefined,
 ): CIProviderAdvertisementState {
   const query = use$(() => {
-    if (!pubkey) {
+    if (!pubkey)
       return of({ settled: true, relayCount: 0, failedRelayCount: 0 });
-    }
     return ciIdentityEnrichment$(pubkey);
   }, [pubkey]);
-
-  const advertisement = useStoredCIProviderAdvertisement(pubkey);
-
+  const offerings = useStoredCIProviderAdvertisements(pubkey);
   return {
-    advertisement,
+    ...offerings,
     settled: query?.settled === true,
     partial:
       (query?.failedRelayCount ?? 0) > 0 ||
@@ -40,31 +45,73 @@ export function useCIProviderAdvertisement(
   };
 }
 
-/** Read a validated advertisement loaded by the owning page, without relay fetching. */
-export function useStoredCIProviderAdvertisement(
+/** Store-only reader. Each address replaces independently; observed expirations survive this visit. */
+export function useStoredCIProviderAdvertisements(
   pubkey: string | undefined,
-): CIProviderAdvertisement | undefined {
+): CIProviderAdvertisements {
   const store = useEventStore();
   const castStore = store as unknown as CastRefEventStore;
-
-  return use$(() => {
-    if (!pubkey) return of(undefined);
-    return combineLatest([
-      store.timeline([
-        {
-          kinds: [CI_NIX_PROVIDER_ADVERTISEMENT_KIND],
-          authors: [pubkey],
-        } as Filter,
-      ]),
-    ]).pipe(
-      map(([events]) => {
-        const advertisements = (events as NostrEvent[])
-          .filter(isValidCIProviderAdvertisement)
-          .sort((a, b) => b.created_at - a.created_at);
-        return advertisements[0]
-          ? new CIProviderAdvertisement(advertisements[0], castStore)
-          : undefined;
-      }),
-    );
-  }, [pubkey, store]);
+  return (
+    use$(() => {
+      if (!pubkey)
+        return of({ advertisements: [], now: Math.floor(Date.now() / 1000) });
+      return store
+        .timeline([
+          {
+            kinds: [
+              CI_NIX_PROVIDER_ADVERTISEMENT_KIND,
+              CI_LEGACY_PROVIDER_ADVERTISEMENT_KIND,
+            ],
+            authors: [pubkey],
+          } as Filter,
+        ])
+        .pipe(
+          scan(
+            (previous: NostrEvent[], events) =>
+              retainProviderAdvertisements(
+                previous,
+                events,
+                Math.floor(Date.now() / 1000),
+              ),
+            [],
+          ),
+          map((events) =>
+            events
+              .filter(isValidCIProviderAdvertisement)
+              .map((event) => new CIProviderAdvertisement(event, castStore))
+              .sort(
+                (a, b) =>
+                  Number(a.isLegacy) - Number(b.isLegacy) ||
+                  (a.offeringId ?? "").localeCompare(b.offeringId ?? ""),
+              ),
+          ),
+          switchMap((advertisements) =>
+            of(Math.floor(Date.now() / 1000)).pipe(
+              // One deadline at a time, cancelled on replacement or unmount. Also
+              // recheck when a future-dated advertisement reaches its start time.
+              expand((now) => {
+                const next = Math.min(
+                  ...advertisements
+                    .flatMap((ad) => [ad.event.created_at, ad.expiration])
+                    .filter((time) => time > now),
+                );
+                return Number.isFinite(next)
+                  ? timer(
+                      // Browser timers overflow beyond a signed 32-bit delay.
+                      Math.min(
+                        2_147_483_647,
+                        Math.max(1, next * 1000 - Date.now()),
+                      ),
+                    ).pipe(map(() => Math.floor(Date.now() / 1000)))
+                  : EMPTY;
+              }),
+              map((now) => ({ advertisements, now })),
+            ),
+          ),
+        );
+    }, [pubkey, store]) ?? {
+      advertisements: [],
+      now: Math.floor(Date.now() / 1000),
+    }
+  );
 }
