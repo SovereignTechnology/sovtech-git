@@ -12,6 +12,7 @@
 import type { Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 import {
+  BehaviorSubject,
   combineLatest,
   defer,
   of,
@@ -25,6 +26,7 @@ import {
   map,
   share,
   shareReplay,
+  startWith,
   switchMap,
 } from "rxjs/operators";
 import type { RelayGroup } from "applesauce-relay";
@@ -41,6 +43,7 @@ import {
   CI_SERVICE_STOP_KIND,
 } from "@/lib/ci";
 import { REPO_KIND, parseRepoCoordinate } from "@/lib/nip34";
+import { normalizeUrl } from "@/lib/url";
 import { KEYED_SHARE_LINGER_MS, keyedShared } from "@/lib/keyedShared";
 import {
   RepositoryRelayGroup,
@@ -185,21 +188,64 @@ export const CI_IDENTITY_ENRICHMENT_KINDS = [
 ] as const;
 
 const identityEnrichment = new Map<string, Observable<RelayQuerySettlement>>();
+const identityRelayHints = new Map<string, BehaviorSubject<string[]>>();
+
+function validIdentityRelayHints(values: readonly string[]): string[] {
+  return sortedUnique(
+    values.flatMap((value) => {
+      try {
+        const url = new URL(value);
+        return (url.protocol === "ws:" || url.protocol === "wss:") &&
+          !url.username &&
+          !url.password &&
+          !url.hash
+          ? [normalizeUrl(value)]
+          : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
+}
 
 /**
  * Shared per-pubkey enrichment fetch for CI provider / coordinator
- * identities on the lookup + index relays. All consumers of the same pubkey
- * share one live query; results are read back from the EventStore. A relay
- * added to the discovery lists later joins the live query with one REQ of
- * its own instead of restarting the REQs already open.
+ * identities on lookup/index relays, explicit hints and NIP-65 outboxes.
+ * Hints accumulate per identity so a provider link can extend an owner that
+ * another component already opened. New relays join with one REQ each;
+ * existing queries and their settlement are not restarted.
  */
 export function ciIdentityEnrichment$(
   pubkey: string,
+  relayHints: readonly string[] = [],
 ): Observable<RelayQuerySettlement> {
+  let hints = identityRelayHints.get(pubkey);
+  if (!hints) {
+    hints = new BehaviorSubject<string[]>([]);
+    identityRelayHints.set(pubkey, hints);
+  }
+  const nextHints = sortedUnique([
+    ...hints.value,
+    ...validIdentityRelayHints(relayHints),
+  ]);
+  if (!sameList(hints.value, nextHints)) hints.next(nextHints);
+  const hints$ = hints;
   return keyedShared(identityEnrichment, pubkey, () =>
     loadAdditiveRelayQueryUntilSettled(
       pool,
-      discoveryRelays$(),
+      combineLatest([
+        discoveryRelays$(),
+        hints$,
+        eventStore.mailboxes(pubkey).pipe(
+          map((mailboxes) => mailboxes?.outboxes ?? []),
+          startWith([] as string[]),
+        ),
+      ]).pipe(
+        map(([discovery, explicit, outboxes]) =>
+          validIdentityRelayHints([...discovery, ...explicit, ...outboxes]),
+        ),
+        distinctUntilChanged<string[]>(sameList),
+      ),
       {
         initial: [
           {

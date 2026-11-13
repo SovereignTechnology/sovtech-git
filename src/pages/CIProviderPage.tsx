@@ -44,10 +44,10 @@ export default function CIProviderPage() {
   const pubkey = decodePubkeyIdentifier(providerIdentifier);
   useLoadProfile(pubkey);
   const profile = useProfile(pubkey);
-  const state = useCIProviderAdvertisement(pubkey);
+  const relayHints = searchParams.getAll("relay");
+  const state = useCIProviderAdvertisement(pubkey, relayHints);
   const coordinatorState = useCICoordinatorAdvertisement(pubkey);
   const coordinatorAdvertisement = coordinatorState.advertisement;
-  const relayHints = searchParams.getAll("relay");
   const providerJobs = useCIProviderJobs(pubkey, relayHints);
   const trust = useCITrustContext({
     extraIdentities: pubkey ? [pubkey] : [],

@@ -29,12 +29,14 @@ export interface CIProviderAdvertisementState extends CIProviderAdvertisements {
 /** Discover every offering from this provider through the shared identity query. */
 export function useCIProviderAdvertisement(
   pubkey: string | undefined,
+  relayHints: readonly string[] = [],
 ): CIProviderAdvertisementState {
+  const relayHintKey = JSON.stringify([...relayHints].sort());
   const query = use$(() => {
     if (!pubkey)
       return of({ settled: true, relayCount: 0, failedRelayCount: 0 });
-    return ciIdentityEnrichment$(pubkey);
-  }, [pubkey]);
+    return ciIdentityEnrichment$(pubkey, relayHints);
+  }, [pubkey, relayHintKey]);
   const offerings = useStoredCIProviderAdvertisements(pubkey);
   return {
     ...offerings,
