@@ -60,11 +60,10 @@ let
       root = ../../..;
       fileset = pkgs.lib.fileset.unions [
         ../../../package.json ../../../pnpm-lock.yaml ../../../pnpm-workspace.yaml
-        ../../../patches ../../../scripts/apply-pnpm-patches.mjs
       ];
     };
     fetcherVersion = 3;
-    hash = "sha256-TdFdyLf5oBId3omNsIHGW0pjPn8gSEZogpiEwlcI91w=";
+    hash = "sha256-xOjEnErKQK7qp3Khm1NJCBPG+yvNmeF84LEPnu+QIqs=";
   };
 in {
   inherit node pnpm ngit gradle dependencies;

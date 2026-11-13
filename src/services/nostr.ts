@@ -1,4 +1,4 @@
-import { optionalLocalCacheRequest, queryLocalCache } from "./localCache";
+import { queryLocalCache } from "./localCache";
 import {
   observeRepositoryCacheRestore,
   loadRepositoryCache,
@@ -56,6 +56,7 @@ import { MailboxesModel } from "applesauce-core/models";
 import {
   cacheRequest,
   parallelCacheRequest,
+  releasingCacheRequest,
   createRepositoryCacheWriter,
   loadDeletionEvents,
   saveDeletionEvent,
@@ -644,8 +645,7 @@ export const eventLoader = createEventLoaderForStore(
   eventStore,
   loaderRelayRequest,
   {
-    cacheRequest,
-    parallelCacheRequest: optionalLocalCacheRequest,
+    cacheRequest: releasingCacheRequest,
     lookupRelays: lookupRelays.getValue(),
     extraRelays: fallbackRelays,
     followRelayHints: true,
@@ -658,8 +658,7 @@ export const eventLoader = createEventLoaderForStore(
  * Used for loading articles, profiles, and other replaceable events.
  */
 export const addressLoader = createAddressLoader(loaderRelayRequest, {
-  cacheRequest,
-  parallelCacheRequest: optionalLocalCacheRequest,
+  cacheRequest: releasingCacheRequest,
   extraRelays: fallbackRelays,
   eventStore,
   lookupRelays: lookupRelays.getValue(),
@@ -698,8 +697,7 @@ export const zapsLoader = createZapsLoader(loaderRelayRequest, {
  * the caller — see useLoadProfile / useProfilesForPubkeys.
  */
 export const profileLoader = createAddressLoader(loaderRelayRequest, {
-  cacheRequest,
-  parallelCacheRequest: optionalLocalCacheRequest,
+  cacheRequest: releasingCacheRequest,
   eventStore,
   extraRelays: fallbackRelays,
   lookupRelays: lookupRelays.getValue(),

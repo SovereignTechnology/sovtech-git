@@ -1,5 +1,15 @@
 import { markFromCache } from "applesauce-core/helpers";
-import { from, merge, mergeMap, tap } from "rxjs";
+import {
+  catchError,
+  defer,
+  EMPTY,
+  endWith,
+  from,
+  merge,
+  mergeMap,
+  tap,
+} from "rxjs";
+import type { CacheEmission } from "applesauce-loaders";
 import type { Filter, NostrEvent } from "applesauce-core/helpers";
 import "@/lib/localNetworkInstall";
 import { optionalLocalCacheRequest, writeLocalCache } from "./localCache";
@@ -48,6 +58,17 @@ export const parallelCacheRequest = (filters: Filter[]) =>
     from(cacheRequest(filters)).pipe(mergeMap((events) => from(events))),
     optionalLocalCacheRequest(filters),
   ).pipe(tap((event) => markFromCache(event)));
+
+/** Disk hits precede relay loading; optional local-cache events keep streaming. */
+export const releasingCacheRequest = (filters: Filter[]) =>
+  merge(
+    defer(() => cacheRequest(filters)).pipe(
+      mergeMap((events) => from(events)),
+      catchError(() => EMPTY),
+      endWith<CacheEmission>({ type: "release" }),
+    ),
+    optionalLocalCacheRequest(filters),
+  );
 
 export const cacheRequest =
   // Profiling builds only: per-shape timings in `__gwPerf.report()`.

@@ -42,7 +42,7 @@ temporary; remove them once upstream npm includes those fixes, and remove
 the overlay once the pinned Nixpkgs distribution supplies a patched bundle.
 
 The `ci-dependencies` Nix package includes Node and pnpm alongside a store using only
-`package.json`, `pnpm-lock.yaml`, and `patches/`. Its fixed hash verifies the
+`package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml`. Its fixed hash verifies the
 downloaded dependency contents, including the prepared JavaScript for the
 pinned Git signer plugin. Source-only changes reuse that package from
 the provider's Nix cache when populated. Each job restores it and runs

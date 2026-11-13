@@ -3,10 +3,6 @@
     "@swc/core": true,
     "esbuild": true
   },
-  "patchedDependencies": {
-    "applesauce-core@7.1.2": "patches/applesauce-core@7.1.2.patch",
-    "applesauce-loaders@7.1.1": "patches/applesauce-loaders@7.1.1.patch"
-  },
   "overrides": {
     "@tailwindcss/typography>postcss-selector-parser": "6.1.5"
   }

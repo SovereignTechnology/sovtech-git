@@ -47,9 +47,9 @@ prompt can only follow the app's explanation and Continue action.
 Disk and network caches have separate APIs and lifetimes. `cacheRequest` reads
 only IndexedDB (or the injected provider). The optional local relay streams events
 through `optionalLocalCacheRequest`, on its separate unsigned pool. SDK pointer
-loaders run that source alongside the **whole** disk/hints/fallback sequence using
-the `applesauce-loaders` `parallelCacheRequest` patch, not inside a serial cache or
-relay-hint stage. A slow local relay therefore cannot delay disk hits, public
+loaders use `releasingCacheRequest` to merge both sources. After disk completes
+(or fails), it emits Applesauce’s `{ type: "release" }` signal to start the
+hints/fallback sequence while optional local-cache events continue streaming. A slow local relay therefore cannot delay disk hits, public
 fallback starts, or public results. Once the ordinary sequence resolves every
 pointer, its optional local request is canceled to release the batch slot.
 
