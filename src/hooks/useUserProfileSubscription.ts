@@ -39,6 +39,7 @@ import { normalizeUrl } from "@/lib/url";
 import {
   CI_COORDINATOR_ADVERTISEMENT_KIND,
   CI_NIX_PROVIDER_ADVERTISEMENT_KIND,
+  CI_LEGACY_PROVIDER_ADVERTISEMENT_KIND,
 } from "@/lib/ci";
 
 /** Replaceable event kinds that define a user's identity and follow lists. */
@@ -84,6 +85,7 @@ export function useUserProfileSubscription(
           ? [
               CI_COORDINATOR_ADVERTISEMENT_KIND,
               CI_NIX_PROVIDER_ADVERTISEMENT_KIND,
+              CI_LEGACY_PROVIDER_ADVERTISEMENT_KIND,
             ]
           : []),
       ],

@@ -21,7 +21,7 @@ import { useUserStarredRepos } from "@/hooks/useUserStarredRepos";
 import { useUserActivity } from "@/hooks/useUserActivity";
 import { usePrefetchNip05 } from "@/hooks/usePrefetchNip05";
 import { useStoredCICoordinatorAdvertisement } from "@/hooks/useCICoordinatorProfile";
-import { useStoredCIProviderAdvertisement } from "@/hooks/useCIProviderAdvertisement";
+import { useStoredCIProviderAdvertisements } from "@/hooks/useCIProviderAdvertisement";
 import { useDefaultRepoPath } from "@/hooks/useRepoPath";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { useIsFollowing } from "@/hooks/useIsFollowing";
@@ -168,7 +168,8 @@ export default function UserPage({ pubkey }: UserPageProps) {
   const pinnedCoords = useUserPinnedCoords(pubkey);
   const pinnedRepos = useUserPinnedRepos(pubkey);
   const coordinatorAdvertisement = useStoredCICoordinatorAdvertisement(pubkey);
-  const providerAdvertisement = useStoredCIProviderAdvertisement(pubkey);
+  const { advertisements: providerAdvertisements } =
+    useStoredCIProviderAdvertisements(pubkey);
 
   // Prefetch NIP-05 identity so useRepoPath resolves it from IDB on next visit
   usePrefetchNip05([pubkey]);
@@ -313,7 +314,7 @@ export default function UserPage({ pubkey }: UserPageProps) {
               {/* Npub copy + follow buttons */}
               <div className="mt-4 flex items-center gap-2 flex-wrap">
                 <CopyNpub npub={npub} />
-                {providerAdvertisement && (
+                {providerAdvertisements.length > 0 && (
                   <Button
                     asChild
                     variant="outline"

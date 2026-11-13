@@ -22,6 +22,8 @@
 
 ### Changed
 
+- Show native Nix CI provider offerings independently, with advertised systems, isolation, capacity and expiry, while retaining legacy provider capabilities.
+
 - Update Applesauce for batched timelines, cached failed casts, and reduced relay/loader timer churn, with upstream core 7.1.3 broad-filter fixes and loaders 7.2.0 cache release signals replacing both local patches.
 
 - Coordinate local relay discovery, bunker signers, and internal Git connections with endpoint approval and browser network permissions. Explain local connections before browser permission prompts, offer optional local caching after login, and keep public Git proxy fallback while excluding recognized internal servers.

@@ -10,7 +10,7 @@
 
 import { Relay } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
-import { generateSecretKey, getPublicKey } from "nostr-tools";
+import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import type { Subscription } from "rxjs";
 import { of } from "rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,25 +20,31 @@ import {
   CI_IDENTITY_ENRICHMENT_KINDS,
   ciIdentityEnrichment$,
 } from "@/services/ciQueries";
-import { pool } from "@/services/nostr";
+import { eventStore, pool } from "@/services/nostr";
+import { isValidCIProviderAdvertisement } from "@/casts/CIProvider";
 import { gitIndexRelays, lookupRelays } from "@/services/settings";
 
-const RELAY_A = "wss://enrichment-initial.test";
-const RELAY_B = "wss://enrichment-joined.test";
+let RELAY_A: string;
+let RELAY_B: string;
+let relayFixture = 0;
 
 type ReqMessage = ["REQ", string, ...Filter[]];
 
-function requests(server: WS): ReqMessage[] {
+// Shared owners linger for 60 seconds; count only this fixture identity.
+function requests(server: WS, pubkey: string): ReqMessage[] {
   return server.messages.filter(
     (message): message is ReqMessage =>
-      Array.isArray(message) && message[0] === "REQ",
+      Array.isArray(message) &&
+      message[0] === "REQ" &&
+      (message[2] as Filter).authors?.includes(pubkey) === true,
   );
 }
 
-function closes(server: WS): Array<["CLOSE", string]> {
+function closes(server: WS, pubkey: string): Array<["CLOSE", string]> {
+  const ids = new Set(requests(server, pubkey).map((request) => request[1]));
   return server.messages.filter(
     (message): message is ["CLOSE", string] =>
-      Array.isArray(message) && message[0] === "CLOSE",
+      Array.isArray(message) && message[0] === "CLOSE" && ids.has(message[1]),
   );
 }
 
@@ -47,6 +53,9 @@ let serverB: WS;
 let querySub: Subscription | undefined;
 
 beforeEach(() => {
+  relayFixture += 1;
+  RELAY_A = `wss://enrichment-initial-${relayFixture}.test`;
+  RELAY_B = `wss://enrichment-joined-${relayFixture}.test`;
   vi.spyOn(Relay, "fetchInformationDocument").mockImplementation(() =>
     Promise.resolve(null),
   );
@@ -86,9 +95,9 @@ describe("ciIdentityEnrichment$", () => {
 
     querySub = ciIdentityEnrichment$(pubkey).subscribe();
 
-    await vi.waitFor(() => expect(requests(serverA)).toHaveLength(1));
-    expect(requests(serverA)[0].slice(2)).toEqual([enrichmentFilter]);
-    expect(requests(serverB)).toHaveLength(0);
+    await vi.waitFor(() => expect(requests(serverA, pubkey)).toHaveLength(1));
+    expect(requests(serverA, pubkey)[0].slice(2)).toEqual([enrichmentFilter]);
+    expect(requests(serverB, pubkey)).toHaveLength(0);
 
     // A relay appearing in the settings later grows the discovery set. The
     // old implementation restarted the whole query here (CLOSE on the
@@ -96,9 +105,96 @@ describe("ciIdentityEnrichment$", () => {
     // must open one REQ on the new relay alone.
     gitIndexRelays.next([RELAY_B]);
 
-    await vi.waitFor(() => expect(requests(serverB)).toHaveLength(1));
-    expect(requests(serverB)[0].slice(2)).toEqual([enrichmentFilter]);
-    expect(requests(serverA)).toHaveLength(1);
-    expect(closes(serverA)).toHaveLength(0);
+    await vi.waitFor(() => expect(requests(serverB, pubkey)).toHaveLength(1));
+    expect(requests(serverB, pubkey)[0].slice(2)).toEqual([enrichmentFilter]);
+    expect(requests(serverA, pubkey)).toHaveLength(1);
+    expect(closes(serverA, pubkey)).toHaveLength(0);
+  });
+
+  it("loads an offering found only on an explicit relay hint", async () => {
+    const key = generateSecretKey();
+    const pubkey = getPublicKey(key);
+    const createdAt = Math.floor(Date.now() / 1000);
+    const advertisement = finalizeEvent(
+      {
+        kind: 39845,
+        created_at: createdAt,
+        content: "",
+        tags: [
+          ["d", "default"],
+          ["W", "nix"],
+          ["S", "nix:x86_64-linux"],
+          [
+            "allocation-key",
+            "nip44-v2",
+            getPublicKey(generateSecretKey()),
+            RELAY_B,
+          ],
+          ["isolation", "hardware-vm"],
+          ["capacity", "1", "1"],
+          ["expiration", String(createdAt + 1800)],
+        ],
+      },
+      key,
+    );
+    querySub = ciIdentityEnrichment$(pubkey, [
+      RELAY_B + "/",
+      RELAY_B,
+      "https://invalid.test",
+    ]).subscribe();
+    await vi.waitFor(() => expect(requests(serverA, pubkey)).toHaveLength(1));
+    await vi.waitFor(() => expect(requests(serverB, pubkey)).toHaveLength(1));
+    expect(requests(serverB, pubkey)[0][2]).toEqual({
+      kinds: [...CI_IDENTITY_ENRICHMENT_KINDS],
+      authors: [pubkey],
+    });
+    serverA.send(["EOSE", requests(serverA, pubkey)[0][1]]);
+    serverB.send(["EVENT", requests(serverB, pubkey)[0][1], advertisement]);
+    serverB.send(["EOSE", requests(serverB, pubkey)[0][1]]);
+    await vi.waitFor(() =>
+      expect(eventStore.getEvent(advertisement.id)).toBeDefined(),
+    );
+    expect(
+      isValidCIProviderAdvertisement(eventStore.getEvent(advertisement.id)!),
+    ).toBe(true);
+    expect(requests(serverB, pubkey)).toHaveLength(1);
+  });
+
+  it("adds hints to an already shared identity without restarting existing REQs", async () => {
+    const pubkey = getPublicKey(generateSecretKey());
+    const owner = ciIdentityEnrichment$(pubkey);
+    querySub = owner.subscribe();
+    await vi.waitFor(() => expect(requests(serverA, pubkey)).toHaveLength(1));
+    expect(ciIdentityEnrichment$(pubkey, [RELAY_B])).toBe(owner);
+    await vi.waitFor(() => expect(requests(serverB, pubkey)).toHaveLength(1));
+    expect(ciIdentityEnrichment$(pubkey, [RELAY_B + "/"])).toBe(owner);
+    expect(requests(serverA, pubkey)).toHaveLength(1);
+    expect(requests(serverB, pubkey)).toHaveLength(1);
+    expect(closes(serverA, pubkey)).toHaveLength(0);
+  });
+
+  it("discovers offerings through a NIP-65 outbox arriving after the index query", async () => {
+    const key = generateSecretKey();
+    const pubkey = getPublicKey(key);
+    querySub = ciIdentityEnrichment$(pubkey).subscribe();
+    await vi.waitFor(() => expect(requests(serverA, pubkey)).toHaveLength(1));
+    expect(requests(serverB, pubkey)).toHaveLength(0);
+    const relayList = finalizeEvent(
+      {
+        kind: 10002,
+        created_at: Math.floor(Date.now() / 1000),
+        content: "",
+        tags: [["r", RELAY_B, "write"]],
+      },
+      key,
+    );
+    serverA.send(["EVENT", requests(serverA, pubkey)[0][1], relayList]);
+    await vi.waitFor(() => expect(requests(serverB, pubkey)).toHaveLength(1));
+    expect(requests(serverB, pubkey)[0][2]).toEqual({
+      kinds: [...CI_IDENTITY_ENRICHMENT_KINDS],
+      authors: [pubkey],
+    });
+    expect(requests(serverA, pubkey)).toHaveLength(1);
+    expect(closes(serverA, pubkey)).toHaveLength(0);
   });
 });
