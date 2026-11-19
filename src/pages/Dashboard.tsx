@@ -41,6 +41,7 @@ import { useUserFollowedRepos } from "@/hooks/useUserFollowedRepos";
 import { useAccessiblePrivateRepositories } from "@/hooks/useAccessiblePrivateRepositories";
 import { DOCUMENTATION_URLS } from "@/lib/documentation";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useNotificationPageEssentials } from "@/hooks/useNotificationPageEssentials";
 import { useUserProfileSubscription } from "@/hooks/useUserProfileSubscription";
 import { useUserPath } from "@/hooks/useUserPath";
 import { useActiveAccount } from "applesauce-react/hooks";
@@ -51,10 +52,12 @@ import { ManualRetryAction } from "@/components/ErrorRetryAction";
 import { compareBySelection } from "@/lib/repoSelectionScore";
 
 import { useState, useMemo } from "react";
+import type { IFuseOptions } from "fuse.js";
 import type { ResolvedRepo } from "@/lib/nip34";
 import { NotificationRow } from "@/components/NotificationRow";
 import { isPrivateRepositoryCoordinate } from "@/services/privateRepositoryScope";
 import { retryPrivateGitRelayList } from "@/services/privateGitRelays";
+import { useFuzzySearch } from "@/hooks/useFuzzySearch";
 
 // ---------------------------------------------------------------------------
 // Greeting header
@@ -150,6 +153,17 @@ function RepoRowSkeleton() {
 // ---------------------------------------------------------------------------
 
 const INITIAL_VISIBLE = 15;
+const REPOSITORY_SEARCH_OPTIONS: IFuseOptions<ResolvedRepo> = {
+  keys: [
+    { name: "name", weight: 3 },
+    { name: "dTag", weight: 2 },
+    { name: "description", weight: 1 },
+  ],
+  threshold: 0.35,
+  ignoreDiacritics: true,
+  useTokenSearch: true,
+  tokenMatch: "all",
+};
 
 function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   const repos = useUserRepositories(pubkey);
@@ -172,16 +186,7 @@ function MyRepositoriesPanel({ pubkey }: { pubkey: string }) {
   );
 
   const trimmed = search.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!sorted) return undefined;
-    if (!trimmed) return sorted;
-    return sorted.filter(
-      (r) =>
-        r.name.toLowerCase().includes(trimmed) ||
-        r.dTag.toLowerCase().includes(trimmed) ||
-        r.description.toLowerCase().includes(trimmed),
-    );
-  }, [sorted, trimmed]);
+  const filtered = useFuzzySearch(sorted, search, REPOSITORY_SEARCH_OPTIONS);
 
   const isFiltering = trimmed.length > 0;
   const displayRepos =
@@ -339,16 +344,7 @@ function FollowedReposPanel({ pubkey }: { pubkey: string }) {
   );
 
   const trimmed = search.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!sorted) return undefined;
-    if (!trimmed) return sorted;
-    return sorted.filter(
-      (r) =>
-        r.name.toLowerCase().includes(trimmed) ||
-        r.dTag.toLowerCase().includes(trimmed) ||
-        r.description.toLowerCase().includes(trimmed),
-    );
-  }, [sorted, trimmed]);
+  const filtered = useFuzzySearch(sorted, search, REPOSITORY_SEARCH_OPTIONS);
 
   const isFiltering = trimmed.length > 0;
   const displayRepos =
@@ -456,16 +452,7 @@ function AccessiblePrivateRepositoriesPanel({ pubkey }: { pubkey: string }) {
   );
 
   const trimmed = search.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!sorted) return undefined;
-    if (!trimmed) return sorted;
-    return sorted.filter(
-      (repo) =>
-        repo.name.toLowerCase().includes(trimmed) ||
-        repo.dTag.toLowerCase().includes(trimmed) ||
-        repo.description.toLowerCase().includes(trimmed),
-    );
-  }, [sorted, trimmed]);
+  const filtered = useFuzzySearch(sorted, search, REPOSITORY_SEARCH_OPTIONS);
 
   const isFiltering = trimmed.length > 0;
   const displayRepos =
@@ -630,6 +617,7 @@ function NotificationsPanel() {
     () => items?.filter((item) => !item.archived).slice(0, NOTIF_LIMIT),
     [items],
   );
+  const resolvedMap = useNotificationPageEssentials(inboxItems ?? []);
 
   const hasMore =
     (items?.filter((item) => !item.archived).length ?? 0) > NOTIF_LIMIT;
@@ -704,6 +692,7 @@ function NotificationsPanel() {
                   actions={actions}
                   compact
                   currentView="inbox"
+                  resolvedMap={resolvedMap}
                 />
               ))}
             </ul>

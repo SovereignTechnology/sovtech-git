@@ -41,6 +41,7 @@
 import { CommentFactory } from "applesauce-common/factories";
 import { COMMENT_KIND } from "applesauce-common/helpers";
 import { blankEventTemplate } from "applesauce-core/factories";
+import { replaceMarkdownHashtags } from "@/lib/markdownHashtags";
 import type { NostrEvent } from "nostr-tools";
 
 export interface InlineCommentLocation {
@@ -88,7 +89,8 @@ export class InlineCommentFactory extends CommentFactory {
       resolve(blankEventTemplate(COMMENT_KIND)),
     )
       .parent(parentEvent)
-      .text(content);
+      .text(content)
+      .modifyPublicTags(replaceMarkdownHashtags(content));
 
     // When the parent isn't the root, overwrite the E/K/P root tags to point
     // at the actual PR / patch.

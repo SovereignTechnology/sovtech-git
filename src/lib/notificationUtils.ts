@@ -19,8 +19,10 @@ import {
   STATUS_CLOSED,
   STATUS_OPEN,
   STATUS_DRAFT,
+  STATUS_KINDS,
   PR_UPDATE_KIND,
   extractPatchSubject,
+  compareNip01Chronologically,
 } from "@/lib/nip34";
 import {
   getNotificationActorPubkey,
@@ -132,6 +134,7 @@ export interface NotificationSummary {
 
 export function buildNotificationSummary(
   item: NotificationItem,
+  validStatusEventIds?: ReadonlySet<string>,
 ): NotificationSummary {
   let purpose: string | undefined;
   let hasNewCommits = false;
@@ -172,26 +175,23 @@ export function buildNotificationSummary(
 
   let commentCount = 0;
   let coverNoteCount = 0;
-  let merged = false;
-  let closed = false;
-  let reopened = false;
-  let drafted = false;
+  let latestStatus: NostrEvent | undefined;
   let newRevision = false;
   let zapSats = 0;
 
   for (const ev of unreadEvents) {
+    if (
+      (STATUS_KINDS as readonly number[]).includes(ev.kind) &&
+      !validStatusEventIds?.has(ev.id)
+    )
+      continue;
     if (ev.kind === COVER_NOTE_KIND) {
       coverNoteCount++;
     } else if (ev.kind === COMMENT_KIND || ev.kind === 1 || ev.kind === 1622) {
       commentCount++;
-    } else if (ev.kind === STATUS_RESOLVED) {
-      merged = true;
-    } else if (ev.kind === STATUS_CLOSED) {
-      closed = true;
-    } else if (ev.kind === STATUS_OPEN) {
-      reopened = true;
-    } else if (ev.kind === STATUS_DRAFT) {
-      drafted = true;
+    } else if ((STATUS_KINDS as readonly number[]).includes(ev.kind)) {
+      if (!latestStatus || compareNip01Chronologically(ev, latestStatus) > 0)
+        latestStatus = ev;
     } else if (ev.kind === PR_UPDATE_KIND) {
       newRevision = true;
     } else if (ev.kind === ZAP_RECEIPT_KIND) {
@@ -199,13 +199,13 @@ export function buildNotificationSummary(
     }
   }
 
-  // drafted is tracked but currently has no separate output label
-  void drafted;
-
+  const merged = latestStatus?.kind === STATUS_RESOLVED;
+  const closed = latestStatus?.kind === STATUS_CLOSED;
   const parts: string[] = [];
   if (merged) parts.push("merged");
   else if (closed) parts.push("closed");
-  else if (reopened) parts.push("reopened");
+  else if (latestStatus?.kind === STATUS_OPEN) parts.push("reopened");
+  else if (latestStatus?.kind === STATUS_DRAFT) parts.push("marked as draft");
   if (newRevision) parts.push("new revision");
   if (commentCount > 0) {
     parts.push(`${commentCount} unread`);

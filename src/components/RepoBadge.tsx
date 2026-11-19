@@ -45,6 +45,10 @@ import { useEventStore } from "@/hooks/useEventStore";
 import { UserAvatar, UserName } from "@/components/UserAvatar";
 import { getRepoName, REPO_KIND } from "@/lib/nip34";
 import { cn } from "@/lib/utils";
+import {
+  badgeBackground,
+  type BadgeBackgroundVariant,
+} from "@/components/ui/badge-background";
 import { nip19 } from "nostr-tools";
 import type { Filter } from "applesauce-core/helpers";
 import { map } from "rxjs/operators";
@@ -267,6 +271,10 @@ export interface RepoGroupBadgeMaintainer {
 }
 
 interface RepoGroupBadgeProps {
+  /** Defaults to the existing neutral repository badge. */
+  backgroundVariant?: BadgeBackgroundVariant;
+  /** Inherit the surrounding prose size when embedded in a sentence. */
+  size?: "compact" | "inherit";
   maintainers: RepoGroupBadgeMaintainer[];
   repoName: string;
   leadMaintainer?: string;
@@ -277,12 +285,16 @@ interface RepoGroupBadgeProps {
 function RepoGroupMaintainerSegment({
   maintainer,
   selected,
+  backgroundVariant,
+  size,
   lead,
   onSelect,
   className,
 }: {
   maintainer: RepoGroupBadgeMaintainer;
   selected: boolean;
+  backgroundVariant: BadgeBackgroundVariant;
+  size: "compact" | "inherit";
   lead?: boolean;
   onSelect: (pubkey: string) => void;
   className?: string;
@@ -294,7 +306,10 @@ function RepoGroupMaintainerSegment({
       title={lead ? "Lead maintainer" : "Open through this maintainer"}
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 transition-colors",
-        selected && "bg-secondary/80",
+        selected &&
+          (backgroundVariant === "amber"
+            ? "bg-amber-950/10 dark:bg-amber-100/10"
+            : "bg-secondary/80"),
         className,
       )}
     >
@@ -306,7 +321,13 @@ function RepoGroupMaintainerSegment({
       />
       <UserName
         pubkey={maintainer.pubkey}
-        className="sr-only text-xs font-normal text-muted-foreground sm:not-sr-only sm:max-w-28 sm:truncate"
+        className={cn(
+          "sr-only font-normal sm:not-sr-only sm:max-w-28 sm:truncate",
+          size === "compact" && "text-xs",
+          backgroundVariant === "amber"
+            ? "text-inherit"
+            : "text-muted-foreground",
+        )}
         noHoverCard
       />
     </span>
@@ -326,6 +347,8 @@ export function RepoGroupBadge({
   repoName,
   leadMaintainer,
   initialMaintainer,
+  backgroundVariant = "secondary",
+  size = "compact",
   className,
 }: RepoGroupBadgeProps) {
   const initialPubkey =
@@ -348,13 +371,17 @@ export function RepoGroupBadge({
       onClick={(event) => event.stopPropagation()}
       title="Open this repository"
       className={cn(
-        "inline-flex max-w-full items-stretch overflow-hidden rounded-full bg-secondary text-xs text-secondary-foreground align-middle transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex max-w-full items-stretch overflow-hidden rounded-full align-middle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        size === "compact" ? "text-xs" : "text-[length:inherit] leading-none",
+        badgeBackground({ backgroundVariant }),
         className,
       )}
     >
       {lead ? (
         <>
           <RepoGroupMaintainerSegment
+            backgroundVariant={backgroundVariant}
+            size={size}
             maintainer={lead}
             selected={false}
             lead
@@ -362,7 +389,10 @@ export function RepoGroupBadge({
           />
           {otherMaintainerCount > 0 && (
             <span
-              className="py-0.5 pr-2 text-muted-foreground"
+              className={cn(
+                "py-0.5 pr-2",
+                backgroundVariant !== "amber" && "text-muted-foreground",
+              )}
               title={`${otherMaintainerCount} other ${
                 otherMaintainerCount === 1 ? "maintainer" : "maintainers"
               }`}
@@ -375,6 +405,8 @@ export function RepoGroupBadge({
         maintainers.map((maintainer, index) => (
           <RepoGroupMaintainerSegment
             key={maintainer.pubkey}
+            backgroundVariant={backgroundVariant}
+            size={size}
             maintainer={maintainer}
             selected={
               maintainers.length > 1 &&
@@ -386,7 +418,16 @@ export function RepoGroupBadge({
         ))
       )}
       <span className="inline-flex min-w-0 items-center py-0.5 pr-2 font-medium">
-        <span className="text-muted-foreground/40 font-normal">/</span>
+        <span
+          className={cn(
+            "font-normal",
+            backgroundVariant === "amber"
+              ? "opacity-60"
+              : "text-muted-foreground/40",
+          )}
+        >
+          /
+        </span>
         <span className="ml-1 max-w-40 truncate">{repoName}</span>
       </span>
     </Link>

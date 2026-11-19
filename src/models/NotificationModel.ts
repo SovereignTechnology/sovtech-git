@@ -9,7 +9,7 @@
  * (backed by a BehaviorSubject in the hook layer) so the model can react to
  * both store changes and read-state changes.
  *
- * Cache key: the user's pubkey (one model per logged-in user).
+ * Cache key: the user's pubkey and the notification store's state stream.
  */
 
 import { combineLatest, of, type Observable } from "rxjs";
@@ -22,6 +22,10 @@ import {
 import type { Model } from "applesauce-core/event-store";
 import type { NostrEvent } from "nostr-tools";
 import { getZapEventPointer } from "applesauce-common/helpers";
+import {
+  ValidStatusEventsModel,
+  statusRootsKey,
+} from "./ValidStatusEventsModel";
 import { REPO_KIND } from "@/lib/nip34";
 import {
   buildThreadEventMap,
@@ -55,20 +59,28 @@ export interface NotificationModelOutput {
  *   the async resolver. Populated by the zap-receipt watcher in
  *   notificationStore. Events in this set are excluded from thread grouping.
  *
- * Cache key: pubkey only (via getKey). The BehaviorSubject references are
- * stable for the lifetime of the store entry.
+ * The state stream identifies a store entry. Consumers of that entry share
+ * a model; a recreated entry must not inherit the previous model's streams.
  */
 export function NotificationModel(
   pubkey: string,
   readState$: Observable<NotificationReadState>,
   repoCoords$: Observable<string[]>,
   nonGitEventIds$: Observable<Set<string>>,
+  deletionEvents$?: Observable<NostrEvent[]>,
 ): Model<NotificationModelOutput> {
   return (store) => {
     const threadFilters = buildNotificationFilters(pubkey);
 
     // Thread events — static filters (includes zap receipts on thread items)
     const threadEvents$ = store.timeline(threadFilters);
+    const validStatusEventIds$ = threadEvents$.pipe(
+      map(statusRootsKey),
+      distinctUntilChanged(),
+      switchMap((key) =>
+        store.model(ValidStatusEventsModel, key, deletionEvents$),
+      ),
+    );
 
     // Zap receipts identify their target event rather than its thread root.
     // Watch targets that do not independently match notification filters.
@@ -131,6 +143,7 @@ export function NotificationModel(
       repoZapEvents$,
       repoCoords$,
       nonGitEventIds$,
+      validStatusEventIds$,
     ]).pipe(
       // Collapse rapid emissions (e.g. many events arriving at once)
       auditTime(100),
@@ -144,6 +157,7 @@ export function NotificationModel(
           zapEventsRaw,
           coords,
           nonGitEventIds,
+          validStatusEventIds,
         ]) => {
           const allThreadEvents = threadEventsRaw as NostrEvent[];
           const targetEvents = zappedTargetEvents as NostrEvent[];
@@ -179,6 +193,7 @@ export function NotificationModel(
             pubkey,
             threadEventsById,
             nonGitEventIds,
+            validStatusEventIds,
           );
           const socialItems = groupSocialNotifications(
             allStarEvents,
@@ -213,9 +228,19 @@ export function NotificationModel(
   };
 }
 
-/**
- * Cache key: pubkey only. The readState$ and repoCoords$ arguments are
- * intentionally excluded so the model instance is reused across acquire/release
- * cycles for the same pubkey.
- */
-NotificationModel.getKey = (pubkey: string) => pubkey;
+// Weak keys do not retain discarded store entries beyond the model cache's
+// own lifetime. A state's identity stays stable across page/badge consumers.
+const stateStreamIds = new WeakMap<Observable<NotificationReadState>, number>();
+let nextStateStreamId = 0;
+
+NotificationModel.getKey = (
+  pubkey: string,
+  readState$: Observable<NotificationReadState>,
+) => {
+  let id = stateStreamIds.get(readState$);
+  if (id === undefined) {
+    id = ++nextStateStreamId;
+    stateStreamIds.set(readState$, id);
+  }
+  return `${pubkey}:${id}`;
+};

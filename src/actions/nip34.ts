@@ -48,6 +48,7 @@ import { CI_SERVICE_REQUEST_KIND, CI_SERVICE_STOP_KIND } from "@/lib/ci";
 import { pubkeyFromCoordinate, type IssueStatus } from "@/lib/nip34";
 import { outboxStore } from "@/services/outbox";
 import { eventStore } from "@/services/nostr";
+import { replaceMarkdownHashtags } from "@/lib/markdownHashtags";
 
 // ---------------------------------------------------------------------------
 // Relay group ID helpers
@@ -345,7 +346,7 @@ export function CreateComment(
     let factory = CommentFactory.create(parent, content, {
       alt,
       expiration,
-    });
+    }).modifyPublicTags(replaceMarkdownHashtags(content));
 
     // Append imeta / extra tags that CommentFactory doesn't handle natively
     if (extraTags && extraTags.length > 0) {

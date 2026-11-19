@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRecoveryToast } from "@/hooks/useRecoveryToast";
 /**
  * Shared components used in both IssuePage and PRPage thread views.
@@ -1147,6 +1148,7 @@ export function ResolvedThreadCard({
               </span>
             </div>
 
+            <RepositorySourceBadge eventId={event.id} />
             {/* Raw JSON viewer */}
             <button
               type="button"
@@ -1189,6 +1191,7 @@ export function ResolvedThreadCard({
         /* Collapsed: minimal 1-liner, no avatar/timestamp */
         <div className="flex items-center gap-2 py-1 pl-2 text-xs text-muted-foreground/60">
           <CheckCircle2 className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+          <RepositorySourceBadge eventId={event.id} />
           <span>
             {authorised ? "Resolved" : "Proposed resolving"} discussion
             {codeLocationLabel && (
@@ -1484,6 +1487,7 @@ export function CoverNoteCard({
               </Button>
             )}
 
+            <RepositorySourceBadge eventId={event.id} />
             {/* Raw JSON viewer */}
             <Button
               variant="ghost"

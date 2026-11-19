@@ -168,7 +168,30 @@ export abstract class CIContextCast<
   get jobRefs(): CIJobRef[] {
     return getOrComputeCachedValue(this.event, JobRefsSymbol, () =>
       this.event.tags
-        .filter(([name, eventId]) => name === "q" && !!eventId)
+        .filter(([name, eventId, , , marker, conclusion]) => {
+          // Addressable progress quotes are not immutable job results.
+          if (name !== "q" || !/^[0-9a-f]{64}$/i.test(eventId ?? "")) {
+            return false;
+          }
+          // Older job quotes omit the conclusion. Keep those, but exclude
+          // marked provenance quotes. A job may itself use a reserved marker
+          // as its id; its trailing conclusion distinguishes that shape.
+          return (
+            [
+              "success",
+              "failure",
+              "neutral",
+              "cancelled",
+              "skipped",
+              "timed_out",
+              "startup_failure",
+            ].includes(conclusion) ||
+            (marker !== "manual-trigger" &&
+              marker !== "service-request" &&
+              marker !== "job-allocation" &&
+              marker !== "allocation-key")
+          );
+        })
         .map(([, eventId, relay, pubkey, jobId]) => ({
           eventId,
           relay,

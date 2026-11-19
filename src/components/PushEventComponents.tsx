@@ -1,3 +1,4 @@
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRecoveryToast } from "@/hooks/useRecoveryToast";
 /**
  * PushEventComponents — timeline nodes for patch-set pushes and PR Updates.
@@ -230,6 +231,7 @@ export function PatchSetPushEvent({
                 { addSuffix: true },
               )}
             </span>
+            <RepositorySourceBadge eventId={rootPatch.id} />
             {superseded && (
               <OutdatedBadge
                 commitsHref={basePath ? `${basePath}/commits` : undefined}
@@ -297,6 +299,7 @@ export function PatchSetPushEvent({
                 <CompactCommitGraphList
                   rows={group.commits.map((c) => ({
                     key: c.id,
+                    badge: <RepositorySourceBadge eventId={c.id} />,
                     hash: c.hash,
                     shortHash: c.shortHash,
                     subject: c.subject,
@@ -424,6 +427,7 @@ export function PROpenPushEvent({
             )}
           </span>
           <span className="text-xs text-muted-foreground/50">{timeAgo}</span>
+          <RepositorySourceBadge eventId={pr.event.id} />
           {superseded && (
             <OutdatedBadge
               commitsHref={basePath ? `${basePath}/commits` : undefined}

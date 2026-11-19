@@ -17,14 +17,7 @@ import type { Filter } from "applesauce-core/helpers";
 import { onlyEvents } from "applesauce-relay";
 import type { RelayGroup } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
-import {
-  combineLatest,
-  firstValueFrom,
-  merge,
-  Observable,
-  of,
-  type Subscription,
-} from "rxjs";
+import { combineLatest, firstValueFrom, merge, Observable, of } from "rxjs";
 import {
   distinctUntilChanged,
   ignoreElements,
@@ -330,7 +323,10 @@ export function useSoftwarePublisherApplications(
       map((scope): string[] => scope.relays),
       distinctUntilChanged((left, right) => sameStrings(left, right)),
     );
-    const source = resilientSubscription(
+    // use$ probes synchronous values by subscribing and immediately unsubscribing.
+    // Let resilientSubscription emit stopped/new-generation lifecycle facts;
+    // permanently stopping this memoized coverage would poison the live lease.
+    return resilientSubscription(
       pool,
       relays$,
       [applicationFilter, { kinds: [5], authors: [pubkey] } as Filter],
@@ -341,14 +337,6 @@ export function useSoftwarePublisherApplications(
         onRelayLifecycle: (event) => coverage.onLifecycle(event),
       },
     ).pipe(onlyEvents(), mapEventsToStore(store), ignoreElements());
-
-    return new Observable<never>((subscriber) => {
-      const subscription = source.subscribe(subscriber);
-      return () => {
-        coverage.stop();
-        subscription.unsubscribe();
-      };
-    });
   }, [applicationFilter, coverage, pubkey, scope$, store]);
 
   const applications =
@@ -461,7 +449,10 @@ export function useSoftwareReleaseCandidatePreflight(
       map((scope): string[] => scope.relays),
       distinctUntilChanged((left, right) => sameStrings(left, right)),
     );
-    const source = resilientSubscription(
+    // use$ probes synchronous values by subscribing and immediately unsubscribing.
+    // Let resilientSubscription emit stopped/new-generation lifecycle facts;
+    // permanently stopping this memoized coverage would poison the live lease.
+    return resilientSubscription(
       pool,
       relays$,
       [
@@ -478,14 +469,6 @@ export function useSoftwareReleaseCandidatePreflight(
         onRelayLifecycle: (event) => coverage.onLifecycle(event),
       },
     ).pipe(onlyEvents(), mapEventsToStore(store), ignoreElements());
-
-    return new Observable<never>((subscriber) => {
-      const subscription: Subscription = source.subscribe(subscriber);
-      return () => {
-        coverage.stop();
-        subscription.unsubscribe();
-      };
-    });
   }, [coverage, identifier, publisherPreflight, store]);
 
   const assertAvailable = useCallback(async () => {

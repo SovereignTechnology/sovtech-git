@@ -53,8 +53,11 @@ export const CI_COORDINATOR_ADVERTISEMENT_KIND = 19843;
 /** Kind 19844 — repositories for which a coordinator is request-ready. */
 export const CI_REQUEST_READINESS_KIND = 19844;
 
-/** Kind 19845 — live native Nix compute-provider capabilities. */
-export const CI_NIX_PROVIDER_ADVERTISEMENT_KIND = 19845;
+/** Kind 39845 — addressable native Nix compute-provider offering. */
+export const CI_NIX_PROVIDER_ADVERTISEMENT_KIND = 39845;
+
+/** Kind 19845 — legacy singleton provider capabilities. */
+export const CI_LEGACY_PROVIDER_ADVERTISEMENT_KIND = 19845;
 
 /** Kind 39844 — effective coordinator service for one repository root. */
 export const CI_REPOSITORY_STATUS_KIND = 39844;

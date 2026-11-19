@@ -53,6 +53,18 @@ import {
 import { nip19 } from "nostr-tools";
 import type { EventTemplate } from "nostr-tools";
 
+import { DeleteRepo } from "@/actions/nip34";
+import { runner } from "@/services/actions";
+import { fixedRelayGroupId } from "@/services/outbox";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -658,6 +670,47 @@ function RepoSettingsForm({
 
   // Submit state
   const [isSaving, setIsSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const deletionPending = useRef(false);
+  const [deleteError, setDeleteError] = useState<string>();
+
+  const handleDelete = async () => {
+    if (
+      !deleteOpen ||
+      deletionPending.current ||
+      isSaving ||
+      membershipMutation.pendingIntent ||
+      !account ||
+      !selectedAnnouncement ||
+      selectedAnnouncement.pubkey !== account.pubkey
+    )
+      return;
+
+    deletionPending.current = true;
+    setIsDeleting(true);
+    setDeleteError(undefined);
+    try {
+      // Keep delivery destinations available after the announcement is removed
+      // from the local store and its dynamic relay group can no longer resolve.
+      const frozenRelays = fixedRelayGroupId([
+        ...relayUrls,
+        ...currentRelayUrls,
+      ]);
+      await runner.run(DeleteRepo, selectedAnnouncement, "repo", [
+        ...repo.confirmedMaintainerCoordinates,
+        ...(frozenRelays ? [frozenRelays] : []),
+      ]);
+      navigate("/");
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Could not delete repository",
+      );
+    } finally {
+      deletionPending.current = false;
+      setIsDeleting(false);
+    }
+  };
   const [saveError, setSaveError] = useState<string | undefined>();
 
   const editedCloneUrls = useMemo(() => {
@@ -1301,7 +1354,8 @@ function RepoSettingsForm({
         stateSettled)) &&
     !hasInvalidSubordinateForkInput &&
     !isResolvingUpstreamNip05 &&
-    !isSaving;
+    !isSaving &&
+    !deleteOpen;
 
   const handleSave = useCallback(async () => {
     if (!canSave || !account) return;
@@ -2805,6 +2859,80 @@ function RepoSettingsForm({
               <ShieldAlert className="h-4 w-4" />
               Danger zone
             </h2>
+            <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Delete repository</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  Delete your repository announcement, including its previous
+                  versions. Servers that honor this request may permanently
+                  delete all repository events and Git data.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                disabled={isSaving || !!membershipMutation.pendingIntent}
+                onClick={() => {
+                  setDeleteError(undefined);
+                  setDeleteOpen(true);
+                }}
+              >
+                Delete repository
+              </Button>
+            </div>
+            <AlertDialog
+              open={deleteOpen}
+              onOpenChange={(open) => {
+                if (!deletionPending.current) setDeleteOpen(open);
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete repository?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    <strong>
+                      This may permanently delete all your repository data.
+                    </strong>{" "}
+                    Deleting your announcement for “{repo.dTag}” and its
+                    previous versions asks servers to remove the repository.
+                    GRASP servers that honor this request may delete all related
+                    events and Git data, including issues, pull requests, and
+                    commit history. Recovery is not guaranteed. Back up anything
+                    you want to keep before continuing.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                {deleteError && (
+                  <div
+                    role="alert"
+                    className="space-y-2 text-sm text-destructive"
+                  >
+                    <p>{deleteError}</p>
+                    <ManualRetryAction
+                      onRetry={handleDelete}
+                      busy={isDeleting}
+                    />
+                  </div>
+                )}
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={isDeleting}>
+                    Cancel
+                  </AlertDialogCancel>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={isDeleting}
+                    onClick={() => void handleDelete()}
+                  >
+                    {isDeleting && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    {isDeleting ? "Deleting…" : "Delete repository"}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <p className="text-sm font-medium">Advanced repair</p>

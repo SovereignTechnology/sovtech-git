@@ -1,11 +1,10 @@
+import { TimelineModel } from "applesauce-core/models";
+import { coalesceBursts } from "@/lib/coalesceBursts";
 import { combineLatest, of } from "rxjs";
 import { auditTime, switchMap, map } from "rxjs/operators";
 import type { Model } from "applesauce-core/event-store";
 import {
   ISSUE_KIND,
-  LABEL_KIND,
-  DELETION_KIND,
-  STATUS_KINDS,
   COMMENT_KIND,
   LEGACY_REPLY_KINDS,
   pubkeyFromCoordinate,
@@ -17,8 +16,7 @@ import {
 import type { Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
-/** All essential kinds fetched alongside issues. */
-const ESSENTIALS_KINDS = [...STATUS_KINDS, LABEL_KIND, DELETION_KIND] as const;
+import { ItemEssentialEventsModel } from "./ItemEssentialEventsModel";
 
 /**
  * IssueListModel — subscribes to issues and their essentials, comment, and
@@ -92,16 +90,21 @@ export function IssueListModel(
         const ids = events.map((e) => e.id);
 
         // All inner streams are scoped to the current issue IDs.
-        const essentials$ = store.timeline([
-          { kinds: [...ESSENTIALS_KINDS], "#e": ids } as Filter,
-        ]);
-        const comments$ = store.timeline([
+        // The outer list model is shared. These changing ID sets belong only
+        // to this snapshot: caching them would keep obsolete queries active
+        // throughout the store's model keep-warm window.
+        const essentials$ = ItemEssentialEventsModel(ids.sort().join(","))(
+          store,
+        );
+        const comments$ = TimelineModel([
           { kinds: [COMMENT_KIND], "#E": ids } as Filter,
-        ]);
-        const legacyReplies$ = store.timeline([
+        ])(store);
+        const legacyReplies$ = TimelineModel([
           { kinds: [...LEGACY_REPLY_KINDS], "#e": ids } as Filter,
-        ]);
-        const zaps$ = store.timeline([{ kinds: [9735], "#e": ids } as Filter]);
+        ])(store);
+        const zaps$ = TimelineModel([{ kinds: [9735], "#e": ids } as Filter])(
+          store,
+        );
 
         return combineLatest([
           essentials$,
@@ -109,18 +112,26 @@ export function IssueListModel(
           legacyReplies$,
           zaps$,
         ]).pipe(
+          // Keep the latest snapshot without rebuilding the entire list per event.
+          coalesceBursts(),
           map(
             ([essentialEvents, commentEvents, legacyReplyEvents, zapEvents]) =>
               buildResolvedIssues(
                 events,
-                essentialEvents as NostrEvent[],
+                essentialEvents.essentials,
                 [
                   ...(commentEvents as NostrEvent[]),
                   ...(legacyReplyEvents as NostrEvent[]),
                 ],
                 zapEvents as NostrEvent[],
                 memberSet,
-                options,
+                {
+                  ...options,
+                  essentialDeletionEvents: [
+                    ...(options.essentialDeletionEvents ?? []),
+                    ...essentialEvents.deletions,
+                  ],
+                },
               ),
           ),
         );

@@ -1,7 +1,20 @@
+import {
+  localAccessAllowed,
+  localNetworkRevision,
+  subscribeLocalNetwork,
+} from "@/lib/localNetwork";
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
+import { RepoListToolbar } from "@/components/RepoListToolbar";
+import { REPO_LIST_DEFAULTS, useRepoListState } from "@/hooks/useRepoListState";
 import { useComposerDraft } from "@/hooks/useComposerDraft";
-import { useMemo, useState } from "react";
+import { useSyncExternalStore, useMemo, useState } from "react";
+import type { IFuseOptions } from "fuse.js";
 import { Link } from "react-router-dom";
-import { eventIdMatchesSearch, eventIdToNevent } from "@/lib/routeUtils";
+import {
+  eventIdMatchesSearch,
+  eventIdToNevent,
+  searchQueryToPubkey,
+} from "@/lib/routeUtils";
 import { compactNumber } from "@/lib/utils";
 import { useSeoMeta } from "@unhead/react";
 import { useProfile } from "@/hooks/useProfile";
@@ -14,7 +27,6 @@ import { StatusTabs } from "@/components/StatusTabs";
 import { LabelBadge } from "@/components/LabelBadge";
 import { CreateIssueForm } from "@/components/CreateIssueForm";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,24 +35,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { MultiSelect } from "@/components/ui/multi-select";
 import type { MultiSelectOption } from "@/components/ui/multi-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Search,
-  MessageCircle,
-  Users,
-  CircleDot,
-  X,
-  Plus,
-  Zap,
-} from "lucide-react";
+import { MessageCircle, Users, CircleDot, Plus, Zap } from "lucide-react";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
   hasAcceptedRepositoryReference,
@@ -52,13 +48,30 @@ import {
   RepoItemAttributionIndicator,
   RepoItemAttributionWarning,
 } from "@/components/RepoItemAttributionWarning";
+import { useFuzzySearch } from "@/hooks/useFuzzySearch";
+import { useRepoListSortPreference } from "@/hooks/useRepoListSortPreference";
+import { compareRepoItems } from "@/lib/repoListSort";
 
-const DEFAULT_STATUS_FILTER: IssueStatus[] = ["open"];
+const DEFAULT_STATUS_FILTER = REPO_LIST_DEFAULTS.issues.statusFilter;
+const ISSUE_SEARCH_OPTIONS: IFuseOptions<ResolvedIssueLite> = {
+  keys: [
+    { name: "currentSubject", weight: 4 },
+    { name: "originalSubject", weight: 2 },
+    { name: "content", weight: 1 },
+  ],
+  threshold: 0.35,
+  ignoreDiacritics: true,
+  useTokenSearch: true,
+  tokenMatch: "all",
+};
 
 export default function RepoIssuesPage() {
   const { pubkey, repoId, resolved, issues, basePath } = useRepoContext();
   const repo = resolved?.repo;
+  useSyncExternalStore(subscribeLocalNetwork, localNetworkRevision);
+  const localRelayPaused = repo?.relays.some((url) => !localAccessAllowed(url));
   const account = useActiveAccount();
+  const sorting = useRepoListSortPreference(repo?.componentId, "issues");
   const repoOwnerProfile = useProfile(pubkey);
   const isReadOnlyRepository =
     repo?.coordinateStatus === "archived" ||
@@ -81,13 +94,21 @@ export default function RepoIssuesPage() {
     setOpenDraft(draftKey);
   }
 
-  // Filters — all multi-select; status defaults to open
-  const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(
-    DEFAULT_STATUS_FILTER,
-  );
-  const [labelFilter, setLabelFilter] = useState<string[]>([]);
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    state: filters,
+    update: updateFilter,
+    reset: clearFilters,
+  } = useRepoListState(repo?.componentId, "issues");
+  const { statusFilter, labelFilter, authorFilter, searchQuery } = filters;
+
+  const setStatusFilter = (value: typeof filters.statusFilter) =>
+    updateFilter("statusFilter", value);
+  const setLabelFilter = (value: typeof filters.labelFilter) =>
+    updateFilter("labelFilter", value);
+  const setAuthorFilter = (value: typeof filters.authorFilter) =>
+    updateFilter("authorFilter", value);
+  const setSearchQuery = (value: typeof filters.searchQuery) =>
+    updateFilter("searchQuery", value);
 
   // Status counts describe only work addressed to the accepted repository.
   const { statusCounts, unconfirmedStatusCounts } = useMemo(() => {
@@ -140,43 +161,60 @@ export default function RepoIssuesPage() {
     label: l,
   }));
 
-  // Apply filters
+  // Pubkey queries select an author; ordinary queries use fuzzy text search.
+  const searchPubkey = useMemo(
+    () => searchQueryToPubkey(searchQuery),
+    [searchQuery],
+  );
+
+  const facetFilteredIssues = useMemo(
+    () =>
+      issues
+        ?.filter(
+          (issue) =>
+            (statusFilter.length === 0 ||
+              statusFilter.includes(issue.status)) &&
+            !(
+              labelFilter.length > 0 &&
+              !labelFilter.some((label) => issue.labels.includes(label))
+            ) &&
+            (!authorFilter || issue.pubkey === authorFilter),
+        )
+        .sort(compareRepoItems(sorting.sort)),
+    [issues, statusFilter, labelFilter, authorFilter, sorting.sort],
+  );
+  const fuzzyIssues = useFuzzySearch(
+    facetFilteredIssues,
+    searchPubkey ? "" : searchQuery,
+    ISSUE_SEARCH_OPTIONS,
+  );
+
+  // Exact event IDs remain authoritative and can bypass active facets.
   const { filteredIssues, idMatchesOutsideFilters } = useMemo(() => {
-    if (!issues) {
+    if (!issues || !fuzzyIssues) {
       return { filteredIssues: undefined, idMatchesOutsideFilters: 0 };
     }
-    let outsideFilterCount = 0;
-    const filtered = issues.filter((issue) => {
-      const matchesFacets =
-        (statusFilter.length === 0 || statusFilter.includes(issue.status)) &&
-        !(
-          labelFilter.length > 0 &&
-          !labelFilter.some((label) => issue.labels.includes(label))
-        ) &&
-        (!authorFilter || issue.pubkey === authorFilter);
-      const matchesId = eventIdMatchesSearch(issue.id, searchQuery);
 
-      if (matchesId) {
-        if (!matchesFacets) outsideFilterCount++;
-        return true;
-      }
-      if (!matchesFacets) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !issue.currentSubject.toLowerCase().includes(q) &&
-          !issue.originalSubject.toLowerCase().includes(q) &&
-          !issue.content.toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    });
+    const facetIds = new Set(facetFilteredIssues?.map((issue) => issue.id));
+    const idMatches = issues.filter((issue) =>
+      eventIdMatchesSearch(issue.id, searchQuery),
+    );
+    const idMatchIds = new Set(idMatches.map((issue) => issue.id));
+
     return {
-      filteredIssues: filtered,
-      idMatchesOutsideFilters: outsideFilterCount,
+      filteredIssues: [
+        ...idMatches,
+        ...fuzzyIssues.filter(
+          (issue) =>
+            !idMatchIds.has(issue.id) &&
+            (!searchPubkey || issue.pubkey === searchPubkey),
+        ),
+      ],
+      idMatchesOutsideFilters: idMatches.filter(
+        (issue) => !facetIds.has(issue.id),
+      ).length,
     };
-  }, [issues, statusFilter, labelFilter, authorFilter, searchQuery]);
+  }, [issues, facetFilteredIssues, fuzzyIssues, searchQuery, searchPubkey]);
 
   const { visibleAcceptedIssues, visibleUnconfirmedIssues } = useMemo(() => {
     if (!filteredIssues || !repo) {
@@ -204,13 +242,6 @@ export default function RepoIssuesPage() {
     labelFilter.length > 0 ||
     !!authorFilter ||
     searchQuery.trim().length > 0;
-
-  const clearFilters = () => {
-    setStatusFilter(DEFAULT_STATUS_FILTER);
-    setLabelFilter([]);
-    setAuthorFilter(null);
-    setSearchQuery("");
-  };
 
   useSeoMeta({
     title: repo ? `Issues - ${repo.name} - ngit` : "Repository Issues - ngit",
@@ -253,61 +284,21 @@ export default function RepoIssuesPage() {
         </Dialog>
       )}
 
-      {/* Search + filters */}
-      <div className="flex flex-col md:flex-row gap-3 mb-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search issues or event ID..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-background/60"
-          />
-        </div>
-
-        <div className="flex gap-2 flex-wrap items-center ml-auto">
-          {allLabels.length > 0 && (
-            <MultiSelect
-              options={labelOptions}
-              selected={labelFilter}
-              onChange={setLabelFilter}
-              placeholder="Label"
-              className="w-[150px]"
-            />
-          )}
-
-          {allAuthors.length > 1 && (
-            <Select
-              value={authorFilter ?? "__all__"}
-              onValueChange={(v) => setAuthorFilter(v === "__all__" ? null : v)}
-            >
-              <SelectTrigger className="w-[160px] h-9 text-sm">
-                <SelectValue placeholder="Author" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Authors</SelectItem>
-                {allAuthors.map((pk) => (
-                  <SelectItem key={pk} value={pk}>
-                    <AuthorSelectLabel pubkey={pk} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 text-sm text-muted-foreground hover:text-foreground"
-              onClick={clearFilters}
-            >
-              <X className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
-        </div>
-      </div>
+      <RepoListToolbar
+        list="issues"
+        sorting={sorting}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        searching={!!searchQuery.trim() && !searchPubkey}
+        labelOptions={labelOptions}
+        labelFilter={labelFilter}
+        setLabelFilter={setLabelFilter}
+        authors={allAuthors}
+        authorFilter={authorFilter}
+        setAuthorFilter={setAuthorFilter}
+        hasActiveFilters={hasActiveFilters}
+        onReset={clearFilters}
+      />
 
       {idMatchesOutsideFilters > 0 && (
         <p
@@ -326,6 +317,7 @@ export default function RepoIssuesPage() {
         <div className="flex items-center bg-muted/40 px-3 py-1.5 overflow-x-auto">
           <StatusTabs
             counts={statusCounts}
+            pending={issues === undefined}
             secondaryCounts={unconfirmedStatusCounts}
             selected={statusFilter}
             onChange={(v) => setStatusFilter(v as IssueStatus[])}
@@ -355,12 +347,16 @@ export default function RepoIssuesPage() {
             <p className="text-muted-foreground">
               {hasActiveFilters
                 ? "No issues match your filters"
-                : "No issues yet"}
+                : localRelayPaused
+                  ? "No issues loaded"
+                  : "No issues yet"}
             </p>
             <p className="text-muted-foreground/60 text-sm mt-1">
               {hasActiveFilters
                 ? "Try adjusting your filters"
-                : "Issues sent to this repository will appear here"}
+                : localRelayPaused
+                  ? "Connect to the local relay above to check for content."
+                  : "Issues sent to this repository will appear here"}
             </p>
           </div>
         ) : (
@@ -409,15 +405,6 @@ export default function RepoIssuesPage() {
   );
 }
 
-function AuthorSelectLabel({ pubkey }: { pubkey: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <UserAvatar pubkey={pubkey} size="sm" />
-      <UserName pubkey={pubkey} className="text-sm" />
-    </div>
-  );
-}
-
 function IssueRow({
   issue,
   repoPath,
@@ -454,6 +441,7 @@ function IssueRow({
             <span className="font-medium text-foreground group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors line-clamp-1">
               {issue.currentSubject}
             </span>
+            <RepositorySourceBadge eventId={issue.id} />
             {issue.labels.map((label) => (
               <LabelBadge
                 key={label}

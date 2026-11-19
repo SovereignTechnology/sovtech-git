@@ -1,30 +1,17 @@
+import { RepositoryLocalConnectionNotice } from "@/components/LocalNetworkControls";
 import type { ComponentProps } from "react";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import { useErrorRetry, type ErrorRetryState } from "@/hooks/useErrorRetry";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams, useLocation } from "react-router-dom";
 import { useActiveAccount } from "applesauce-react/hooks";
 import {
   useResolvedRepository,
   type ResolvedRepository,
 } from "@/hooks/useResolvedRepository";
-import RepoIssuesPage from "./RepoIssuesPage";
-import RepoPRsPage from "./RepoPRsPage";
-import RepoCodePage from "./RepoCodePage";
-import RepoAboutPage from "./RepoAboutPage";
-import RepoSettingsPage from "./RepoSettingsPage";
-import RepoCommitsPage from "./RepoCommitsPage";
-import RepoCommitPage from "./RepoCommitPage";
-import RepoBranchesPage from "./RepoBranchesPage";
-import RepoTagsPage from "./RepoTagsPage";
-import RepoComparePage from "./RepoComparePage";
-import RepoActionsPage from "./RepoActionsPage";
-import RepoCoordinatorsPage from "./RepoCoordinatorsPage";
-import RepoReleasesPage from "./RepoReleasesPage";
-import IssuePage from "@/pages/IssuePage";
-import PRPage from "@/pages/PRPage";
 import { useIssues } from "@/hooks/useIssues";
 import { usePRs } from "@/hooks/usePRs";
+import { useNip34RepoLoader } from "@/hooks/useNip34RepoLoader";
 import { useRepoHasCI } from "@/hooks/useCI";
 import { useRepoReleaseSummary } from "@/hooks/useSoftwareReleases";
 import { usePrefetchNip05 } from "@/hooks/usePrefetchNip05";
@@ -54,18 +41,12 @@ import {
   Loader2,
   Code2,
   Info,
-  MoreHorizontal,
   Settings,
   Workflow,
   Package,
   UserPlus,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { RepositoryNavigation } from "@/components/RepositoryNavigation";
 import { RepoContext, type RepoContextValue } from "./RepoContext";
 import {
   getRepositoryPresentationCoordinates,
@@ -73,8 +54,13 @@ import {
   type RepoQueryOptions,
   type ResolvedRepo,
 } from "@/lib/nip34";
-import { relayCurationMode } from "@/services/settings";
-import { cn } from "@/lib/utils";
+import { useSavedRepositoryCuration } from "@/hooks/useRepositoryCuration";
+import { RepositoryCurationContext } from "@/contexts/RepositoryCurationContext";
+import { CuratedEventStore } from "@/lib/curatedEventStore";
+import { relayEventPresence } from "@/lib/relayEventPresence";
+import { eventStore as canonicalEventStore } from "@/services/nostr";
+import { outboxStore } from "@/services/outbox";
+import { EventStoreProvider } from "applesauce-react/providers";
 import { StarButton } from "@/components/StarButton";
 import { FollowRepoButton } from "@/components/FollowRepoButton";
 import { RepoZapButton } from "@/components/RepoZapButton";
@@ -101,6 +87,80 @@ import { useGitPool } from "@/hooks/useGitPool";
 import { usePrivateGitRelays } from "@/hooks/usePrivateGitRelays";
 import { BuzzRepositoryContext } from "@/contexts/BuzzRepositoryContext";
 import { formatDistanceToNow } from "date-fns";
+
+import { deferredModule, queuePreload } from "@/lib/backgroundPreload";
+
+const RepoIssuesPageModule = deferredModule(() => import("./RepoIssuesPage"));
+const RepoIssuesPage = lazy(RepoIssuesPageModule.load);
+const RepoPRsPageModule = deferredModule(() => import("./RepoPRsPage"));
+const RepoPRsPage = lazy(RepoPRsPageModule.load);
+const RepoCodePageModule = deferredModule(() => import("./RepoCodePage"));
+const RepoCodePage = lazy(RepoCodePageModule.load);
+const RepoAboutPageModule = deferredModule(() => import("./RepoAboutPage"));
+const RepoAboutPage = lazy(RepoAboutPageModule.load);
+const RepoSettingsPageModule = deferredModule(
+  () => import("./RepoSettingsPage"),
+);
+const RepoSettingsPage = lazy(RepoSettingsPageModule.load);
+const RepoCommitsPageModule = deferredModule(() => import("./RepoCommitsPage"));
+const RepoCommitsPage = lazy(RepoCommitsPageModule.load);
+const RepoCommitPageModule = deferredModule(() => import("./RepoCommitPage"));
+const RepoCommitPage = lazy(RepoCommitPageModule.load);
+const RepoBranchesPageModule = deferredModule(
+  () => import("./RepoBranchesPage"),
+);
+const RepoBranchesPage = lazy(RepoBranchesPageModule.load);
+const RepoTagsPageModule = deferredModule(() => import("./RepoTagsPage"));
+const RepoTagsPage = lazy(RepoTagsPageModule.load);
+const RepoComparePageModule = deferredModule(() => import("./RepoComparePage"));
+const RepoComparePage = lazy(RepoComparePageModule.load);
+const RepoActionsPageModule = deferredModule(() => import("./RepoActionsPage"));
+const RepoActionsPage = lazy(RepoActionsPageModule.load);
+const RepoCoordinatorsPageModule = deferredModule(
+  () => import("./RepoCoordinatorsPage"),
+);
+const RepoCoordinatorsPage = lazy(RepoCoordinatorsPageModule.load);
+const RepoReleasesPageModule = deferredModule(
+  () => import("./RepoReleasesPage"),
+);
+const RepoReleasesPage = lazy(RepoReleasesPageModule.load);
+const IssuePageModule = deferredModule(() => import("@/pages/IssuePage"));
+const IssuePage = lazy(IssuePageModule.load);
+const PRPageModule = deferredModule(() => import("@/pages/PRPage"));
+const PRPage = lazy(PRPageModule.load);
+const repositoryPages = [
+  RepoIssuesPageModule,
+  RepoPRsPageModule,
+  IssuePageModule,
+  PRPageModule,
+  RepoCodePageModule,
+  RepoAboutPageModule,
+  RepoSettingsPageModule,
+  RepoCommitsPageModule,
+  RepoCommitPageModule,
+  RepoBranchesPageModule,
+  RepoTagsPageModule,
+  RepoComparePageModule,
+  RepoActionsPageModule,
+  RepoCoordinatorsPageModule,
+  RepoReleasesPageModule,
+];
+
+// Warming the layout also queues its views, without mounting their data owners.
+for (const module of repositoryPages) queuePreload(module);
+
+function RepositoryPageFallback() {
+  return (
+    <div
+      className="container space-y-6 px-4 py-8 md:px-8"
+      role="status"
+      aria-label="Loading page"
+    >
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // RepoLayout
@@ -315,9 +375,55 @@ function RepoLayoutSession({
   const repoRelayUrls =
     use$(() => relayGroupUrls$(repoRelayGroup), [repoRelayGroup]) ?? [];
 
-  // Respect the user's relay curation preference.
-  const curationMode = use$(relayCurationMode);
+  const curation = useSavedRepositoryCuration(repo?.componentId);
+  const {
+    mode: curationMode,
+    preference: curationPreference,
+    defaultMode: defaultCurationMode,
+    setMode: setCurationMode,
+  } = curation;
+  const curated = useMemo(
+    () =>
+      new CuratedEventStore(
+        canonicalEventStore,
+        relayEventPresence,
+        outboxStore.items$,
+      ),
+    [],
+  );
+  useEffect(() => curated.connect(), [curated]);
+  const declaredRelaysKey = (repo?.relays ?? []).join(",");
+  useEffect(() => {
+    curated.setPolicy(repo?.relays ?? [], curationMode === "outbox");
+    // Content-keyed: resolver object churn must not rebuild the projection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curated, declaredRelaysKey, curationMode]);
+  const repositoryStore = isPrivate ? canonicalEventStore : curated.store;
 
+  const relayHintsKey = relayHints.join(",");
+  const confirmedMaintainersKey = repo?.confirmedMaintainers.join(",") ?? "";
+  const queryOptions: RepoQueryOptions = useMemo(
+    () => ({
+      relayHints: isPrivate ? [] : relayHints,
+      useItemAuthorRelays: false,
+      maintainerPubkeys: repo?.confirmedMaintainers ?? [],
+      privateRepository: isPrivate,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [relayHintsKey, confirmedMaintainersKey, isPrivate],
+  );
+
+  const cacheStatus = useNip34RepoLoader(
+    presentationRepoCoordinates,
+    repoRelayGroup,
+    queryOptions.privateRepository,
+    repo?.roleHistory,
+    repo?.relays,
+  );
+  // Initial cache hydration (or the storage-stall fallback) precedes
+  // supplemental roots so known statuses cannot lose a race to faster outbox
+  // delivery. Readiness stays true across
+  // later coordinate growth; existing supplemental subscriptions keep running.
   // In outbox mode, also subscribe to the extra maintainer mailbox relays so
   // issues and PRs published only to those relays are discovered. Uses
   // nip34SupplementalRelayLoader which — unlike a plain subscription — also
@@ -344,6 +450,7 @@ function RepoLayoutSession({
   use$(() => {
     if (
       curationMode !== "outbox" ||
+      !cacheStatus?.ready ||
       isPrivate ||
       !extraRelaysForMaintainerMailboxCoverage ||
       !hasMemberCoords
@@ -355,37 +462,33 @@ function RepoLayoutSession({
     ).pipe(catchError(() => EMPTY));
   }, [
     curationMode,
+    cacheStatus?.ready,
     isPrivate,
     extraRelaysForMaintainerMailboxCoverage,
     hasMemberCoords,
     supplementalCoords$,
   ]);
 
-  const relayHintsKey = relayHints.join(",");
-  const confirmedMaintainersKey = repo?.confirmedMaintainers.join(",") ?? "";
-  const queryOptions: RepoQueryOptions = useMemo(
-    () => ({
-      relayHints: isPrivate ? [] : relayHints,
-      useItemAuthorRelays: false,
-      maintainerPubkeys: repo?.confirmedMaintainers ?? [],
-      privateRepository: isPrivate,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [relayHintsKey, confirmedMaintainersKey, isPrivate],
+  const initialCachePending = !isPrivate && !cacheStatus?.ready;
+  const modelCoordinates = initialCachePending
+    ? undefined
+    : presentationRepoCoordinates;
+  const loadedIssues = useIssues(
+    modelCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
+  );
+  const loadedPRs = usePRs(
+    modelCoordinates,
+    repo?.roleHistory,
+    repositoryStore,
   );
 
-  const issues = useIssues(
-    presentationRepoCoordinates,
-    repoRelayGroup,
-    queryOptions,
-    repo?.roleHistory,
-  );
-  const prs = usePRs(
-    presentationRepoCoordinates,
-    repoRelayGroup,
-    queryOptions,
-    repo?.roleHistory,
-  );
+  // A pending cache read is not an empty repository. Subscribe to list models
+  // only after hydration, so their buffered pre-hydration empty result cannot
+  // briefly replace the skeleton with a false zero before cached roots settle.
+  const issues = initialCachePending ? undefined : loadedIssues;
+  const prs = initialCachePending ? undefined : loadedPRs;
 
   const acceptedRepoCoordinates = useMemo(
     () => repo?.confirmedMemberCoordinates ?? [],
@@ -761,345 +864,304 @@ function RepoLayoutSession({
     return <Navigate to={leadRedirectPath} replace state={location.state} />;
   }
   return (
-    <RepoRelaysContext.Provider value={repoRelayUrls}>
-      <div className="min-h-full">
-        {/* Repo header */}
-        <div className="relative isolate border-b border-border/40">
-          <div className="absolute inset-0 -z-10 bg-gradient-to-br from-pink-500/5 via-transparent to-pink-500/5" />
+    <RepositoryCurationContext.Provider value={curation}>
+      <RepoRelaysContext.Provider value={repoRelayUrls}>
+        <div className="min-h-full">
+          {/* Repo header */}
+          <div className="relative isolate border-b border-border/40">
+            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-pink-500/5 via-transparent to-pink-500/5" />
 
-          <div className="container max-w-screen-xl px-4 md:px-8 pt-6 pb-0">
-            {repo ? (
-              <div className="flex items-center justify-between gap-3 mb-4 min-w-0 overflow-hidden">
-                <RepoBreadcrumb
-                  pubkey={pubkey}
-                  repoName={repo.name}
-                  basePath={basePath}
-                  nip05={nip05}
-                />
-                {repo.isBuzz && (
-                  <Badge variant="secondary" className="shrink-0">
-                    Basic Buzz support
-                  </Badge>
-                )}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {!isPrivate && (
-                    <>
-                      <RepoZapButton
-                        targetAnnouncement={repo.confirmedAnnouncements.find(
-                          (a) => a.pubkey === repo.selectedMaintainer,
-                        )}
-                        repoCoords={acceptedRepoCoordinates}
-                      />
-                      <FollowRepoButton repoCoord={selectedRepoCoordinate} />
-                      <StarButton
-                        targetAnnouncement={repo.confirmedAnnouncements.find(
-                          (a) => a.pubkey === repo.selectedMaintainer,
-                        )}
-                        allAnnouncements={acceptedAnnouncements}
-                        repoCoords={acceptedRepoCoordinates}
-                      />
-                    </>
+            <div className="container max-w-screen-xl px-4 md:px-8 pt-6 pb-0">
+              {repo ? (
+                <div className="flex items-center justify-between gap-3 mb-4 min-w-0 overflow-hidden">
+                  <RepoBreadcrumb
+                    pubkey={pubkey}
+                    repoName={repo.name}
+                    basePath={basePath}
+                    nip05={nip05}
+                  />
+                  {repo.isBuzz && (
+                    <Badge variant="secondary" className="shrink-0">
+                      Basic Buzz support
+                    </Badge>
                   )}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {!isPrivate && (
+                      <>
+                        <RepoZapButton
+                          targetAnnouncement={repo.confirmedAnnouncements.find(
+                            (a) => a.pubkey === repo.selectedMaintainer,
+                          )}
+                          repoCoords={acceptedRepoCoordinates}
+                        />
+                        <FollowRepoButton repoCoord={selectedRepoCoordinate} />
+                        <StarButton
+                          targetAnnouncement={repo.confirmedAnnouncements.find(
+                            (a) => a.pubkey === repo.selectedMaintainer,
+                          )}
+                          allAnnouncements={acceptedAnnouncements}
+                          repoCoords={acceptedRepoCoordinates}
+                        />
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 mb-4">
-                <Skeleton className="h-5 w-24" />
-                <span className="text-muted-foreground">/</span>
-                <Skeleton className="h-5 w-32" />
-              </div>
-            )}
+              ) : (
+                <div className="flex items-center gap-1.5 mb-4">
+                  <Skeleton className="h-5 w-24" />
+                  <span className="text-muted-foreground">/</span>
+                  <Skeleton className="h-5 w-32" />
+                </div>
+              )}
 
-            {/* Tab navigation */}
-            <nav className="-mb-px flex w-full gap-0 sm:gap-1">
-              {/* Primary tabs — always visible */}
-              <TabLink
-                to={basePath}
-                active={isCodeTab}
-                icon={<Code2 className="h-4 w-4" />}
-                label="Code"
+              <RepositoryNavigation
+                tabs={[
+                  {
+                    to: basePath,
+                    active: isCodeTab,
+                    icon: <Code2 className="h-4 w-4 shrink-0" />,
+                    label: "Code",
+                  },
+                  {
+                    to: `${basePath}/issues`,
+                    active: isIssuesTab,
+                    icon: <CircleDot className="h-4 w-4 shrink-0" />,
+                    label: "Issues",
+                    count: openIssueCount,
+                  },
+                  {
+                    to: `${basePath}/prs`,
+                    active: isPRsTab,
+                    icon: <GitPullRequest className="h-4 w-4 shrink-0" />,
+                    label: "PRs",
+                    count: openPRCount,
+                  },
+                  ...(!isPrivate && (hasCI || isActionsTab)
+                    ? [
+                        {
+                          to: `${basePath}/actions`,
+                          active: isActionsTab,
+                          icon: <Workflow className="h-4 w-4 shrink-0" />,
+                          label: "Actions",
+                        },
+                      ]
+                    : []),
+                  ...(showReleases
+                    ? [
+                        {
+                          to: `${basePath}/releases`,
+                          active: isReleasesTab,
+                          icon: <Package className="h-4 w-4 shrink-0" />,
+                          label: "Releases",
+                        },
+                      ]
+                    : []),
+                  {
+                    to: `${basePath}/about`,
+                    active: isAboutTab,
+                    icon: <Info className="h-4 w-4 shrink-0" />,
+                    label: "About",
+                  },
+                  ...(canOpenSettings
+                    ? [
+                        {
+                          to: `${basePath}/settings`,
+                          active: isSettingsTab,
+                          icon: <Settings className="h-4 w-4 shrink-0" />,
+                          label: "Settings",
+                        },
+                      ]
+                    : []),
+                ]}
+                relayView={
+                  repo && !isPrivate && (isIssuesTab || isPRsTab)
+                    ? {
+                        mode: curationMode,
+                        preference: curationPreference,
+                        defaultMode: defaultCurationMode,
+                        onChange: setCurationMode,
+                      }
+                    : undefined
+                }
               />
-              <TabLink
-                to={`${basePath}/issues`}
-                active={isIssuesTab}
-                icon={<CircleDot className="h-4 w-4" />}
-                label="Issues"
-                count={openIssueCount}
-              />
-              <TabLink
-                to={`${basePath}/prs`}
-                active={isPRsTab}
-                icon={<GitPullRequest className="h-4 w-4" />}
-                label="PRs"
-                count={openPRCount}
-              />
-
-              {/* Secondary tabs — visible on md+ screens */}
-              <div className="hidden md:flex gap-1">
-                {!isPrivate && (hasCI || isActionsTab) && (
-                  <TabLink
-                    to={`${basePath}/actions`}
-                    active={isActionsTab}
-                    icon={<Workflow className="h-4 w-4" />}
-                    label="Actions"
-                  />
-                )}
-                {showReleases && (
-                  <TabLink
-                    to={`${basePath}/releases`}
-                    active={isReleasesTab}
-                    icon={<Package className="h-4 w-4" />}
-                    label="Releases"
-                  />
-                )}
-                <TabLink
-                  to={`${basePath}/about`}
-                  active={isAboutTab}
-                  icon={<Info className="h-4 w-4" />}
-                  label="About"
-                />
-                {canOpenSettings && (
-                  <TabLink
-                    to={`${basePath}/settings`}
-                    active={isSettingsTab}
-                    icon={<Settings className="h-4 w-4" />}
-                    label="Settings"
-                  />
-                )}
-              </div>
-
-              {/* "More" dropdown — mobile only */}
-              <div className="flex shrink-0 items-end pb-px md:hidden">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className={cn(
-                        "inline-flex items-center gap-1.5 px-2 py-2.5 text-sm font-medium border-b-2 transition-colors sm:px-3",
-                        isAboutTab ||
-                          isSettingsTab ||
-                          isActionsTab ||
-                          isReleasesTab
-                          ? "border-pink-500 text-foreground"
-                          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-                      )}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                      <span className="sr-only">More</span>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {!isPrivate && (hasCI || isActionsTab) && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/actions`}
-                          className="flex items-center gap-2"
-                        >
-                          <Workflow className="h-4 w-4" />
-                          Actions
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    {showReleases && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/releases`}
-                          className="flex items-center gap-2"
-                        >
-                          <Package className="h-4 w-4" />
-                          Releases
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem asChild>
-                      <Link
-                        to={`${basePath}/about`}
-                        className="flex items-center gap-2"
-                      >
-                        <Info className="h-4 w-4" />
-                        About
-                      </Link>
-                    </DropdownMenuItem>
-                    {canOpenSettings && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={`${basePath}/settings`}
-                          className="flex items-center gap-2"
-                        >
-                          <Settings className="h-4 w-4" />
-                          Settings
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </nav>
-          </div>
-        </div>
-
-        {repo && announcementsSettled && (
-          <RepositoryLifecycleNotice repo={repo} />
-        )}
-
-        {repo && announcementsSettled && repo.repositoryHealth.length > 0 && (
-          <RepositoryHealthNotice
-            resolved={resolved}
-            repo={repo}
-            accountPubkey={account?.pubkey}
-            basePath={basePath}
-            stateSettled={repoRelayEose}
-            relayUrls={[
-              ...new Set([
-                ...repoRelayUrls,
-                ...(extraRelaysForMaintainerMailboxCoverage?.relays.map(
-                  ({ url }) => url,
-                ) ?? []),
-              ]),
-            ]}
-            repoState={repoState}
-          />
-        )}
-
-        {repo && !isPrivate && (
-          <RepoMaintainerRequestBanner
-            repo={repo}
-            pageSuffix={repoPageSuffix}
-          />
-        )}
-
-        {repo && !isPrivate && account?.pubkey && (
-          <MaintainerInvitationSafetyBanner
-            resolved={resolved}
-            repo={repo}
-            accountPubkey={account.pubkey}
-            announcementsSettled={announcementsSettled}
-            stateSettled={repoRelayEose}
-            repoState={repoState}
-            relayUrls={[
-              ...new Set([
-                ...repoRelayUrls,
-                ...(extraRelaysForMaintainerMailboxCoverage?.relays.map(
-                  ({ url }) => url,
-                ) ?? []),
-              ]),
-            ]}
-          />
-        )}
-
-        {repo && isPrivate && privateAccessError && (
-          <div
-            className="container max-w-screen-xl px-4 pt-4 md:px-8"
-            role="alert"
-          >
-            <div className="flex gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="space-y-3">
-                <p>{privateAccessError}</p>
-                <ErrorRetryAction recovery={accessRecovery} />
-                <Button asChild variant="outline" size="sm">
-                  <Link to="/settings">Review Private Git services</Link>
-                </Button>
-              </div>
             </div>
           </div>
-        )}
 
-        {/* Page content */}
-        {ctxValue ? (
-          <BuzzRepositoryContext.Provider value={repo?.isBuzz ?? false}>
-            <GitCommitLinkContext.Provider value={gitCommitLinkCtxValue}>
-              <RepoContext.Provider value={ctxValue}>
-                {isPrivate &&
-                (subPage === "actions" ||
-                  subPage === "action-coordinators" ||
-                  subPage === "releases" ||
-                  subPage === "settings" ||
-                  subPage === "edit") ? (
-                  <PrivateFeatureUnavailable />
-                ) : subPage === "code" ? (
-                  <RepoCodePage />
-                ) : subPage === "commits" ? (
-                  <RepoCommitsPage />
-                ) : subPage === "commit" ? (
-                  <RepoCommitPage />
-                ) : subPage === "branches" ? (
-                  <RepoBranchesPage />
-                ) : subPage === "tags" ? (
-                  <RepoTagsPage />
-                ) : subPage === "compare" ? (
-                  <RepoComparePage />
-                ) : subPage === "actions" ? (
-                  <RepoActionsPage />
-                ) : subPage === "action-coordinators" ? (
-                  <RepoCoordinatorsPage
-                    coordinatorIdentifier={coordinatorIdentifier}
-                  />
-                ) : subPage === "releases" ? (
-                  <RepoReleasesPage
-                    eventId={releaseId}
-                    view={releaseView ?? "releases"}
-                  />
-                ) : subPage === "issue" ? (
-                  <IssuePage />
-                ) : subPage === "issues" ? (
-                  <RepoIssuesPage />
-                ) : subPage === "pr" ? (
-                  <PRPage />
-                ) : subPage === "pr-commit" ? (
-                  <PRPage />
-                ) : subPage === "prs" ? (
-                  <RepoPRsPage />
-                ) : subPage === "about" ? (
-                  <RepoAboutPage />
-                ) : subPage === "edit" ? (
-                  <Navigate to={`${basePath}/settings`} replace />
-                ) : subPage === "settings" ? (
-                  <RepoSettingsPage />
-                ) : null}
-              </RepoContext.Provider>
-            </GitCommitLinkContext.Provider>
-          </BuzzRepositoryContext.Provider>
-        ) : privateProbe?.status === "unavailable" ? (
-          <PrivateRepositoryUnavailable reason={privateProbe.error} />
-        ) : repoSearch &&
-          (repoSearch.concludedNotFound ||
-            repoSearch.deleted ||
-            repoSearch.vanished ||
-            (Object.keys(repoSearch.relayStatuses).length > 0 &&
-              repoSearchDelayElapsed)) &&
-          !repoSearch.found ? (
-          <EventSearchStatus
-            search={repoSearch}
-            itemLabel="Repository"
-            backPath="/"
-            backLabel="Back to repositories"
-            searchMoreActive={true}
-          />
-        ) : subPage === "issue" ||
-          subPage === "pr" ||
-          subPage === "pr-commit" ? (
-          /* Show an issue/PR-shaped skeleton while the repo context resolves,
-           so the transition to the real page feels seamless. */
-          <>
-            <div className="border-b border-border/40">
-              <div className="container max-w-screen-xl px-4 md:px-8 pt-6 pb-4">
+          {repo && (
+            <RepositoryLocalConnectionNotice
+              relays={repo.relays}
+              cloneUrls={cloneUrls}
+            />
+          )}
+
+          {repo && announcementsSettled && (
+            <RepositoryLifecycleNotice repo={repo} />
+          )}
+
+          {repo && announcementsSettled && repo.repositoryHealth.length > 0 && (
+            <RepositoryHealthNotice
+              resolved={resolved}
+              repo={repo}
+              accountPubkey={account?.pubkey}
+              basePath={basePath}
+              stateSettled={repoRelayEose}
+              relayUrls={[
+                ...new Set([
+                  ...repoRelayUrls,
+                  ...(extraRelaysForMaintainerMailboxCoverage?.relays.map(
+                    ({ url }) => url,
+                  ) ?? []),
+                ]),
+              ]}
+              repoState={repoState}
+            />
+          )}
+
+          {repo && !isPrivate && (
+            <RepoMaintainerRequestBanner
+              repo={repo}
+              pageSuffix={repoPageSuffix}
+            />
+          )}
+
+          {repo && !isPrivate && account?.pubkey && (
+            <MaintainerInvitationSafetyBanner
+              resolved={resolved}
+              repo={repo}
+              accountPubkey={account.pubkey}
+              announcementsSettled={announcementsSettled}
+              stateSettled={repoRelayEose}
+              repoState={repoState}
+              relayUrls={[
+                ...new Set([
+                  ...repoRelayUrls,
+                  ...(extraRelaysForMaintainerMailboxCoverage?.relays.map(
+                    ({ url }) => url,
+                  ) ?? []),
+                ]),
+              ]}
+            />
+          )}
+
+          {repo && isPrivate && privateAccessError && (
+            <div
+              className="container max-w-screen-xl px-4 pt-4 md:px-8"
+              role="alert"
+            >
+              <div className="flex gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="space-y-3">
-                  <div className="flex gap-3">
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                    <Skeleton className="h-7 w-96" />
-                  </div>
-                  <div className="flex gap-3">
-                    <Skeleton className="h-6 w-6 rounded-full" />
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-4 w-20" />
-                  </div>
+                  <p>{privateAccessError}</p>
+                  <ErrorRetryAction recovery={accessRecovery} />
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/settings">Review Private Git services</Link>
+                  </Button>
                 </div>
               </div>
             </div>
-          </>
-        ) : null}
-      </div>
-    </RepoRelaysContext.Provider>
+          )}
+
+          {/* Page content */}
+          {ctxValue ? (
+            <BuzzRepositoryContext.Provider value={repo?.isBuzz ?? false}>
+              <GitCommitLinkContext.Provider value={gitCommitLinkCtxValue}>
+                <EventStoreProvider eventStore={repositoryStore}>
+                  <RepoContext.Provider value={ctxValue}>
+                    <Suspense fallback={<RepositoryPageFallback />}>
+                      {isPrivate &&
+                      (subPage === "actions" ||
+                        subPage === "action-coordinators" ||
+                        subPage === "releases" ||
+                        subPage === "settings" ||
+                        subPage === "edit") ? (
+                        <PrivateFeatureUnavailable />
+                      ) : subPage === "code" ? (
+                        <RepoCodePage />
+                      ) : subPage === "commits" ? (
+                        <RepoCommitsPage />
+                      ) : subPage === "commit" ? (
+                        <RepoCommitPage />
+                      ) : subPage === "branches" ? (
+                        <RepoBranchesPage />
+                      ) : subPage === "tags" ? (
+                        <RepoTagsPage />
+                      ) : subPage === "compare" ? (
+                        <RepoComparePage />
+                      ) : subPage === "actions" ? (
+                        <RepoActionsPage />
+                      ) : subPage === "action-coordinators" ? (
+                        <RepoCoordinatorsPage
+                          coordinatorIdentifier={coordinatorIdentifier}
+                        />
+                      ) : subPage === "releases" ? (
+                        <RepoReleasesPage
+                          eventId={releaseId}
+                          view={releaseView ?? "releases"}
+                        />
+                      ) : subPage === "issue" ? (
+                        <IssuePage />
+                      ) : subPage === "issues" ? (
+                        <RepoIssuesPage />
+                      ) : subPage === "pr" ? (
+                        <PRPage />
+                      ) : subPage === "pr-commit" ? (
+                        <PRPage />
+                      ) : subPage === "prs" ? (
+                        <RepoPRsPage />
+                      ) : subPage === "about" ? (
+                        <RepoAboutPage />
+                      ) : subPage === "edit" ? (
+                        <Navigate to={`${basePath}/settings`} replace />
+                      ) : subPage === "settings" ? (
+                        <RepoSettingsPage />
+                      ) : null}
+                    </Suspense>
+                  </RepoContext.Provider>
+                </EventStoreProvider>
+              </GitCommitLinkContext.Provider>
+            </BuzzRepositoryContext.Provider>
+          ) : privateProbe?.status === "unavailable" ? (
+            <PrivateRepositoryUnavailable reason={privateProbe.error} />
+          ) : repoSearch &&
+            (repoSearch.concludedNotFound ||
+              repoSearch.deleted ||
+              repoSearch.vanished ||
+              (Object.keys(repoSearch.relayStatuses).length > 0 &&
+                repoSearchDelayElapsed)) &&
+            !repoSearch.found ? (
+            <EventSearchStatus
+              search={repoSearch}
+              itemLabel="Repository"
+              backPath="/"
+              backLabel="Back to repositories"
+              searchMoreActive={true}
+            />
+          ) : subPage === "issue" ||
+            subPage === "pr" ||
+            subPage === "pr-commit" ? (
+            /* Show an issue/PR-shaped skeleton while the repo context resolves,
+           so the transition to the real page feels seamless. */
+            <>
+              <div className="border-b border-border/40">
+                <div className="container max-w-screen-xl px-4 md:px-8 pt-6 pb-4">
+                  <div className="space-y-3">
+                    <div className="flex gap-3">
+                      <Skeleton className="h-6 w-16 rounded-full" />
+                      <Skeleton className="h-7 w-96" />
+                    </div>
+                    <div className="flex gap-3">
+                      <Skeleton className="h-6 w-6 rounded-full" />
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </RepoRelaysContext.Provider>
+    </RepositoryCurationContext.Provider>
   );
 }
 
@@ -1269,7 +1331,7 @@ function PrivateRepositoryUnavailable({ reason }: { reason?: string }) {
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
         <AlertCircle className="mx-auto h-8 w-8 text-amber-600 dark:text-amber-400" />
         <h2 className="mt-4 text-xl font-semibold">
-          Private repository unavailable
+          Repository discovery unavailable
         </h2>
         <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
           {reason ??
@@ -1849,46 +1911,5 @@ function RepoBreadcrumb({
         {repoName}
       </Link>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tab link
-// ---------------------------------------------------------------------------
-
-function TabLink({
-  to,
-  active,
-  icon,
-  label,
-  count,
-}: {
-  to: string;
-  active: boolean;
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-}) {
-  return (
-    <Link
-      to={to}
-      className={cn(
-        "inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-1 py-2.5 text-sm font-medium border-b-2 transition-colors sm:flex-none sm:gap-2 sm:px-4",
-        active
-          ? "border-pink-500 text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-      )}
-    >
-      {icon}
-      {label}
-      {count !== undefined && count > 0 && (
-        <Badge
-          variant="secondary"
-          className="ml-0.5 h-5 min-w-[20px] shrink-0 px-1.5 text-[11px] font-medium sm:ml-1"
-        >
-          {count}
-        </Badge>
-      )}
-    </Link>
   );
 }

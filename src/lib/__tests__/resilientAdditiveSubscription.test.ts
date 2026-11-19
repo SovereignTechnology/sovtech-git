@@ -13,7 +13,7 @@
  */
 
 import { Relay, RelayPool } from "applesauce-relay";
-import type { Filter } from "applesauce-core/helpers";
+import { matchFilter, type Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 import {
   BehaviorSubject,
@@ -28,6 +28,7 @@ import { WS } from "vitest-websocket-mock";
 
 import {
   AdditiveFilterConflictError,
+  getRateLimitCooldownRemaining,
   resilientAdditiveSubscription,
   type AdditiveFilterChunk,
   type ResilientAdditiveSubscriptionOptions,
@@ -116,7 +117,7 @@ function track(subscription: Subscription): Subscription {
 
 beforeEach(() => {
   vi.spyOn(Relay, "fetchInformationDocument").mockImplementation(() =>
-    of(null),
+    Promise.resolve(null),
   );
 
   server = new WS(RELAY_URL, { jsonProtocol: true });
@@ -563,5 +564,199 @@ describe("resilientAdditiveSubscription", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("additive root history", () => {
+  function roots(coordinate: string, offset = 0): NostrEvent[] {
+    return [400, 300, 200, 100].map((time, index) => ({
+      ...mockEvent,
+      kind: 1621,
+      id: (index + offset + 1).toString(16).padStart(64, "0"),
+      created_at: 1700000000 + time,
+      tags: [["a", coordinate]],
+    }));
+  }
+  function answer(target: WS, req: ReqMessage, events: NostrEvent[]) {
+    const found = new Map<string, NostrEvent>();
+    for (const filter of req.slice(2) as Filter[])
+      for (const event of events
+        .filter((event) => matchFilter(filter, event))
+        .slice(0, 2))
+        found.set(event.id, event);
+    for (const event of found.values()) target.send(["EVENT", req[1], event]);
+    target.send(["EOSE", req[1]]);
+  }
+  async function drain(
+    target: WS,
+    events: NostrEvent[],
+    complete: () => boolean,
+  ) {
+    while (!complete()) {
+      const req = await nextReq(target, 5000);
+      const handled =
+        requests(target).findIndex((frame) => frame[1] === req[1]) + 1;
+      answer(target, req, events);
+      await vi.waitFor(
+        () =>
+          expect(complete() || requests(target).length > handled).toBe(true),
+        { timeout: 5000 },
+      );
+    }
+  }
+
+  it("recovers capped roots and late coordinates while preserving live updates and initial settlement", async () => {
+    const additions = new Subject<AdditiveFilterChunk>();
+    const values: ResilientSubscriptionResponse[] = [];
+    const complete = vi.fn();
+    const a = roots("a"),
+      b = roots("b", 10);
+    track(
+      resilientAdditiveSubscription(
+        pool,
+        [RELAY_URL],
+        {
+          initial: [chunk("a", { kinds: [1621], "#a": ["a"] })],
+          additions$: additions,
+        },
+        {
+          history: true,
+          limit: 500,
+          settleTime: 1,
+          onHistoryComplete: complete,
+        },
+      ).subscribe((value) => values.push(value)),
+    );
+    const initial = await nextReq(server);
+    answer(server, initial, a);
+    await vi.waitFor(() => expect(eoseCount(values)).toBe(1));
+    expect(complete).not.toHaveBeenCalled();
+    await drain(server, a, () => complete.mock.calls.length === 1);
+    expect(complete).toHaveBeenLastCalledWith(RELAY_URL, "a", true);
+    expect(
+      new Set(
+        values.filter((value) => value !== "EOSE").map((value) => value.id),
+      ),
+    ).toEqual(new Set(a.map((event) => event.id)));
+    additions.next(chunk("b", { kinds: [1621], "#a": ["b"] }));
+    const delta = await nextReq(server);
+    answer(server, delta, b);
+    await drain(server, b, () => complete.mock.calls.length === 2);
+    expect(complete).toHaveBeenLastCalledWith(RELAY_URL, "b", true);
+    expect(eoseCount(values)).toBe(1);
+    expect(
+      new Set(
+        values.filter((value) => value !== "EOSE").map((value) => value.id),
+      ),
+    ).toEqual(new Set([...a, ...b].map((event) => event.id)));
+    const live = { ...a[0], id: "ef".repeat(32), created_at: 1700000500 };
+    server.send(["EVENT", initial[1], live]);
+    await vi.waitFor(() => expect(values).toContainEqual(live));
+    expect(closes(server).some((frame) => frame[1] === initial[1])).toBe(false);
+  }, 20000);
+
+  it("cancels removed-relay history without completion and starts fresh for a new relay", async () => {
+    const relays = new BehaviorSubject([RELAY_URL]);
+    const complete = vi.fn();
+    track(
+      resilientAdditiveSubscription(
+        pool,
+        relays,
+        {
+          initial: [chunk("roots", { kinds: [1621] })],
+        },
+        { history: true, onHistoryComplete: complete },
+      ).subscribe(),
+    );
+    const initial = await nextReq(server);
+    server.send(["EOSE", initial[1]]);
+    const history = await nextReq(server);
+    expect(history[2]).toHaveProperty("until");
+    relays.next([]);
+    await vi.waitFor(() =>
+      expect(closes(server).map((frame) => frame[1])).toEqual(
+        expect.arrayContaining([initial[1], history[1]]),
+      ),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    relays.next([RELAY_URL_2]);
+    const next = await nextReq(server2);
+    server2.send(["EOSE", next[1]]);
+    const nextHistory = await nextReq(server2);
+    server2.send(["EOSE", nextHistory[1]]);
+    await vi.waitFor(() =>
+      expect(complete).toHaveBeenCalledExactlyOnceWith(
+        RELAY_URL_2,
+        "roots",
+        true,
+      ),
+    );
+  });
+
+  it("does not report a rate-limited history attempt as completed", async () => {
+    const url = "wss://additive-history-cooldown.test";
+    const target = new WS(url, { jsonProtocol: true });
+    const complete = vi.fn();
+    const sub = track(
+      resilientAdditiveSubscription(
+        pool,
+        [url],
+        {
+          initial: [chunk("roots", { kinds: [1621] })],
+        },
+        { history: true, onHistoryComplete: complete },
+      ).subscribe(),
+    );
+    const initial = await nextReq(target);
+    target.send(["EOSE", initial[1]]);
+    const history = await nextReq(target);
+    target.send(["CLOSED", history[1], "rate-limited: too many queries"]);
+    await vi.waitFor(() =>
+      expect(getRateLimitCooldownRemaining(url)).toBeGreaterThan(60000),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    sub.unsubscribe();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("reports terminal history refusal as incomplete without closing the live query", async () => {
+    const complete = vi.fn();
+    track(
+      resilientAdditiveSubscription(
+        pool,
+        [RELAY_URL],
+        {
+          initial: [chunk("roots", { kinds: [1621] })],
+        },
+        { history: true, onHistoryComplete: complete },
+      ).subscribe(),
+    );
+    const initial = await nextReq(server);
+    server.send(["EOSE", initial[1]]);
+    const history = await nextReq(server);
+    server.send(["CLOSED", history[1], "blocked: history denied"]);
+    await vi.waitFor(() =>
+      expect(complete).toHaveBeenCalledExactlyOnceWith(
+        RELAY_URL,
+        "roots",
+        false,
+      ),
+    );
+    expect(closes(server).some((frame) => frame[1] === initial[1])).toBe(false);
+  });
+
+  it("refuses request-relative initial filters when history is enabled", () => {
+    const errors: unknown[] = [];
+    resilientAdditiveSubscription(
+      pool,
+      [RELAY_URL],
+      {
+        initial: [{ key: "limited", filters: [{ kinds: [1621], limit: 2 }] }],
+      },
+      { history: true },
+    ).subscribe({ error: (error) => errors.push(error) });
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/limit/);
+    expect(pool.relay).not.toHaveBeenCalled();
   });
 });

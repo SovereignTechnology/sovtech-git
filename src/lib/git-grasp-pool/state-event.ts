@@ -173,3 +173,55 @@ export class StateEventManager {
     this._retryAt = null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// State-commit fetch groups
+// ---------------------------------------------------------------------------
+
+/** The subset of a server's cached infoRefs the grouping decision needs. */
+export interface CachedInfoRefs {
+  symrefs: Record<string, string>;
+  refs: Record<string, string>;
+}
+
+/**
+ * Group servers for a fetch of the commit named by the state event.
+ *
+ * The announced commit need not be a branch tip: one maintainer can announce a
+ * commit that another has since built on, and the server still holds that object.
+ * Servers with matching or unknown HEADs are tried first. Servers with different
+ * HEADs join after a short grace period, or when all preferred servers fail:
+ * a HEAD mismatch does not prove that the announced commit is unavailable.
+ */
+export function groupStateCommitUrls(
+  urls: string[],
+  commitHash: string,
+  peekInfoRefs: (url: string) => CachedInfoRefs | undefined,
+): { preferred: string[]; fallback: string[] } {
+  const agreeing: string[] = [];
+  const rest: string[] = [];
+
+  for (const url of urls) {
+    const cached = peekInfoRefs(url);
+    if (!cached) {
+      // Nothing cached yet: no reason to distrust this server.
+      agreeing.push(url);
+      continue;
+    }
+    const headRef = cached.symrefs["HEAD"];
+    const headCommit = headRef
+      ? cached.refs[headRef]
+      : Object.values(cached.refs)[0];
+    if (
+      !headCommit ||
+      headCommit.startsWith(commitHash) ||
+      commitHash.startsWith(headCommit)
+    ) {
+      agreeing.push(url);
+      continue;
+    }
+    rest.push(url);
+  }
+
+  return { preferred: agreeing, fallback: rest };
+}

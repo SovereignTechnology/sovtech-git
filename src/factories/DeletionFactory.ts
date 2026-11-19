@@ -5,6 +5,10 @@
  *   - `DeletionFactory.forEvents(events, reason?)`
  *       Delete specific event versions via `e` tags. One `e` tag per event,
  *       plus a `k` tag for each unique kind.
+ *   - `DeletionFactory.forEventsAndAddresses(events, reason?)`
+ *       Like `forEvents`, but also adds an `a` coordinate tag for each
+ *       addressable event so relays drop every version of it, not only the
+ *       one referenced by id.
  *   - `DeletionFactory.forAddressable(coord, kind, reason?)`
  *       Delete all versions of a replaceable/addressable event via an `a`
  *       coordinate tag. Tells relays to delete every event with that
@@ -22,6 +26,10 @@
 
 import { blankEventTemplate, EventFactory } from "applesauce-core/factories";
 import type { KnownEventTemplate } from "applesauce-core/helpers/event";
+import {
+  getReplaceableAddress,
+  isAddressableKind,
+} from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
 const DELETION_KIND = 5;
@@ -61,6 +69,34 @@ export class DeletionFactory extends EventFactory<
           ? `Deletion request for event ${events[0].id.slice(0, 8)}…`
           : `Deletion request for ${events.length} events`,
       );
+  }
+
+  /**
+   * Delete specific event versions via `e` tags, and every version of each
+   * addressable event among them via its `a` coordinate.
+   *
+   * NIP-09 permits mixing `e` and `a` tags. The `e` tag still covers relays
+   * that only index by id, while the `a` tag removes any other version of the
+   * same addressable event published up to the deletion's `created_at`.
+   */
+  static forEventsAndAddresses(
+    events: NostrEvent[],
+    reason?: string,
+  ): DeletionFactory {
+    return DeletionFactory.forEvents(events, reason).modifyPublicTags(
+      (tags) => {
+        const newTags = [...tags];
+        const coordinates = new Set<string>();
+        for (const ev of events) {
+          if (!isAddressableKind(ev.kind)) continue;
+          const coordinate = getReplaceableAddress(ev);
+          if (!coordinate || coordinates.has(coordinate)) continue;
+          coordinates.add(coordinate);
+          newTags.push(["a", coordinate]);
+        }
+        return newTags;
+      },
+    );
   }
 
   /**

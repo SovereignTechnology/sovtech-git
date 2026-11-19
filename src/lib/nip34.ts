@@ -1105,11 +1105,11 @@ export interface ResolvedIssueLite {
    */
   authorisedUsers: Set<string>;
   /**
-   * Set of label event IDs (kind:1985) that have been deleted by their author
-   * via NIP-09. Populated on detail pages; always an empty set on list pages
-   * where label deletion events are not fetched.
+   * Status and label event IDs withdrawn by their own author via NIP-09.
    */
   deletedEssentialEventIds: Set<string>;
+  /** Valid, non-deleted status changes targeting this item, including history. */
+  validStatusEventIds?: ReadonlySet<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,6 +1189,11 @@ function buildResolvedList(
   options: ResolveEssentialsOptions = {},
 ): (ResolvedIssueLite & { itemType?: PRItemType })[] {
   const { prUpdateEvents, roleHistory } = options;
+  const deletedEssentialEventIds = getDeletedEssentialEventIds(
+    essentialEvents,
+    options.essentialDeletionEvents ?? [],
+  );
+  const validStatusIdsByRoot = new Map<string, Set<string>>();
 
   // ── Index root events ────────────────────────────────────────────────────
   const authorById = new Map<string, string>();
@@ -1219,38 +1224,48 @@ function buildResolvedList(
   const latestEssentialAt = new Map<string, number>();
 
   for (const ev of essentialEvents) {
+    if (deletedEssentialEventIds.has(ev.id)) continue;
     const rootId = getNip10References(ev).root?.e?.id;
     if (!rootId || !authorById.has(rootId)) continue;
 
-    // Track latest essential timestamp for lastActivityAt.
-    const prev = latestEssentialAt.get(rootId) ?? 0;
-    if (ev.created_at > prev) latestEssentialAt.set(rootId, ev.created_at);
-
     const issuePubkey = authorById.get(rootId)!;
-    const isMember = roleHistory
-      ? isHistoricalRepositoryMember(roleHistory, ev.pubkey, ev.created_at)
-      : memberSet.has(ev.pubkey);
     const isAuthor = ev.pubkey === issuePubkey;
 
     // ── Deletion (kind:5) — NIP-09: only the original author's deletion is valid.
     if (ev.kind === DELETION_KIND) {
-      if (isAuthor) deletedIds.add(rootId);
+      if (isAuthor) {
+        deletedIds.add(rootId);
+        latestEssentialAt.set(
+          rootId,
+          Math.max(latestEssentialAt.get(rootId) ?? 0, ev.created_at),
+        );
+      }
       continue;
     }
 
     // ── Status events (kinds 1630–1633)
     if ((STATUS_KINDS as readonly number[]).includes(ev.kind)) {
-      const statusRootId = getNip10References(ev).root?.e?.id;
-      if (!statusRootId || !authorById.has(statusRootId)) continue;
+      if (
+        !isValidItemStatusEvent(
+          ev,
+          { id: rootId, pubkey: issuePubkey },
+          memberSet,
+          roleHistory,
+          deletedEssentialEventIds,
+        )
+      )
+        continue;
+      latestEssentialAt.set(
+        rootId,
+        Math.max(latestEssentialAt.get(rootId) ?? 0, ev.created_at),
+      );
+      const validIds = validStatusIdsByRoot.get(rootId) ?? new Set<string>();
+      validIds.add(ev.id);
+      validStatusIdsByRoot.set(rootId, validIds);
 
-      // NIP-34 authorises the root author or a confirmed repository member
-      // for every status kind. A merged status records an authorised merge;
-      // it does not grant permission to create or push the merge itself.
-      if (!isAuthor && !isMember) continue;
-
-      const existing = latestStatusByRoot.get(statusRootId);
+      const existing = latestStatusByRoot.get(rootId);
       if (!existing || ev.created_at > existing.createdAt) {
-        latestStatusByRoot.set(statusRootId, {
+        latestStatusByRoot.set(rootId, {
           kind: ev.kind,
           createdAt: ev.created_at,
         });
@@ -1260,7 +1275,14 @@ function buildResolvedList(
 
     // ── Label events (kind:1985)
     if (ev.kind === LABEL_KIND) {
+      const isMember = roleHistory
+        ? isHistoricalRepositoryMember(roleHistory, ev.pubkey, ev.created_at)
+        : memberSet.has(ev.pubkey);
       if (!isAuthor && !isMember) continue;
+      latestEssentialAt.set(
+        rootId,
+        Math.max(latestEssentialAt.get(rootId) ?? 0, ev.created_at),
+      );
 
       const subjectLabel = ev.tags.find(
         ([t, , ns]) => t === "l" && ns === SUBJECT_LABEL_NAMESPACE,
@@ -1385,9 +1407,9 @@ function buildResolvedList(
         participantCount: participantPubkeys.size,
         zapTotal: Math.floor((zapsByRoot.get(ev.id) ?? 0) / 1000),
         authorisedUsers,
-        // List model doesn't fetch deletion events for individual label events —
-        // label deletions are only resolved on detail pages.
-        deletedEssentialEventIds: new Set<string>(),
+        deletedEssentialEventIds,
+        validStatusEventIds:
+          validStatusIdsByRoot.get(ev.id) ?? new Set<string>(),
       };
     })
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
@@ -1473,11 +1495,12 @@ export interface ResolvedPRLite {
   /** Pubkeys authorised to write status/label/rename events */
   authorisedUsers: Set<string>;
   /**
-   * Set of label event IDs (kind:1985) that have been deleted by their author
-   * via NIP-09. Forwarded to buildTimelineNodes so label timeline entries are
-   * suppressed for deleted events.
+   * Status and label event IDs withdrawn by their own author via NIP-09.
+   * Forwarded to buildTimelineNodes to suppress withdrawn entries.
    */
   deletedEssentialEventIds: Set<string>;
+  /** Valid, non-deleted status changes targeting this item, including history. */
+  validStatusEventIds?: ReadonlySet<string>;
 }
 
 /** Whether an event author may update state for a repository item. */
@@ -1493,12 +1516,13 @@ export function isItemEventAuthorised(
   );
 }
 
-/** Publication-time authority for a role-scoped repository item event. */
+/** Publication-time authority; strict consumers disable the unresolved fallback. */
 export function isItemEventAuthorisedAt(
   event: Pick<NostrEvent, "pubkey" | "created_at">,
   itemPubkey: string,
   currentMembers: ReadonlySet<string>,
   roleHistory?: RepositoryRoleHistory,
+  allowUnresolved = true,
 ): boolean {
   if (event.pubkey === itemPubkey) return true;
   if (roleHistory) {
@@ -1509,7 +1533,10 @@ export function isItemEventAuthorisedAt(
     );
   }
   // Preserve existing loading behavior until repository history resolves.
-  return currentMembers.size === 0 || currentMembers.has(event.pubkey);
+  return (
+    (allowUnresolved && currentMembers.size === 0) ||
+    currentMembers.has(event.pubkey)
+  );
 }
 
 /** Publication-time authority for item operations restricted to maintainers. */
@@ -1528,6 +1555,46 @@ export function isItemEventMaintainerAuthorisedAt(
     );
   }
   return currentMaintainers.size === 0 || currentMaintainers.has(event.pubkey);
+}
+
+/** Status authority fails closed while repository membership is unresolved. */
+export function isValidItemStatusEvent(
+  event: NostrEvent,
+  root: Pick<NostrEvent, "id" | "pubkey">,
+  members: ReadonlySet<string>,
+  roleHistory?: RepositoryRoleHistory,
+  deletedIds?: ReadonlySet<string>,
+): boolean {
+  if (
+    !(STATUS_KINDS as readonly number[]).includes(event.kind) ||
+    getNip10References(event).root?.e?.id !== root.id ||
+    deletedIds?.has(event.id)
+  )
+    return false;
+  return isItemEventAuthorisedAt(
+    event,
+    root.pubkey,
+    members,
+    roleHistory,
+    false,
+  );
+}
+
+/** Only the essential event's own author can withdraw it with NIP-09. */
+export function getDeletedEssentialEventIds(
+  essentials: NostrEvent[],
+  deletions: NostrEvent[],
+): Set<string> {
+  const byId = new Map(essentials.map((event) => [event.id, event]));
+  const deleted = new Set<string>();
+  for (const deletion of deletions) {
+    if (deletion.kind !== DELETION_KIND) continue;
+    for (const [name, id] of deletion.tags) {
+      const target = name === "e" ? byId.get(id) : undefined;
+      if (target && deletion.pubkey === target.pubkey) deleted.add(id);
+    }
+  }
+  return deleted;
 }
 
 /**
@@ -1570,20 +1637,11 @@ export function resolveItemEssentials(
   const rootId = rootEvent.id;
   const rootPubkey = rootEvent.pubkey;
 
-  // ── Build deleted essential event ID set ─────────────────────────────────
-  // A deletion is valid only when the deleter's pubkey matches the pubkey
-  // that originally published the target essential event (status or label).
-  const essentialById = new Map(essentialEvents.map((e) => [e.id, e]));
-  const deletedEssentialEventIds = new Set<string>();
-  for (const delEv of essentialDeletionEvents ?? []) {
-    for (const [t, id] of delEv.tags) {
-      if (t !== "e") continue;
-      const target = essentialById.get(id);
-      if (target && delEv.pubkey === target.pubkey) {
-        deletedEssentialEventIds.add(id);
-      }
-    }
-  }
+  const deletedEssentialEventIds = getDeletedEssentialEventIds(
+    essentialEvents,
+    essentialDeletionEvents ?? [],
+  );
+  const validStatusEventIds = new Set<string>();
 
   // ── Process essentials ──────────────────────────────────────────────────
   let isDeleted = false;
@@ -1596,27 +1654,32 @@ export function resolveItemEssentials(
     const evRootId = getNip10References(ev).root?.e?.id;
     if (evRootId !== rootId) continue;
 
-    if (ev.created_at > latestEssentialAt) latestEssentialAt = ev.created_at;
-
-    const isMember = roleHistory
-      ? isHistoricalRepositoryMember(roleHistory, ev.pubkey, ev.created_at)
-      : memberSet.has(ev.pubkey);
+    if (deletedEssentialEventIds.has(ev.id)) continue;
     const isAuthor = ev.pubkey === rootPubkey;
 
     // Deletion (kind:5) — NIP-09: only the original author's deletion is valid.
     if (ev.kind === DELETION_KIND) {
-      if (isAuthor) isDeleted = true;
+      if (isAuthor) {
+        isDeleted = true;
+        latestEssentialAt = Math.max(latestEssentialAt, ev.created_at);
+      }
       continue;
     }
 
     // Status events (kinds 1630-1633)
     if ((STATUS_KINDS as readonly number[]).includes(ev.kind)) {
-      // Skip status events that have been deleted by their author.
-      if (deletedEssentialEventIds.has(ev.id)) continue;
-      // NIP-34 authorises the root author or a confirmed repository member
-      // for every status kind. A merged status records an authorised merge;
-      // it does not grant permission to create or push the merge itself.
-      if (!isAuthor && !isMember) continue;
+      if (
+        !isValidItemStatusEvent(
+          ev,
+          rootEvent,
+          memberSet,
+          roleHistory,
+          deletedEssentialEventIds,
+        )
+      )
+        continue;
+      validStatusEventIds.add(ev.id);
+      latestEssentialAt = Math.max(latestEssentialAt, ev.created_at);
 
       if (!latestStatus || ev.created_at > latestStatus.createdAt) {
         latestStatus = { kind: ev.kind, createdAt: ev.created_at };
@@ -1626,10 +1689,11 @@ export function resolveItemEssentials(
 
     // Label events (kind:1985)
     if (ev.kind === LABEL_KIND) {
+      const isMember = roleHistory
+        ? isHistoricalRepositoryMember(roleHistory, ev.pubkey, ev.created_at)
+        : memberSet.has(ev.pubkey);
       if (!isAuthor && !isMember) continue;
-      // Skip label events that have been deleted by their author.
-      if (deletedEssentialEventIds.has(ev.id)) continue;
-
+      latestEssentialAt = Math.max(latestEssentialAt, ev.created_at);
       const subjectLabel = ev.tags.find(
         ([t, , ns]) => t === "l" && ns === SUBJECT_LABEL_NAMESPACE,
       );
@@ -1745,6 +1809,7 @@ export function resolveItemEssentials(
     zapTotal: filteredZapTotal,
     authorisedUsers,
     deletedEssentialEventIds,
+    validStatusEventIds,
     subjectRenames: sortedRenames,
   };
 }
@@ -2053,15 +2118,27 @@ export function buildTimelineNodes(
     isItemEventAuthorisedAt(ev, rootEvent.pubkey, authorisedUsers, roleHistory);
 
   // ── Status nodes ──────────────────────────────────────────────────────────
-  // Show all status events regardless of auth; flag unauthorised ones so the
-  // UI can render "proposed status" vs "set status".
+  // Match the effective-status resolver's root check: a mention of this item
+  // does not make a status change on another item part of this timeline.
+  // Keep unauthorised proposals targeting this item, flagged for display.
   const statusNodes: (IssueTimelineNode | PRTimelineNode)[] = essentials
-    .filter((ev) => (STATUS_KINDS as readonly number[]).includes(ev.kind))
+    .filter(
+      (ev) =>
+        (STATUS_KINDS as readonly number[]).includes(ev.kind) &&
+        getNip10References(ev).root?.e?.id === rootId &&
+        !args.deletedEssentialEventIds?.has(ev.id),
+    )
     .map((ev) => ({
       type: "status" as const,
       event: ev,
       status: kindToStatus(ev.kind),
-      authorised: isStatusAuthorised(ev),
+      authorised: isValidItemStatusEvent(
+        ev,
+        rootEvent,
+        authorisedUsers,
+        roleHistory,
+        args.deletedEssentialEventIds,
+      ),
       ts: ev.created_at,
     }));
 
@@ -2481,6 +2558,7 @@ export function buildResolvedPRs(
   memberSet: Set<string>,
   prUpdateEvents: NostrEvent[] = [],
   roleHistory?: RepositoryRoleHistory,
+  essentialDeletionEvents: NostrEvent[] = [],
 ): ResolvedPRLite[] {
   return buildResolvedList(
     rootEvents,
@@ -2491,6 +2569,7 @@ export function buildResolvedPRs(
     {
       prUpdateEvents,
       roleHistory,
+      essentialDeletionEvents,
     },
   ).map((item) => ({
     ...item,

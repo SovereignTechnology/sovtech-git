@@ -3,7 +3,7 @@
  *
  * Two hooks:
  *   - useNotifications()           — full state for the notifications page
- *   - useUnreadNotificationCount() — just the badge count for the navbar
+ *   - useNotificationBadge() — badge count and discovery status for the navbar
  *
  * Both share the same singleton NotificationStoreEntry (one per pubkey) so
  * multiple consumers don't create duplicate relay subscriptions.
@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useActiveAccount } from "applesauce-react/hooks";
 import { map, type Observable } from "rxjs";
 import { use$ } from "./use$";
+import { deletionEvents$ } from "@/services/nostr";
 import { useEventStore } from "./useEventStore";
 import {
   acquireNotificationStore,
@@ -151,6 +152,7 @@ function useNotificationStoreEntry(): NotificationStoreEntry | undefined {
 export function useNotifications(): {
   items: NotificationItem[] | undefined;
   unreadCount: number;
+  discoveryLoading: boolean;
   actions: NotificationActions;
   history: NotificationHistoryState;
   sync: NotificationSyncState | undefined;
@@ -167,6 +169,9 @@ export function useNotifications(): {
     [entry?.notificationSync],
   );
 
+  const discoveryLoading =
+    use$(() => entry?.discoveryLoading$, [entry]) ?? false;
+
   // Activate the full history fetch on mount. activateFullFetch is idempotent —
   // it creates the loader and fires the first page only once per store entry.
   useEffect(() => {
@@ -178,11 +183,7 @@ export function useNotifications(): {
   // historyLoader is null until activateFullFetch resolves, so we read it
   // from the entry after the effect fires. We use use$ with the loader's
   // BehaviorSubjects once they exist.
-  const historyLoading =
-    use$(() => {
-      if (!entry?.historyLoader) return undefined;
-      return entry.historyLoader.historyLoading$;
-    }, [entry?.historyLoader]) ?? false;
+  const historyLoading = use$(() => entry?.historyLoading$, [entry]) ?? false;
 
   const historyHasMore =
     use$(() => {
@@ -196,9 +197,8 @@ export function useNotifications(): {
       return entry.historyLoader.historyReachedArchive$;
     }, [entry?.historyLoader]) ?? false;
 
-  // model cache key is pubkey only; readState$, repoCoords$, and
-  // nonGitEventIds$ are passed as separate arguments and are not part of the
-  // cache key.
+  // Page and badge share a model for this store entry. Its readState$ identity
+  // prevents a recreated entry from reusing a model bound to retired streams.
   const output = use$(() => {
     if (!pubkey || !readState$ || !repoCoords$ || !nonGitEventIds$)
       return undefined;
@@ -208,6 +208,7 @@ export function useNotifications(): {
       readState$,
       repoCoords$,
       nonGitEventIds$,
+      deletionEvents$,
     ) as unknown as Observable<NotificationModelOutput>;
   }, [pubkey, readState$, repoCoords$, nonGitEventIds$, store]);
 
@@ -249,6 +250,7 @@ export function useNotifications(): {
   return {
     items: output?.items,
     unreadCount: output?.unreadCount ?? 0,
+    discoveryLoading,
     actions,
     history,
     sync,
@@ -257,14 +259,17 @@ export function useNotifications(): {
 }
 
 // ---------------------------------------------------------------------------
-// useUnreadNotificationCount
+// useNotificationBadge
 // ---------------------------------------------------------------------------
 
 /**
- * Just the unread notification count for the navbar badge.
+ * Unread count and current discovery status for the navbar badge.
  * Lightweight — shares the same singleton store as useNotifications.
  */
-export function useUnreadNotificationCount(): number {
+export function useNotificationBadge(): {
+  unreadCount: number;
+  loading: boolean;
+} {
   const store = useEventStore();
   const entry = useNotificationStoreEntry();
   const pubkey = entry?.pubkey;
@@ -282,9 +287,11 @@ export function useUnreadNotificationCount(): number {
         readState$,
         repoCoords$,
         nonGitEventIds$,
+        deletionEvents$,
       ) as unknown as Observable<NotificationModelOutput>
     ).pipe(map((output) => output.unreadCount));
   }, [pubkey, readState$, repoCoords$, nonGitEventIds$, store]);
 
-  return count ?? 0;
+  const loading = use$(() => entry?.discoveryLoading$, [entry]) ?? false;
+  return { unreadCount: count ?? 0, loading };
 }

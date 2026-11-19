@@ -1,0 +1,39 @@
+{
+  "rounds": 2,
+  "variants": [
+    {
+      "name": "before",
+      "port": 4193,
+      "metadataPath": "perf-reports/direct-entry/before-meta.json"
+    },
+    {
+      "name": "after",
+      "port": 4192,
+      "metadataPath": "perf-reports/direct-entry/after-meta.json"
+    }
+  ],
+  "defaults": {
+    "cap": 10000,
+    "latencyMs": 20,
+    "commentLatencyMs": 20,
+    "phaseMs": 12000,
+    "observationMs": 20000,
+    "nip77": true
+  },
+  "scenarios": [
+    {
+      "name": "negotiation-warm-conversation",
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cacheReload": true
+    },
+    {
+      "name": "negotiation-navigation",
+      "journey": "cold",
+      "navigateAtMs": 1200
+    },
+    {
+      "name": "negotiation-return",
+      "journey": "return"
+    }
+  ]
+}

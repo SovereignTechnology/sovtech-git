@@ -231,7 +231,7 @@ function ThreadNotificationRow({
   const isOwnRepository = repoCoord
     ? repoOwnerPubkey(repoCoord) === activeAccount?.pubkey
     : false;
-  const summary = buildNotificationSummary(item);
+  const summary = buildNotificationSummary(item, resolved?.validStatusEventIds);
   const isNewRoot = ["new issue", "new PR", "new patch"].includes(
     summary.purpose ?? "",
   );

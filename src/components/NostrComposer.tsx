@@ -34,6 +34,11 @@ import { MentionAutocomplete } from "@/components/MentionAutocomplete";
 import { useUserDisplayName } from "@/hooks/useUserDisplayName";
 import { useBlossomUpload, type Nip94Tags } from "@/hooks/useBlossomUpload";
 import { cn } from "@/lib/utils";
+import { useEventStore } from "@/hooks/useEventStore";
+import {
+  ITEM_REFERENCE_KINDS,
+  resolveShortItemReferences,
+} from "@/lib/shortItemReferences";
 
 // ---------------------------------------------------------------------------
 // NIP-19 regex — matches bare identifiers not already preceded by "nostr:"
@@ -168,6 +173,8 @@ export const NostrComposer = forwardRef<
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const store = useEventStore();
+  const pendingSelection = useRef<{ start: number; end: number }>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [internalTab, setInternalTab] = useState<ComposerTab>("write");
   const activeTab = activeTabProp ?? internalTab;
@@ -211,14 +218,61 @@ export const NostrComposer = forwardRef<
   // Detect nsec in value
   const hasNsec = NSEC_RE.test(value);
 
+  const normalizeReferences = useCallback(
+    (content: string) => {
+      if (!/#[a-f0-9]{8}/i.test(content)) return content;
+      const result = resolveShortItemReferences(
+        content,
+        store.getByFilters({ kinds: ITEM_REFERENCE_KINDS }),
+      );
+      const textarea = textareaRef.current;
+      if (
+        result.value !== content &&
+        textarea &&
+        document.activeElement === textarea
+      ) {
+        pendingSelection.current = {
+          start: result.mapCursor(textarea.selectionStart),
+          end: result.mapCursor(textarea.selectionEnd),
+        };
+      }
+      return result.value;
+    },
+    [store],
+  );
+
+  useLayoutEffect(() => {
+    const selection = pendingSelection.current;
+    if (!selection) return;
+    textareaRef.current?.setSelectionRange(selection.start, selection.end);
+    pendingSelection.current = undefined;
+  }, [value]);
+
+  useEffect(() => {
+    if (disabled) return;
+    // Page-owned loaders already fetch repository issues and PRs. Recheck
+    // unresolved references when those events arrive, without another query.
+    const normalize = () => {
+      const next = normalizeReferences(value);
+      if (next !== value) onChange(next);
+    };
+    normalize();
+    const subscription = store.insert$.subscribe((event) => {
+      if (ITEM_REFERENCE_KINDS.includes(event.kind)) normalize();
+    });
+    return () => subscription.unsubscribe();
+  }, [value, onChange, normalizeReferences, store, disabled]);
+
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newValue = e.target.value.replace(NIP19_BARE_RE, "nostr:$&");
+      const newValue = normalizeReferences(
+        e.target.value.replace(NIP19_BARE_RE, "nostr:$&"),
+      );
       onChange(newValue);
       // Collapse back to write mode when content is cleared
       if (!newValue) _setActiveTab("write");
     },
-    [onChange, _setActiveTab],
+    [onChange, _setActiveTab, normalizeReferences],
   );
 
   // Insert mention from MentionAutocomplete
@@ -376,15 +430,9 @@ export const NostrComposer = forwardRef<
         {/* Preview area */}
         {activeTab === "preview" && (
           <div
-            className={cn(
-              "px-3 py-2 text-sm overflow-auto",
-              "[&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border hover:[&::-webkit-scrollbar-thumb]:bg-border/80",
-              className,
-            )}
+            className={cn("px-3 py-2 text-sm overflow-auto", className)}
             style={{
               minHeight: minHeight ?? `${rows * 1.5}rem`,
-              scrollbarWidth: "thin",
-              scrollbarColor: "hsl(var(--border)) transparent",
             }}
           >
             <CommentContent content={value} />
@@ -499,15 +547,11 @@ function WriteArea({
         autoFocus={autoFocus}
         className={cn(
           "resize-none text-sm border-0 shadow-none focus-visible:ring-0 bg-transparent overflow-y-auto",
-          // Style native scrollbar to match shadcn ScrollBar (bg-border thumb, thin track)
-          "[&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border hover:[&::-webkit-scrollbar-thumb]:bg-border/80",
           className,
         )}
         style={{
           ...(minHeight ? { minHeight } : undefined),
           maxHeight,
-          scrollbarWidth: "thin",
-          scrollbarColor: "hsl(var(--border)) transparent",
         }}
       />
       <MentionAutocomplete

@@ -2,10 +2,18 @@ import { Link } from "react-router-dom";
 import { GitBranch, HelpCircle } from "lucide-react";
 import { eventIdToNevent } from "@/lib/routeUtils";
 import { cn } from "@/lib/utils";
+import { StatusIcon } from "@/components/StatusIcon";
+import type { ResolvedPRLite } from "@/lib/nip34";
 import type {
   InferredPRParent,
   InferredPRParentRelation,
 } from "@/lib/inferredPRParents";
+
+/**
+ * Above this many entries a single desktop row truncates every title, so the
+ * map flows into balanced columns that read top-to-bottom, then left-to-right.
+ */
+const MAX_INLINE_STACK_ITEMS = 4;
 
 export function InferredPRStackMap({
   relation,
@@ -14,6 +22,7 @@ export function InferredPRStackMap({
   repoPath,
   relayHints,
   layer,
+  prs,
   ambiguousChildren = [],
   branchedChildren = [],
 }: {
@@ -23,6 +32,7 @@ export function InferredPRStackMap({
   repoPath: string;
   relayHints: string[];
   layer?: { position: number; size: number };
+  prs?: readonly Pick<ResolvedPRLite, "id" | "status">[];
   ambiguousChildren?: InferredPRParent[];
   branchedChildren?: InferredPRParent[];
 }) {
@@ -37,6 +47,8 @@ export function InferredPRStackMap({
       : branched
         ? [...items, ...branchedChildren]
         : items;
+  const columns = displayedItems.length > MAX_INLINE_STACK_ITEMS;
+  const linked = !ambiguous && !reverseAmbiguous && !branched;
 
   return (
     <div
@@ -71,26 +83,34 @@ export function InferredPRStackMap({
           </div>
           <ol
             className={cn(
-              "flex min-w-0 flex-col items-start text-sm lg:col-span-2",
-              ambiguous || reverseAmbiguous
-                ? "gap-1.5 xl:flex-row xl:gap-4"
-                : "xl:flex-row xl:items-center",
+              "min-w-0 text-sm lg:col-span-2",
+              columns
+                ? "sm:columns-2xs sm:gap-x-6"
+                : ambiguous || reverseAmbiguous
+                  ? "flex flex-col items-start gap-1.5 xl:flex-row xl:gap-4"
+                  : "flex flex-col items-start xl:flex-row xl:items-center",
             )}
           >
             {displayedItems.map((item, index) => {
               const isCurrent = item.rootId === currentRootId;
+              const status = prs?.find((pr) => pr.id === item.rootId)?.status;
               return (
                 <li
                   key={item.rootId}
                   className={cn(
-                    "flex min-w-0 flex-col items-start xl:flex-row xl:items-center xl:gap-2",
-                    !ambiguous && !reverseAmbiguous && "xl:flex-auto",
+                    "flex min-w-0 flex-col items-start",
+                    columns
+                      ? cn("break-inside-avoid", !linked && "pb-1.5")
+                      : cn(
+                          "xl:flex-row xl:items-center xl:gap-2",
+                          !ambiguous && !reverseAmbiguous && "xl:flex-auto",
+                        ),
                   )}
                 >
                   <div
                     aria-current={isCurrent ? "step" : undefined}
                     className={cn(
-                      "flex min-w-0 items-center gap-1.5 rounded-lg border border-transparent px-2 py-1",
+                      "flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-1",
                       isCurrent &&
                         !ambiguous &&
                         !reverseAmbiguous &&
@@ -113,37 +133,57 @@ export function InferredPRStackMap({
                           ? "↳"
                           : index + 1}
                     </span>
+                    {status && (
+                      <span
+                        title={
+                          status === "resolved"
+                            ? "Merged"
+                            : status.charAt(0).toUpperCase() + status.slice(1)
+                        }
+                      >
+                        <StatusIcon
+                          status={status}
+                          variant="pr"
+                          className="h-4 w-4"
+                        />
+                      </span>
+                    )}
                     {isCurrent ? (
-                      <span className="min-w-0 max-w-64 truncate font-medium">
+                      <span
+                        className={cn(
+                          "min-w-0 truncate font-medium",
+                          !columns && "max-w-64",
+                        )}
+                      >
                         {item.subject}
                       </span>
                     ) : (
                       <Link
-                        className="min-w-0 max-w-64 truncate font-medium text-foreground hover:underline"
+                        className={cn(
+                          "min-w-0 truncate font-medium text-foreground hover:underline",
+                          !columns && "max-w-64",
+                        )}
                         to={`${repoPath}/prs/${eventIdToNevent(item.rootId, relayHints)}`}
                       >
                         {item.subject}
                       </Link>
                     )}
                   </div>
-                  {!ambiguous &&
-                    !reverseAmbiguous &&
-                    !branched &&
-                    index < displayedItems.length - 1 && (
-                      <span
-                        aria-hidden="true"
-                        className="ml-4 h-1 w-px bg-primary/30 xl:hidden"
-                      />
-                    )}
-                  {!ambiguous &&
-                    !reverseAmbiguous &&
-                    !branched &&
-                    index < displayedItems.length - 1 && (
-                      <span
-                        aria-hidden="true"
-                        className="hidden h-px min-w-4 flex-1 bg-primary/30 xl:block"
-                      />
-                    )}
+                  {linked && index < displayedItems.length - 1 && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "ml-4 h-1 w-px bg-primary/30",
+                        !columns && "xl:hidden",
+                      )}
+                    />
+                  )}
+                  {linked && !columns && index < displayedItems.length - 1 && (
+                    <span
+                      aria-hidden="true"
+                      className="hidden h-px min-w-4 flex-1 bg-primary/30 xl:block"
+                    />
+                  )}
                 </li>
               );
             })}

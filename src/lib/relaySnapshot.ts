@@ -1,7 +1,7 @@
 import type { Filter } from "applesauce-core/helpers";
 import { onlyEvents, type RelayPool } from "applesauce-relay";
 import type { NostrEvent } from "nostr-tools";
-import { firstValueFrom, timeout, toArray } from "rxjs";
+import { firstValueFrom, tap, timeout, toArray } from "rxjs";
 
 import { resilientRequest } from "@/lib/resilientSubscription";
 
@@ -23,6 +23,7 @@ export async function requestRelaySnapshot(
 ): Promise<RelaySnapshot> {
   let sawEose = false;
   let failed = false;
+  const received: NostrEvent[] = [];
 
   try {
     const events = await firstValueFrom(
@@ -39,10 +40,17 @@ export async function requestRelaySnapshot(
         onRelayError: () => {
           failed = true;
         },
-      }).pipe(onlyEvents(), toArray(), timeout({ first: timeoutMs })),
+      }).pipe(
+        onlyEvents(),
+        tap((event) => received.push(event)),
+        toArray(),
+        timeout({ first: timeoutMs }),
+      ),
     );
     return { events, complete: sawEose && !failed };
   } catch {
-    return { events: [], complete: false };
+    // Preserve evidence received before timeout; an incomplete snapshot must
+    // not look empty to callers deciding whether public discovery is allowed.
+    return { events: received, complete: false };
   }
 }

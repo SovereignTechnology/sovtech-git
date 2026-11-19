@@ -1,3 +1,5 @@
+import { confirmLocalNetworkAccess, localEndpoint } from "@/lib/localNetwork";
+import { LocalNetworkSettings } from "@/components/LocalNetworkControls";
 import type React from "react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
@@ -29,7 +31,8 @@ import {
   defaultNostrConnectRelays,
   nostrConnectRelaysCustomised$,
   DEFAULT_NOSTR_CONNECT_RELAYS,
-  type RelayCurationMode,
+  DEFAULT_RELAY_CURATION_MODE,
+  type RelayCurationPreference,
 } from "@/services/settings";
 import {
   graspServiceAddressToRelayUrl,
@@ -82,24 +85,31 @@ import {
 } from "lucide-react";
 
 const CURATION_OPTIONS: {
-  value: RelayCurationMode;
+  value: RelayCurationPreference;
   icon: React.ReactNode;
   title: string;
   description: string;
 }[] = [
   {
+    value: "default",
+    icon: <RotateCcw className="h-5 w-5" />,
+    title: `Default (${DEFAULT_RELAY_CURATION_MODE === "repo" ? "Curated" : "Expanded relays"})`,
+    description:
+      "Follow the app’s default repository view, including future changes to that default.",
+  },
+  {
     value: "repo",
     icon: <Shield className="h-5 w-5" />,
     title: "Curated",
     description:
-      "Only events from relays declared in the repository announcement are shown. Maintainers control what appears — spam-resistant and predictable.",
+      "Show repository items and discussion confirmed on the repository’s declared relays, respecting their curation.",
   },
   {
     value: "outbox",
     icon: <Globe className="h-5 w-5" />,
-    title: "Uncensored",
+    title: "Expanded relays",
     description:
-      "Events are fetched from every maintainer's NIP-65 outbox and inbox relays in addition to the repo's declared relays. Nothing is filtered out by relay selection.",
+      "Include additional relays that may hold repository-related events. This can include spam or content deliberately excluded by repository curation; it does not search every relay.",
   },
 ];
 
@@ -109,14 +119,15 @@ function RelayCurationSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Event Fetching Strategy</CardTitle>
+        <CardTitle>Default Repository View</CardTitle>
         <CardDescription>
-          Controls which relays are queried when loading issues, patches, and
-          comments for a repository.
+          Sets the view for repositories without a saved override. Default
+          follows the app’s default view. Choices made on a repository page are
+          saved for that repository in this browser.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {CURATION_OPTIONS.map((opt) => {
             const selected = mode === opt.value;
             return (
@@ -124,6 +135,7 @@ function RelayCurationSection() {
                 key={opt.value}
                 type="button"
                 onClick={() => relayCurationMode.next(opt.value)}
+                aria-pressed={selected}
                 className={cn(
                   "relative flex flex-col gap-2 rounded-lg border p-4 text-left transition-all duration-150",
                   "hover:border-pink-500/50 hover:bg-pink-500/5",
@@ -473,6 +485,8 @@ function GraspRelaysSection() {
 
       if (!address || !isValidGraspServiceAddress(address)) return;
 
+      // Typing is not consent to trigger a local-network permission prompt.
+      if (localEndpoint(graspServiceAddressToRelayUrl(address))) return;
       debounceRef.current = setTimeout(() => {
         void runValidation(address);
       }, 1500);
@@ -504,6 +518,14 @@ function GraspRelaysSection() {
       setValidationState("invalid");
       return;
     }
+
+    if (
+      !(await confirmLocalNetworkAccess(
+        graspServiceAddressToRelayUrl(address),
+        "relay",
+      ))
+    )
+      return;
 
     // If debounce validation is still in flight, cancel it and run immediately
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -1463,6 +1485,7 @@ export default function Settings() {
       <OutboxRelaysSection />
       <InboxRelaysSection />
       <FallbackRelaysSection />
+      <LocalNetworkSettings />
     </div>
   );
 }

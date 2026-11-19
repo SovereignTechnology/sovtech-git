@@ -298,6 +298,7 @@ export function GraphCommitRow({
 
 export interface CompactCommitGraphRowData {
   key: string;
+  badge?: React.ReactNode;
   hash: string;
   shortHash: string;
   subject: string;
@@ -392,6 +393,7 @@ export function CompactCommitGraphList({
               laneCount={layout.laneCount}
               flip
               subject={row.subject}
+              badge={row.badge}
               href={row.href}
               shortHash={row.shortHash}
               superseded={row.superseded}

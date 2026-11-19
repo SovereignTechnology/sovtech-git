@@ -24,6 +24,8 @@ import { cacheRequest } from "@/services/cache";
 import { eventStore, pool } from "@/services/nostr";
 import { resilientRequest } from "@/lib/resilientSubscription";
 import {
+  buildRelayCoverageGroup,
+  RelayCoverageError,
   summarizeRelayCoveragePhases,
   waitForCoverageDecision,
   type PreflightCoverageAssessment,
@@ -411,13 +413,22 @@ export function useRepositoryReplaceablePreflight(
           summary: summarizeRelayCoveragePhases(
             current.coverage,
             current.repositoryRelays,
+            { includeTotal: true },
           ),
+          relayCoverage: [
+            buildRelayCoverageGroup(
+              `Repository relays (${current.repositoryRelays.length})`,
+              current.repositoryRelays,
+              current.coverage,
+            ),
+          ],
         }),
         changes: (current) =>
           merge(current.coverage.changes$, resolvedRevision$.pipe(skip(1))),
         error: (assessment) =>
-          new Error(
-            `Couldn't finish checking ${candidateId ? "whether the current repository announcement or state was deleted" : "the latest repository announcement and state"}. Relay checks: ${assessment.summary}. Retry to check again.`,
+          new RelayCoverageError(
+            `Couldn't finish checking ${candidateId ? "whether the current repository announcement or state was deleted" : "the latest repository announcement and state"}. Repository relay checks: ${assessment.summary}. Retry to check again.`,
+            assessment.relayCoverage ?? [],
           ),
       });
       return {

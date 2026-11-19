@@ -185,7 +185,7 @@ function resolveRelativePath(filePath: string, src: string): string {
   // Build a fake absolute URL so URL() handles ".." and normalises the path.
   // decodeURIComponent turns %20-encoded segments back to literal characters
   // so they match directory/file names in the git tree (e.g. "3rd Logo - Ziton").
-  const base = `https://x/${filePath}`;
+  const base = `https://x/${filePath.split("/").map(encodeURIComponent).join("/")}`;
   try {
     return decodeURIComponent(new URL(src, base).pathname.slice(1));
   } catch {
@@ -200,6 +200,31 @@ function isRelativeSrc(src: string): boolean {
     !src.startsWith("data:") &&
     !src.startsWith("//")
   );
+}
+
+const markdownLinkClassName =
+  "text-primary underline underline-offset-4 decoration-primary/50 hover:decoration-primary transition-colors";
+
+/**
+ * True for a markdown link that points at another file in the same repository:
+ * a relative path, and not an in-page anchor, a query-only link, a site-root
+ * link, or anything carrying a URL scheme (http:, mailto:, nostr:, …).
+ */
+function isRelativeFileHref(href: string): boolean {
+  return (
+    href.length > 0 &&
+    !href.startsWith("#") &&
+    !href.startsWith("?") &&
+    !href.startsWith("/") &&
+    !/^[a-z][a-z0-9+.-]*:/i.test(href)
+  );
+}
+
+/** Split a link target into its path and its "?query" / "#fragment" suffix. */
+function splitLinkTarget(href: string): { path: string; suffix: string } {
+  const index = href.search(/[?#]/);
+  if (index === -1) return { path: href, suffix: "" };
+  return { path: href.slice(0, index), suffix: href.slice(index) };
 }
 
 interface GitImageProps {
@@ -388,6 +413,67 @@ function GitImage({
 }
 
 // ---------------------------------------------------------------------------
+// Git-aware file link
+// ---------------------------------------------------------------------------
+
+type GitFileLinkProps = Omit<React.ComponentPropsWithoutRef<"a">, "href"> & {
+  href: string;
+  gitRef: string;
+  filePath: string;
+};
+
+/**
+ * Link to another file in the same repository at the selected branch, tag,
+ * or commit. Outside a repo page context there is no base path
+ * to resolve against, so the original href is preserved.
+ */
+function GitFileLink({
+  href,
+  gitRef,
+  filePath,
+  className,
+  children,
+  ...props
+}: GitFileLinkProps) {
+  const gitContext = useGitCommitLinkContext();
+
+  if (!gitContext) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(markdownLinkClassName, className)}
+        {...props}
+      >
+        <LinkedMarkdownImageContext.Provider value>
+          {children}
+        </LinkedMarkdownImageContext.Provider>
+      </a>
+    );
+  }
+
+  const { path, suffix } = splitLinkTarget(href);
+  const resolvedPath = resolveRelativePath(filePath, path);
+  // The resolver returns a git path; URL delimiters in filenames must stay data.
+  const encodedPath = resolvedPath.split("/").map(encodeURIComponent).join("/");
+
+  const encodedRef = gitRef.split("/").map(encodeURIComponent).join("/");
+
+  return (
+    <Link
+      to={`${gitContext.basePath}/tree/${encodedRef}/${encodedPath}${suffix}`}
+      className={cn(markdownLinkClassName, className)}
+      {...props}
+    >
+      <LinkedMarkdownImageContext.Provider value>
+        {children}
+      </LinkedMarkdownImageContext.Provider>
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inline Nostr profile mention for markdown — avatar + @name
 // ---------------------------------------------------------------------------
 
@@ -515,6 +601,7 @@ function buildComponents(
   cloneUrls: string[],
   commitHash: string | null,
   filePath: string,
+  gitRef: string | null,
 ): Components {
   const hasGitContext = cloneUrls.length > 0 && commitHash !== null;
 
@@ -560,15 +647,28 @@ function buildComponents(
           </span>
         );
       }
+      // Relative links point at files in this repository. Left untouched they
+      // would resolve against the browser URL and land on an unrelated route.
+      if (hasGitContext && href && isRelativeFileHref(href)) {
+        return (
+          <GitFileLink
+            href={href}
+            gitRef={gitRef || commitHash!}
+            filePath={filePath}
+            className={propsClassName}
+            {...props}
+          >
+            {children}
+          </GitFileLink>
+        );
+      }
+
       return (
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn(
-            "text-primary underline underline-offset-4 decoration-primary/50 hover:decoration-primary transition-colors",
-            propsClassName,
-          )}
+          className={cn(markdownLinkClassName, propsClassName)}
           {...props}
         >
           <LinkedMarkdownImageContext.Provider value>
@@ -806,6 +906,8 @@ export interface MarkdownContentProps {
    * Commit hash to use when fetching relative images from git.
    */
   commitHash?: string | null;
+  /** Selected branch, tag, or commit for relative file links; defaults to commitHash. */
+  gitRef?: string | null;
   /**
    * Path of the markdown file within the repository (e.g. "docs/guide.md").
    * Used to resolve relative image paths correctly.
@@ -825,6 +927,7 @@ function MarkdownContent({
   className,
   cloneUrls = EMPTY_CLONE_URLS,
   commitHash = null,
+  gitRef = null,
   filePath = "",
   allowHtml = false,
 }: MarkdownContentProps) {
@@ -832,8 +935,8 @@ function MarkdownContent({
   // this map on every render remounts embedded previews, briefly resetting
   // loaded avatars to their fallback while Radix reloads the image.
   const components = useMemo(
-    () => buildComponents(cloneUrls, commitHash, filePath),
-    [cloneUrls, commitHash, filePath],
+    () => buildComponents(cloneUrls, commitHash, filePath, gitRef),
+    [cloneUrls, commitHash, filePath, gitRef],
   );
   const rehypePlugins = allowHtml ? rehypePluginsWithHtml : rehypePluginsBase;
 

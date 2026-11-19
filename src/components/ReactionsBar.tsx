@@ -13,7 +13,7 @@ import { useRecoveryToast } from "@/hooks/useRecoveryToast";
  * UI mirrors gitworkshop's EventWrapper.svelte reaction section:
  *   - Collapsed view: grouped emoji pills with counts, plus a faint "add
  *     reaction" heart button
- *   - Expanded picker: preset emoji buttons + close button
+ *   - Expanded picker: preset emojis, searchable emoji picker, and close button
  *   - Pill hover: tooltip showing who reacted
  *   - Own reaction: highlighted pill; clicking it opens a delete confirmation
  */
@@ -29,6 +29,7 @@ import { useActiveAccount } from "applesauce-react/hooks";
 import { CreateReaction, DeleteEvent } from "@/actions/nip34";
 import { runner } from "@/services/actions";
 import { UserLink } from "@/components/UserAvatar";
+import { ReactionEmojiPicker } from "@/components/ReactionEmojiPicker";
 import {
   Tooltip,
   TooltipContent,
@@ -54,7 +55,13 @@ import { useOptionalRepoContext } from "@/pages/repo/RepoContext";
 // Preset emojis (matching gitworkshop)
 // ---------------------------------------------------------------------------
 
-const PRESET_EMOJIS = ["+", "🚀", "🤙", "🙏", "❤️", "🫂", "👀", "😂"];
+const PRESET_EMOJIS = ["+", "-", "🚀", "🤙", "🙏", "❤️", "🫂", "👀", "😂"];
+
+function reactionDisplay(emoji: string): string {
+  if (emoji === "+") return "👍";
+  if (emoji === "-") return "👎";
+  return emoji;
+}
 
 // ---------------------------------------------------------------------------
 // ReactionsBar
@@ -265,15 +272,30 @@ export function ReactionsBar({
                     type="button"
                     disabled={sending}
                     onClick={() => sendReaction(emoji)}
+                    aria-label={`React with ${reactionDisplay(emoji)}`}
                     className={cn(
                       "rounded border border-border/40 px-1.5 py-0.5 text-sm",
                       "hover:bg-muted/60 transition-colors disabled:opacity-40 text-foreground",
                     )}
                   >
-                    {emoji === "+" ? "👍" : emoji}
+                    {reactionDisplay(emoji)}
                   </button>
                 ),
               )}
+            {!isOwn && (
+              <ReactionEmojiPicker
+                disabled={sending}
+                onSelect={(emoji) => {
+                  // Keep thumbs-up/down compatible with the existing NIP-25 presets.
+                  const content =
+                    emoji === "👍" ? "+" : emoji === "👎" ? "-" : emoji;
+                  const existing =
+                    myReactionEvent(content) ?? myReactionEvent(emoji);
+                  if (existing) setDeleteTarget(existing);
+                  else void sendReaction(content);
+                }}
+              />
+            )}
             <button
               type="button"
               onClick={() => setPickerOpen(false)}
@@ -336,7 +358,7 @@ function ReactionPill({
   disabled: boolean;
   onClick: () => void;
 }) {
-  const display = emoji === "+" ? "👍" : emoji;
+  const display = reactionDisplay(emoji);
 
   return (
     <button
@@ -376,7 +398,7 @@ function ReactionGroup({
   onClickMine: () => void;
   onClickOther: () => void;
 }) {
-  const display = emoji === "+" ? "👍" : emoji;
+  const display = reactionDisplay(emoji);
 
   return (
     <div

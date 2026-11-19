@@ -111,12 +111,14 @@ Every resolution ultimately returns one of:
 
 ## Servers
 
-`DEFAULT_ELECTRUMX_SERVERS` in `transport.ts` currently lists four
-public endpoints. Only `electrum.nmc.ethicnology.com:50004` presents a
-publicly-trusted (Let's Encrypt) TLS certificate; the other three are
-best-effort fallbacks for non-browser callers that inject a WebSocket
-implementation which accepts self-signed pins. Additional endpoints
-should only be added after probing them from a real browser.
+`DEFAULT_ELECTRUMX_SERVERS` in `transport.ts` is the source of truth for
+the default endpoint list. Its doc comment records the date of the last
+probe and the browser TLS status of each entry. Endpoints with a
+publicly-trusted TLS certificate lead the list so a stock browser
+succeeds on the first hop; the rest are best-effort fallbacks for
+non-browser callers that inject a WebSocket implementation which
+accepts self-signed pins. Additional endpoints should only be added
+after probing them from a real browser.
 
 ## Bundle verification
 

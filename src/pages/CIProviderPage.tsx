@@ -9,7 +9,7 @@ import {
   Clock3,
   Cpu,
   ExternalLink,
-  GitBranch,
+  Shield,
   RadioTower,
 } from "lucide-react";
 import type { CIProviderAdvertisement } from "@/casts/CIProvider";
@@ -22,7 +22,10 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCIProviderAdvertisement } from "@/hooks/useCIProviderAdvertisement";
+import {
+  useCIProviderAdvertisement,
+  type CIProviderAdvertisementState,
+} from "@/hooks/useCIProviderAdvertisement";
 import { useCICoordinatorAdvertisement } from "@/hooks/useCICoordinatorProfile";
 import { useCIProviderJobs } from "@/hooks/useCIProviderJobs";
 import { useCITrustContext } from "@/hooks/useCITrustContext";
@@ -41,26 +44,30 @@ export default function CIProviderPage() {
   const pubkey = decodePubkeyIdentifier(providerIdentifier);
   useLoadProfile(pubkey);
   const profile = useProfile(pubkey);
-  const state = useCIProviderAdvertisement(pubkey);
+  const relayHints = searchParams.getAll("relay");
+  const state = useCIProviderAdvertisement(pubkey, relayHints);
   const coordinatorState = useCICoordinatorAdvertisement(pubkey);
   const coordinatorAdvertisement = coordinatorState.advertisement;
-  const relayHints = searchParams.getAll("relay");
   const providerJobs = useCIProviderJobs(pubkey, relayHints);
   const trust = useCITrustContext({
     extraIdentities: pubkey ? [pubkey] : [],
   });
-  const advertisement = state.advertisement;
+  const { advertisements, now } = state;
+  const hasProviderAdvertisement = advertisements.length > 0;
+  const currentOfferings = advertisements.filter(
+    (ad) => !ad.isLegacy && ad.event.created_at <= now && ad.expiration > now,
+  );
   const npub = pubkey ? nip19.npubEncode(pubkey) : undefined;
   const displayName =
     profile?.displayName ??
     profile?.name ??
     (npub ? `${npub.slice(0, 16)}…` : "CI identity");
-  const now = Math.floor(Date.now() / 1000);
-  const providerIsLive = advertisement?.isLive === true;
+  const providerIsLive = currentOfferings.length > 0;
   const coordinatorIsLive =
     coordinatorAdvertisement !== undefined &&
     coordinatorAdvertisement.expiration > now;
-  const hasAdvertisedRole = !!advertisement || !!coordinatorAdvertisement;
+  const hasAdvertisedRole =
+    hasProviderAdvertisement || !!coordinatorAdvertisement;
   const hasLiveRole = providerIsLive || coordinatorIsLive;
   const hasObservedProviderRole = providerJobs.jobs.length > 0;
   const rolesSettled =
@@ -105,8 +112,8 @@ export default function CIProviderPage() {
                   )}
                   aria-label={
                     hasLiveRole
-                      ? "At least one advertised CI role is live"
-                      : "Advertised CI roles are offline"
+                      ? "At least one CI advertisement is current"
+                      : "No current CI offering or coordinator advertisement"
                   }
                 />
               )}
@@ -116,7 +123,7 @@ export default function CIProviderPage() {
                 <h1 className="w-full min-w-0 truncate text-2xl font-bold tracking-tight sm:w-auto sm:text-3xl md:text-4xl">
                   {displayName}
                 </h1>
-                {advertisement && (
+                {hasProviderAdvertisement && (
                   <Badge variant="outline" className="gap-1.5 font-normal">
                     <span
                       className={cn(
@@ -124,10 +131,12 @@ export default function CIProviderPage() {
                         providerIsLive ? "bg-emerald-500" : "bg-amber-500",
                       )}
                     />
-                    {providerIsLive ? "Live provider" : "Offline provider"}
+                    {providerIsLive
+                      ? `${currentOfferings.length} current ${currentOfferings.length === 1 ? "offering" : "offerings"}`
+                      : "Provider advertisements"}
                   </Badge>
                 )}
-                {!advertisement && hasObservedProviderRole && (
+                {!hasProviderAdvertisement && hasObservedProviderRole && (
                   <Badge variant="outline" className="gap-1.5 font-normal">
                     <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
                     Observed provider
@@ -151,8 +160,8 @@ export default function CIProviderPage() {
                 />
               </div>
               <p className="mt-2 text-lg text-muted-foreground">
-                {advertisement
-                  ? "Signed provider capabilities and execution identity."
+                {hasProviderAdvertisement
+                  ? "Compute offerings advertised by this provider."
                   : hasObservedProviderRole
                     ? "Signed Job Results show that this key executed CI jobs; no current provider advertisement was found."
                     : coordinatorAdvertisement
@@ -194,9 +203,8 @@ export default function CIProviderPage() {
       <div className="container max-w-screen-xl px-4 py-8 md:px-8">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(19rem,0.9fr)]">
           <div className="min-w-0 space-y-6">
-            <ProviderAdvertisementCard
-              advertisement={advertisement}
-              loading={!state.settled}
+            <ProviderOfferings
+              state={state}
               hasObservedJobs={hasObservedProviderRole}
             />
             <ProviderJobsCard state={providerJobs} />
@@ -230,19 +238,21 @@ export default function CIProviderPage() {
   );
 }
 
-function ProviderAdvertisementCard({
-  advertisement,
-  loading,
+function ProviderOfferings({
+  state,
   hasObservedJobs,
 }: {
-  advertisement: CIProviderAdvertisement | undefined;
-  loading: boolean;
+  state: CIProviderAdvertisementState;
   hasObservedJobs: boolean;
 }) {
-  if (loading) {
+  const { advertisements, now } = state;
+  if (!state.settled && advertisements.length === 0) {
     return (
       <Card>
-        <CardContent className="space-y-4 p-6">
+        <CardContent
+          className="space-y-4 p-6"
+          aria-label="Loading provider offerings"
+        >
           <Skeleton className="h-6 w-52" />
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-8 w-3/4" />
@@ -250,54 +260,184 @@ function ProviderAdvertisementCard({
       </Card>
     );
   }
-
-  if (!advertisement) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="px-6 py-12 text-center">
-          <Cpu className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-          <h2 className="font-semibold">No provider advertisement found</h2>
-          <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">
-            {hasObservedJobs
-              ? "The signed Job Results below show that this key acted as a provider for those jobs. They do not imply a persistent provider role, and this key has no current kind:19845 capability advertisement."
-              : "A Job Result would show that its signer acted as a provider for that job. This key has no current kind:19845 capability advertisement."}
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <RadioTower className="h-5 w-5 text-violet-500" />
-            Provider advertisement
+    <section aria-labelledby="provider-offerings-title" className="space-y-4">
+      <div>
+        <h2
+          id="provider-offerings-title"
+          className="flex items-center gap-2 text-xl font-semibold"
+        >
+          <RadioTower className="h-5 w-5 text-violet-500" /> Provider offerings
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Availability is a signed snapshot, not a reservation. Offerings may
+          share capacity.
+        </p>
+      </div>
+      {advertisements.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="px-6 py-12 text-center">
+            <Cpu className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+            <h3 className="font-semibold">No provider offerings found</h3>
+            <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
+              {hasObservedJobs
+                ? "This provider has signed job results, but no current offering was found on the available relays."
+                : "No current offering was found on the available relays. This does not establish whether the provider is online."}
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        advertisements.map((advertisement) => (
+          <ProviderOfferingCard
+            key={`${advertisement.event.kind}:${advertisement.offeringId ?? "legacy"}`}
+            advertisement={advertisement}
+            now={now}
+          />
+        ))
+      )}
+      {state.partial && (
+        <p className="text-sm text-muted-foreground">
+          Some relay queries could not be completed; additional offerings may
+          exist elsewhere.
+        </p>
+      )}
+      {advertisements.length > 0 && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Capabilities and isolation are provider claims, not execution
+          attestation or repository authorization. Expired advertisements are
+          retained only when observed during this visit.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ProviderOfferingCard({
+  advertisement: ad,
+  now,
+}: {
+  advertisement: CIProviderAdvertisement;
+  now: number;
+}) {
+  const expired = ad.expiration <= now;
+  const future = ad.event.created_at > now;
+  const current = !expired && !future;
+  const capacity = ad.capacity;
+  const state = expired
+    ? "Expired"
+    : future
+      ? "Not yet current"
+      : ad.isLegacy
+        ? "Legacy"
+        : capacity?.available === 0
+          ? "Busy"
+          : "Available";
+  const isolation =
+    ad.isolation === "hardware-vm"
+      ? "Hardware VM"
+      : ad.isolation === "weak-container"
+        ? "Shared-kernel container"
+        : "Direct execution";
+  return (
+    <Card className={cn("overflow-hidden", !current && "border-dashed")}>
+      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0 pb-4">
+        <div className="min-w-0">
+          <CardTitle className="break-words text-lg">
+            {ad.offeringId ?? "Legacy provider advertisement"}
           </CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                "gap-1.5 font-normal",
+                current &&
+                  !ad.isLegacy &&
+                  capacity?.available !== 0 &&
+                  "border-emerald-600/40 text-emerald-700 dark:text-emerald-400",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  !current || ad.isLegacy
+                    ? "bg-muted-foreground"
+                    : capacity?.available === 0
+                      ? "bg-amber-500"
+                      : "bg-emerald-600",
+                )}
+              />
+              {state}
+            </Badge>
+            {ad.isolation && (
+              <Badge variant="secondary" className="gap-1.5 font-normal">
+                <Shield className="h-3.5 w-3.5" />
+                {isolation}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <EventCardActions event={ad.event} />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {ad.isLegacy && (
+          <p className="text-sm text-muted-foreground">
+            Older capability format. No per-offering capacity or isolation was
+            advertised.
+          </p>
+        )}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <CapabilityList
+            title={ad.isLegacy ? "Runner selectors" : "Systems"}
+            values={ad.runnerSelectors}
+            icon={<Cpu className="h-4 w-4" />}
+          />
+          {capacity && (
+            <div className="min-w-32">
+              <p className="text-sm font-medium">
+                {current ? "Available slots" : "Last reported slots"}
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">
+                {capacity.available}
+                <span className="text-base font-normal text-muted-foreground">
+                  {" "}
+                  / {capacity.total}
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+        {ad.environment && (
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Environment reference</p>
+            <a
+              href={ad.environment.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex max-w-full items-center gap-1 rounded font-mono text-xs text-muted-foreground underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={ad.environment.hash}
+            >
+              <span className="truncate">{ad.environment.hash}</span>
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+            </a>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Provider-signed reference; manifest contents have not been
+              verified.
+            </p>
+          </div>
+        )}
+        <div className="border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
             Published{" "}
-            {formatDistanceToNow(advertisement.event.created_at * 1000, {
+            {formatDistanceToNow(ad.event.created_at * 1000, {
               addSuffix: true,
             })}
-            . Expires{" "}
-            {format(advertisement.expiration * 1000, "MMM d, yyyy 'at' h:mm a")}
             .
           </p>
+          <p>
+            {expired ? "Expired" : "Expires"}{" "}
+            {format(ad.expiration * 1000, "MMM d, yyyy 'at' h:mm:ss a")}.
+          </p>
         </div>
-        <EventCardActions event={advertisement.event} />
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <CapabilityList
-          title="Runner families"
-          values={advertisement.runnerFamilies}
-          icon={<Cpu className="h-4 w-4" />}
-        />
-        <CapabilityList
-          title="Runner selectors"
-          values={advertisement.runnerSelectors}
-          icon={<GitBranch className="h-4 w-4" />}
-        />
       </CardContent>
     </Card>
   );
@@ -462,7 +602,11 @@ function CapabilityList({
       </h3>
       <div className="mt-2 flex flex-wrap gap-2">
         {values.map((value) => (
-          <Badge key={value} variant="secondary" className="font-mono">
+          <Badge
+            key={value}
+            variant="secondary"
+            className="max-w-full break-all font-mono"
+          >
             {value}
           </Badge>
         ))}

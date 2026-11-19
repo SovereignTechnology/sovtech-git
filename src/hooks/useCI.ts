@@ -46,6 +46,7 @@ import { CIResult, isValidCIResult } from "@/casts/CIResult";
 import { ciResultsByCommitLoader, pool } from "@/services/nostr";
 import { ciCoordinatorDiscovery$, repoCIActivity$ } from "@/services/ciQueries";
 import { resilientRequest } from "@/lib/resilientSubscription";
+import { coalesceBursts } from "@/lib/coalesceBursts";
 import { mapEventsToStore } from "applesauce-core";
 import { onlyEvents } from "applesauce-relay";
 import { relayGroupUrls$ } from "@/models/RepositoryRelayGroup";
@@ -72,7 +73,11 @@ import {
 /** Re-evaluate expirations of kind:9841 running markers this often. */
 const EXPIRY_RECHECK_INTERVAL_MS = 30_000;
 
-/** Cast raw store events into CI casts and group them into workflow runs. */
+/**
+ * Group complete store snapshots, rather than rebuilding for each arriving event.
+ * Callers coalesce bursts before this work: the first snapshot is immediate and
+ * subsequent snapshots can wait up to 100ms for the latest accumulated state.
+ */
 function castAndGroupCIEvents(
   resultEvents: NostrEvent[],
   runEvents: NostrEvent[],
@@ -158,6 +163,7 @@ export function useCIForPR(
       jobs$,
       timer(0, EXPIRY_RECHECK_INTERVAL_MS),
     ]).pipe(
+      coalesceBursts(),
       map(([resultEvents, runEvents, jobEvents]) =>
         castAndGroupCIEvents(
           resultEvents as NostrEvent[],
@@ -249,6 +255,7 @@ export function useCIForCommits(
       jobs$,
       timer(0, EXPIRY_RECHECK_INTERVAL_MS),
     ]).pipe(
+      coalesceBursts(),
       map(([resultEvents, runEvents, jobEvents]) =>
         castAndGroupCIEvents(
           resultEvents as NostrEvent[],
@@ -345,6 +352,7 @@ export function useRepoCI(
       jobs$,
       timer(0, EXPIRY_RECHECK_INTERVAL_MS),
     ]).pipe(
+      coalesceBursts(),
       map(([resultEvents, runEvents, jobEvents]) =>
         castAndGroupCIEvents(
           resultEvents as NostrEvent[],

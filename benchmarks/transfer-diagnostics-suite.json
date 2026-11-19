@@ -1,0 +1,84 @@
+{
+  "rounds": 6,
+  "variants": [
+    {
+      "name": "before",
+      "port": 4193,
+      "metadataPath": "perf-reports/direct-entry/diagnostic-before-meta.json"
+    },
+    {
+      "name": "after",
+      "port": 4192,
+      "metadataPath": "perf-reports/direct-entry/diagnostic-after-meta.json"
+    }
+  ],
+  "defaults": {
+    "cap": 10000,
+    "latencyMs": 20,
+    "commentLatencyMs": 20,
+    "phaseMs": 12000,
+    "observationMs": 40000,
+    "nip77": true,
+    "stageDiagnostics": true,
+    "storeDiagnostics": true,
+    "diagnosticCheckpointsMs": [10000, 20000, 40000]
+  },
+  "scenarios": [
+    {
+      "name": "diagnostic-capped",
+      "rounds": 2,
+      "cacheReload": true,
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cap": 100
+    },
+    {
+      "name": "diagnostic-stall",
+      "rounds": 2,
+      "transferFault": {
+        "relay": "wss://gitnostr.com/",
+        "mode": "stall"
+      },
+      "cacheReload": true,
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cap": 100
+    },
+    {
+      "name": "diagnostic-slow",
+      "rounds": 2,
+      "transferFault": {
+        "relay": "wss://gitnostr.com/",
+        "mode": "slow"
+      },
+      "cacheReload": true,
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cap": 100
+    },
+    {
+      "name": "diagnostic-trickle",
+      "rounds": 2,
+      "transferFault": {
+        "relay": "wss://gitnostr.com/",
+        "mode": "trickle"
+      },
+      "cacheReload": true,
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cap": 100
+    },
+    {
+      "name": "diagnostic-warm-conversation",
+      "itemId": "600a82d93d54f608defca4b5f3363a017e36845793e022380be1788b2a58b4df",
+      "cacheReload": true,
+      "rounds": 2
+    },
+    {
+      "name": "diagnostic-navigation",
+      "journey": "cold",
+      "navigateAtMs": 1200
+    },
+    {
+      "name": "diagnostic-return",
+      "journey": "return",
+      "rounds": 2
+    }
+  ]
+}

@@ -16,9 +16,9 @@
  *   C. EOSE settle signal — emits "EOSE" after a debounce window once all
  *      relays have signalled EOSE. Uses makeSettleSignal from settleSignal.ts.
  *
- *   D. Backward pagination (opt-in) — after EOSE, if countBeforeEose >= limit,
- *      kicks off loadBlocksFromRelay backward pagination per relay. Supports
- *      auto mode and manual mode (via manualPaginate$).
+ *   D. History (opt-in) — automatic mode proves a finite snapshot with v7
+ *      windows after EOSE, independently of relay result caps. Manual mode
+ *      retains its incremental cursor (via manualPaginate$).
  *
  * resilientRequest — same as resilientSubscription but with autoClose: true.
  * Each per-relay stream completes once the relay has finished its work (EOSE,
@@ -34,20 +34,39 @@
  * and callers use onlyEvents() to strip EOSE if not needed.
  */
 
-import type { RelayPool } from "applesauce-relay";
+import {
+  assertLocalNetworkAccess,
+  localEndpoint,
+  localNetworkReady,
+  subscribeLocalNetwork,
+  LocalNetworkAccessError,
+} from "./localNetwork";
+import type { RelayPool, Relay } from "applesauce-relay";
 import {
   onlyEvents,
   AuthRequiredError,
   RelayClosedError,
 } from "applesauce-relay";
 import type { Filter } from "applesauce-core/helpers";
-import { loadBackwardBlocks } from "applesauce-loaders/loaders";
+import { compileFilter, isFilterEqual } from "applesauce-core/helpers/filter";
+import { batchHistory, type HistoryBatchResult } from "./batchHistory";
+import { loadRelayHistory, historyLiveFilter } from "./relayHistory";
+import type { TimelineStatus } from "applesauce-loaders/loaders";
 import type { TimelessFilter } from "applesauce-loaders";
 import type { NostrEvent } from "nostr-tools";
 import {
-  BehaviorSubject,
   EMPTY,
+  NEVER,
   Observable,
+  TimeoutError,
+  concatWith,
+  connect,
+  debounceTime,
+  endWith,
+  ignoreElements,
+  mergeMap,
+  startWith,
+  throwError,
   Subject,
   Subscription,
   bufferTime,
@@ -55,19 +74,23 @@ import {
   filter,
   finalize,
   identity,
+  map,
   merge,
   repeat,
   retry,
   share,
+  skip,
   switchMap,
   take,
   takeUntil,
   tap,
   timer,
   catchError,
+  timeout,
 } from "rxjs";
 import { makeSettleSignal, DEFAULT_SETTLE_TIME } from "./settleSignal";
 import type { SettleSignal, SettleSignalOptions } from "./settleSignal";
+import { relayEventPresence } from "./relayEventPresence";
 import { foregroundResume$ } from "./foregroundResume";
 
 /**
@@ -100,6 +123,9 @@ export class TransportError extends Error {
 }
 
 export interface ResilientSubscriptionOptions {
+  /** Historical range evidence, distinct from UI settlement or write preflight. */
+  onHistoryStatus?: (status: TimelineStatus) => void;
+  onHistoryBatch?: (relay: string, result: HistoryBatchResult) => void;
   /** Enable smart reconnect with since: lastReceivedAt. Default: true */
   reconnect?: boolean;
   /** Enable gap-fill on foreground resume. Default: true */
@@ -114,7 +140,7 @@ export interface ResilientSubscriptionOptions {
   paginate?: boolean;
   /** Manual pagination trigger. When provided, auto-pagination is disabled. */
   manualPaginate$?: Observable<void>;
-  /** Pagination block size / threshold. Default: 500 */
+  /** Pagination request batch size. Default: 500 */
   limit?: number;
   /**
    * Auto-close each per-relay stream once it has finished its work (EOSE,
@@ -327,6 +353,42 @@ export type ResilientSubscriptionResponse = NostrEvent | "EOSE";
  * current work.
  */
 function processRelay(
+  ...args: Parameters<typeof processApprovedRelay>
+): Observable<NostrEvent> {
+  const relay = args[1];
+  if (!localEndpoint(relay)) return processApprovedRelay(...args);
+  // Keep pending reads alive without opening a socket or consuming retries.
+  // Unsubscribing on navigation removes the approval listener as well.
+  return new Observable<void>((subscriber) => {
+    let checking = false;
+    const check = () => {
+      if (subscriber.closed || checking) return;
+      checking = true;
+      try {
+        assertLocalNetworkAccess(relay);
+        subscriber.next();
+        subscriber.complete();
+      } catch (error) {
+        if (!(error instanceof LocalNetworkAccessError))
+          subscriber.error(error);
+        else if (args[3].autoClose) {
+          // One-shot hint lookups must finish so their caller can advance to
+          // public fallback relays. Only persistent subscriptions wait here.
+          args[4].error(relay);
+          args[3].onRelayError?.(relay);
+          subscriber.complete();
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const unsubscribe = subscribeLocalNetwork(check);
+    void localNetworkReady().then(check);
+    return unsubscribe;
+  }).pipe(switchMap(() => processApprovedRelay(...args)));
+}
+
+function processApprovedRelay(
   pool: RelayPool,
   relay: string,
   filters: Filter[] | (() => Filter[]),
@@ -343,6 +405,8 @@ function processRelay(
       | "autoClose"
     >
   > & {
+    onHistoryStatus?: (status: TimelineStatus) => void;
+    onHistoryBatch?: (relay: string, result: HistoryBatchResult) => void;
     manualPaginate$: Observable<void> | undefined;
     onRelaySettle: ((relay: string) => void) | undefined;
     onRelayEose: ((relay: string) => void) | undefined;
@@ -413,8 +477,14 @@ function processRelay(
   });
 
   return new Observable<NostrEvent>((subscriber) => {
-    let countBeforeEose = 0;
     let oldestSeen: number | undefined;
+    // Only a completed initial request can seed manual history. Events matching
+    // multiple filters cannot be attributed to one filter's limited response.
+    const initialMatchers = opts.manualPaginate$
+      ? filtersSnapshot.map(compileFilter)
+      : [];
+    let initialOldest: Array<number | undefined> = [];
+    let initialPageComplete = false;
     let lastReceivedAt: number | undefined;
     let eoseSeen = false;
     // Persists across retry/repeat cycles. It becomes true only when the live
@@ -429,8 +499,9 @@ function processRelay(
     // Counts buildLiveSub executions so onCycleRestart fires only on
     // re-executions (reconnects), never on the first cycle.
     let cycleCount = 0;
+    let automaticHistoryStarted = false;
+    let automaticHistoryDone = false;
     let paginateSub: { unsubscribe(): void } | undefined;
-    let manualSub: { unsubscribe(): void } | undefined;
     let gapFillSub: { unsubscribe(): void } | undefined;
     let latestLifecycleGeneration: number | undefined;
     let livePipelineCompleted = false;
@@ -481,88 +552,112 @@ function processRelay(
       return Math.min(lastReceivedAt, now) - opts.gapFillBuffer;
     };
 
-    // Shared pagination window — driven by auto (BehaviorSubject) or manual.
-    let window$: Subject<{ since?: number; until?: number }> | undefined;
-
     const startPagination = () => {
-      // loadBackwardBlocks is used here as a backward-only pagination cursor
-      // state machine: it tracks the backward cursor, prevents parallel page
-      // loads, and detects exhaustion (zero events returned). Using
-      // loadBackwardBlocks (rather than loadBlocksFromRelay / loadBlocksForTimelineWindow)
-      // avoids the bug where loadForwardBlocks also fires on the first window
-      // emission (when its cursor is undefined), sending a spurious REQ without
-      // an `until` filter that re-fetches the most-recent events.
-      //
-      // signal.extend() is called on every page request to keep the settle
-      // signal alive while pagination is in flight.
-      const backwardRequest = (until: number | undefined) => {
-        signal.extend(relay);
-        // Build filters: start from paginationFilters (already stripped of
-        // since/until/limit), restore scalar extras (e.g. search) that
-        // mergeFilters would drop, then apply limit and until.
-        const restoredFilters: Filter[] = paginationFilters.map((f, i) => ({
-          ...(scalarExtras[i] ?? {}),
-          ...f,
-          limit,
-          ...(until !== undefined ? { until } : {}),
-        }));
-        return resilientSingleRelayRequest(pool, relay, restoredFilters, {
-          retryCount: opts.retryCount,
-          retryDelay: opts.retryDelay,
-        });
-      };
-
-      if (opts.manualPaginate$) {
-        const manualWindow$ = new Subject<{ since?: number; until?: number }>();
-        window$ = manualWindow$;
-        manualSub = opts.manualPaginate$.subscribe(() => {
-          manualWindow$.next({ since: -Infinity, until: oldestSeen });
-        });
-      } else {
-        window$ = new BehaviorSubject<{ since?: number; until?: number }>({
-          since: -Infinity,
-          until: oldestSeen,
-        });
-      }
-
-      paginateSub = window$
-        .pipe(
-          loadBackwardBlocks(backwardRequest, { limit }),
-          // Pagination errors are non-fatal — finalize still runs and settles
-          // the relay. The merge of all per-relay streams continues.
-          catchError(() => EMPTY),
-          finalize(() => {
-            signal.settle(relay);
-            opts.onRelaySettle?.(relay);
-            // autoClose: pagination is the last work for this relay — complete
-            // the per-relay stream so the merged stream can finish naturally.
-            if (opts.autoClose) subscriber.complete();
-          }),
-        )
-        .subscribe({
-          next: (event) => {
-            if (oldestSeen === undefined || event.created_at < oldestSeen) {
-              oldestSeen = event.created_at;
-            }
-            subscriber.next(event);
+      if (!opts.manualPaginate$) {
+        if (automaticHistoryStarted) return;
+        automaticHistoryStarted = true;
+        paginateSub = loadRelayHistory(
+          pool,
+          (_relays, pageFilters) => {
+            signal.extend(relay);
+            return resilientHistoryRequest(pool, relay, pageFilters);
+          },
+          relay,
+          paginationFilters.map((f, i) => ({
+            ...(scalarExtras[i] ?? {}),
+            ...f,
+          })),
+          {
+            limit,
+            until: oldestSeen,
+            isTerminalError: isHistoryTerminalError,
+            onStatus: (status) => {
+              opts.onHistoryStatus?.(status);
+              if (status.state === "incomplete") {
+                if (status.error instanceof HistoryAdmissionError) {
+                  // Local scheduling is not evidence that the relay failed.
+                  signal.settle(relay);
+                  opts.onRelaySettle?.(relay);
+                } else {
+                  signal.error(relay);
+                  opts.onRelayError?.(relay);
+                }
+              }
+            },
+            onComplete: (covered) => {
+              if (covered) {
+                signal.settle(relay);
+                opts.onRelaySettle?.(relay);
+              }
+            },
+          },
+        ).subscribe({
+          next: (event) => subscriber.next(event),
+          complete: () => {
+            automaticHistoryDone = true;
+            if (opts.autoClose || livePipelineCompleted) subscriber.complete();
           },
         });
+        return;
+      }
+      // Keep one manual owner across reconnect EOSEs. Seed each cursor only
+      // from attributable initial results, retaining the inclusive boundary.
+      // Before EOSE or without evidence, start conservatively at the horizon.
+      if (paginateSub) return;
+      paginateSub = opts.manualPaginate$
+        .pipe(
+          map(() => ({ limit })),
+          batchHistory(
+            (_relays, filters) => {
+              signal.extend(relay);
+              return resilientHistoryRequest(pool, relay, filters);
+            },
+            relay,
+            paginationFilters.map((f, i) => ({
+              ...(scalarExtras[i] ?? {}),
+              ...f,
+            })),
+            {
+              getInitialUntil: (filter) =>
+                initialPageComplete
+                  ? initialOldest[
+                      paginationFilters.findIndex((f) =>
+                        isFilterEqual(f, filter),
+                      )
+                    ]
+                  : undefined,
+              onStatus: opts.onHistoryStatus,
+              retryCount: opts.retryCount,
+              isTerminalError: isHistoryTerminalError,
+              isAdmissionError: (error) =>
+                error instanceof HistoryAdmissionError,
+              onBatchComplete: (result) => {
+                opts.onHistoryBatch?.(relay, result);
+                if (result.incomplete) {
+                  signal.error(relay);
+                  opts.onRelayError?.(relay);
+                } else {
+                  signal.settle(relay);
+                  opts.onRelaySettle?.(relay);
+                }
+                if (opts.autoClose && result.exhausted) subscriber.complete();
+              },
+            },
+          ),
+        )
+        .subscribe({ next: (event) => subscriber.next(event) });
     };
+
+    // Manual triggers must remain usable even when the live relay never EOSEs.
+    if (opts.manualPaginate$) startPagination();
 
     // Build the live subscription factory. defer() re-executes on each retry
     // (error) and repeat (graceful close) so lastReceivedAt is read fresh on
     // every reconnect attempt. A bounded cursor is injected only after a full
     // declared-filter EOSE established the relay owner's baseline.
     //
-    // Note on applesauce's `reconnect` / `resubscribe` options: in
-    // applesauce-relay@6.0.0 the `reconnect` option on subscription() /
-    // request() is plumbed through but never read by req() — only publish()
-    // consumes it (see relay.js:758). The `resubscribe` option (which maps
-    // to a repeat() operator) IS read but defaults to undefined → identity,
-    // i.e. no internal repeat. So we don't need to pass either; applesauce
-    // does no internal REQ-level retry/repeat for subscriptions. The only
-    // applesauce retry layer is the auth-only retry inside req() (line 546)
-    // which only handles AuthRequiredError.
+    // V7 high-level methods retry internally by default. This wrapper owns
+    // reconnect and repeat, so disable those policies on each live request.
     //
     // Socket-level reconnect cadence is governed entirely by
     // relay.reconnectTimer (replaced with a 3-phase curve in nostr.ts).
@@ -570,12 +665,12 @@ function processRelay(
     // the reconnect timer can drive new connection attempts) and waits for
     // open$ plus the configured REQ delay before re-executing buildLiveSub.
     const buildLiveSub = () => {
-      // Reset per-subscription-cycle state so that countBeforeEose and
+      // Reset per-subscription-cycle state so that
       // oldestSeen are tracked correctly after a retry or graceful-close repeat.
       // lastReceivedAt and hasBaselineEose intentionally persist across cycles
       // so a proven baseline can use bounded recovery after a disruption.
       eoseSeen = false;
-      countBeforeEose = 0;
+      if (!initialPageComplete) initialOldest = [];
       if (cycleCount++ > 0) opts.onCycleRestart?.(relay);
       let lifecycleGeneration: number | undefined;
 
@@ -588,7 +683,7 @@ function processRelay(
       }));
 
       // Use the single-relay API so the stream still emits NostrEvent | "EOSE"
-      // — the group-level pool.subscription() strips EOSE in v6, but we need it
+      // — the group-level pool.subscription() strips EOSE, but we need it
       // here to drive the settle signal.
       //
       // CRITICAL: The Relay class swallows WebSocket errors in its watchTower
@@ -616,7 +711,10 @@ function processRelay(
       // that forwards subscription notifications and listens to error$ for
       // the lifetime of the inner subscription only.
       const relayObj = pool.relay(relay);
-      const inner$ = relayObj.subscription(filtersWithSince);
+      const inner$ = relayObj.subscription(filtersWithSince, {
+        reconnect: false,
+        resubscribe: false,
+      });
       const sub$ = new Observable<NostrEvent | "EOSE">((s) => {
         lifecycleGeneration = beginLifecycle("initial");
         liveCycleOpen = true;
@@ -671,6 +769,7 @@ function processRelay(
       .pipe(
         tap((msg) => {
           if (msg !== "EOSE") {
+            relayEventPresence.observe(msg.id, relay);
             const t = (msg as NostrEvent).created_at;
             if (lastReceivedAt === undefined || t > lastReceivedAt)
               lastReceivedAt = t;
@@ -862,6 +961,7 @@ function processRelay(
       .subscribe({
         next: (msg) => {
           if (msg === "EOSE") {
+            initialPageComplete = true;
             eoseSeen = true;
             reconnectAttempts = 0;
             opts.onRelayEose?.(relay);
@@ -875,15 +975,9 @@ function processRelay(
                 opts.onRelaySettle?.(relay);
                 startPagination();
               } else {
-                // Auto mode: paginate if relay was truncated
-                if (countBeforeEose < limit) {
-                  signal.settle(relay);
-                  opts.onRelaySettle?.(relay);
-                  // autoClose: no pagination needed — complete the per-relay stream
-                  if (opts.autoClose) subscriber.complete();
-                } else {
-                  startPagination();
-                }
+                // A relay may cap below our limit; a short initial response
+                // does not prove history exhausted. V7 establishes coverage.
+                startPagination();
               }
             } else {
               signal.settle(relay);
@@ -894,8 +988,19 @@ function processRelay(
             }
           } else {
             const event = msg as NostrEvent;
+            if (opts.manualPaginate$ && !initialPageComplete) {
+              const matching = initialMatchers.flatMap((matches, i) =>
+                matches(event) ? [i] : [],
+              );
+              if (matching.length === 1) {
+                const index = matching[0];
+                initialOldest[index] = Math.min(
+                  initialOldest[index] ?? Infinity,
+                  event.created_at,
+                );
+              }
+            }
             if (!eoseSeen) {
-              countBeforeEose++;
               if (oldestSeen === undefined || event.created_at < oldestSeen) {
                 oldestSeen = event.created_at;
               }
@@ -913,7 +1018,8 @@ function processRelay(
             signal.settle(relay);
             opts.onRelaySettle?.(relay);
           }
-          subscriber.complete();
+          if (!automaticHistoryStarted || automaticHistoryDone)
+            subscriber.complete();
         },
       });
 
@@ -1013,7 +1119,6 @@ function processRelay(
     return () => {
       liveSub.unsubscribe();
       paginateSub?.unsubscribe();
-      manualSub?.unsubscribe();
       gapFillSub?.unsubscribe();
       gapFillResumeSub.unsubscribe();
       liveRestart$.complete();
@@ -1095,6 +1200,8 @@ function resilientSubscriptionStatic(
   const retryDelay = opts.retryDelay ?? defaultRetryDelay;
   const manualPaginate$ = opts.manualPaginate$;
   const onRelaySettle = opts.onRelaySettle;
+  const onHistoryStatus = opts.onHistoryStatus;
+  const onHistoryBatch = opts.onHistoryBatch;
   const onRelayEose = opts.onRelayEose;
   const onRelayError = opts.onRelayError;
   const onRelayLifecycle = opts.onRelayLifecycle;
@@ -1114,6 +1221,8 @@ function resilientSubscriptionStatic(
     manualPaginate$,
     onRelaySettle,
     onRelayEose,
+    onHistoryStatus,
+    onHistoryBatch,
     onRelayError,
     onRelayLifecycle,
     nextLifecycleGeneration,
@@ -1181,6 +1290,8 @@ function resilientSubscriptionReactive(
   const retryDelay = opts.retryDelay ?? defaultRetryDelay;
   const manualPaginate$ = opts.manualPaginate$;
   const onRelaySettle = opts.onRelaySettle;
+  const onHistoryStatus = opts.onHistoryStatus;
+  const onHistoryBatch = opts.onHistoryBatch;
   const onRelayEose = opts.onRelayEose;
   const onRelayError = opts.onRelayError;
   const onRelayLifecycle = opts.onRelayLifecycle;
@@ -1198,6 +1309,8 @@ function resilientSubscriptionReactive(
     manualPaginate$,
     onRelaySettle,
     onRelayEose,
+    onHistoryStatus,
+    onHistoryBatch,
     onRelayError,
     onRelayLifecycle,
     nextLifecycleGeneration,
@@ -1353,6 +1466,16 @@ export interface ResilientAdditiveSubscriptionOptions extends Omit<
   ResilientSubscriptionOptions,
   "autoClose" | "paginate" | "manualPaginate$" | "onRelayLifecycle"
 > {
+  /** Backfill each immutable, delta-safe chunk after a live EOSE. Default: false.
+   * Live settlement still describes only the initial response, not history.
+   */
+  history?: boolean;
+  /** Finite snapshot outcome; cancellation emits no completion. Not preflight coverage. */
+  onHistoryComplete?: (
+    relay: string,
+    chunkKey: string,
+    covered: boolean,
+  ) => void;
   /**
    * Buffer window in ms coalescing chunk additions into one delta REQ per
    * relay. Default: 25
@@ -1485,8 +1608,12 @@ const noopSettleSignal: SettleSignal = {
  * Settlement is monotonic and reuses the standard settle semantics: the
  * "EOSE" sentinel fires once when the initial plan reaches EOSE on every
  * relay (or errors/caps out), and later chunk additions never unsettle it.
- * Delta streams never drive the settle signal. There is no per-chunk
- * completion signal and no chunk retraction.
+ * Delta streams never drive the settle signal. There is no chunk retraction.
+ * Optional history separately backfills each immutable chunk once per relay
+ * membership, including late chunks. Live EOSE is not historical completion;
+ * onHistoryComplete reports the finite snapshot, including incomplete boundaries.
+ * History survives live reconnect consolidation, but ends on relay removal or
+ * owner teardown. It never grants replaceable-write preflight coverage.
  *
  * Duplicate events across overlapping REQs are expected and harmless —
  * EventStore deduplication handles them downstream.
@@ -1556,6 +1683,9 @@ export function resilientAdditiveSubscription(
       main: Subscription | undefined;
       /** Container for this relay's delta streams; replaced when closed. */
       deltas: Subscription;
+      history: Subscription;
+      historyKeys: Set<string>;
+      liveFilters: Map<Filter, Filter>;
     }
     const relayStates = new Map<string, RelayStreams>();
     const root = new Subscription();
@@ -1584,6 +1714,7 @@ export function resilientAdditiveSubscription(
       for (const state of relayStates.values()) {
         state.main?.unsubscribe();
         state.deltas.unsubscribe();
+        state.history.unsubscribe();
       }
       relayStates.clear();
     });
@@ -1605,6 +1736,39 @@ export function resilientAdditiveSubscription(
         },
       });
 
+    const startHistory = (relay: string, state: RelayStreams) => {
+      if (
+        !opts.history ||
+        subscriber.closed ||
+        relayStates.get(relay) !== state
+      )
+        return;
+      for (const [key, chunk] of chunks) {
+        if (state.historyKeys.has(key)) continue;
+        state.historyKeys.add(key);
+        // These cloned clauses never change. A reconnect can consolidate live
+        // deltas without cancelling/restarting an already-owned history range.
+        // A short initial response cannot prove exhaustion under a relay cap.
+        state.history.add(
+          subscribeStream(
+            loadRelayHistory(
+              pool,
+              (_relays, filters) =>
+                resilientHistoryRequest(pool, relay, filters),
+              relay,
+              chunk.filters,
+              {
+                limit,
+                isTerminalError: isHistoryTerminalError,
+                onComplete: (covered) =>
+                  opts.onHistoryComplete?.(relay, key, covered),
+              },
+            ),
+          ),
+        );
+      }
+    };
+
     const closeDeltas = (relay: string) => {
       const state = relayStates.get(relay);
       if (!state) return;
@@ -1612,15 +1776,37 @@ export function resilientAdditiveSubscription(
       state.deltas = new Subscription();
     };
 
+    const liveFilters = (
+      relay: string,
+      state: RelayStreams,
+      filters: Filter[],
+    ) =>
+      filters.map((filter) => {
+        if (!opts.history) return filter;
+        let live = state.liveFilters.get(filter);
+        if (!live) {
+          live = historyLiveFilter(pool, relay, filter);
+          state.liveFilters.set(filter, live);
+        }
+        return live;
+      });
+
     const openMain = (relay: string, state: RelayStreams) => {
       state.main = subscribeStream(
         processRelay(
           pool,
           relay,
-          allFilters,
+          () => liveFilters(relay, state, allFilters()),
           // The reconnect REQ re-reads allFilters, so any delta REQs opened
           // since the last cycle are consolidated into it.
-          { ...mainStreamOpts, onCycleRestart: closeDeltas },
+          {
+            ...mainStreamOpts,
+            onCycleRestart: closeDeltas,
+            onRelayEose: (url) => {
+              opts.onRelayEose?.(url);
+              startHistory(relay, state);
+            },
+          },
           signal,
         ),
       );
@@ -1632,6 +1818,9 @@ export function resilientAdditiveSubscription(
       const state: RelayStreams = {
         main: undefined,
         deltas: new Subscription(),
+        history: new Subscription(),
+        historyKeys: new Set(),
+        liveFilters: new Map(),
       };
       relayStates.set(relay, state);
       if (chunks.size > 0) {
@@ -1649,6 +1838,7 @@ export function resilientAdditiveSubscription(
       if (!state) return;
       state.main?.unsubscribe();
       state.deltas.unsubscribe();
+      state.history.unsubscribe();
       relayStates.delete(relay);
       signal.removeRelay(relay);
     };
@@ -1679,8 +1869,11 @@ export function resilientAdditiveSubscription(
             processRelay(
               pool,
               relay,
-              deltaFilters,
-              deltaStreamOpts,
+              liveFilters(relay, state, deltaFilters),
+              {
+                ...deltaStreamOpts,
+                onRelayEose: () => startHistory(relay, state),
+              },
               noopSettleSignal,
             ),
           ),
@@ -1705,7 +1898,7 @@ export function resilientAdditiveSubscription(
           throw new AdditiveFilterConflictError(chunk.key);
         return; // canonical duplicate — no new work
       }
-      if (chunk.deltaSafe === true)
+      if (opts.history || chunk.deltaSafe === true)
         assertDeltaSafeShape(chunk.key, stored.filters);
       if (!initial && chunk.deltaSafe !== true)
         throw new TypeError(
@@ -1813,6 +2006,189 @@ export function resilientRequest(
 }
 
 /**
+ * A local admission refusal, never successful empty history. The loader retains
+ * the pending range and retries with its own backoff; retryAt is an earliest
+ * admission hint, not a timer the loader necessarily follows. Repeated local
+ * attempts during cooldown send no REQ and can delay recovery after expiry.
+ */
+export class HistoryAdmissionError extends Error {
+  constructor(readonly retryAt: number) {
+    super("History request is waiting for relay admission");
+    this.name = "HistoryAdmissionError";
+  }
+}
+
+type HistoryAdmission = {
+  nextStart: number;
+  active: number;
+  refusals: number;
+  resetAfter: number;
+};
+const historyAdmissions = new WeakMap<
+  RelayPool,
+  Map<string, HistoryAdmission>
+>();
+
+/** Structural refusals cannot be fixed by waiting and repeating the same filter. */
+export function isHistoryTerminalError(error: unknown): boolean {
+  return (
+    isPermanentError(error) ||
+    error instanceof AuthRequiredError ||
+    (error instanceof Error && /^(Auth|RelayAuth)/.test(error.name)) ||
+    (error instanceof RelayClosedError &&
+      /max filter count|too many filters|subscriptions exceed max size/i.test(
+        error.reason,
+      ))
+  );
+}
+
+/**
+ * One admitted history page. The v7 window loader owns retries; this method
+ * never converts failure into empty completion or sleeps through a cooldown.
+ * Background starts share 1s pacing; explicit foreground batches use 100ms.
+ * Both share reservations, five active requests per pool/relay, and cooldowns.
+ * Live subscriptions retain priority and continue using their existing owner.
+ */
+export function resilientHistoryRequest(
+  pool: RelayPool,
+  relay: string,
+  filters: Filter[],
+  options: { foreground?: boolean } = {},
+): Observable<NostrEvent> {
+  return admittedHistoryOperation(
+    pool,
+    relay,
+    (connection) =>
+      connection.request(filters, {
+        reconnect: false,
+        timeout: 120_000,
+        authTimeout: 30_000,
+        authRetries: 1,
+      }),
+    options,
+  ).pipe(tap((event) => relayEventPresence.observe(event.id, relay)));
+}
+
+/** Receive-only negotiation. ID transfers must use resilientHistoryRequest.
+ * The caller serializes negotiations and disables them after a relay refusal;
+ * the dependency owns internal NEG-MSG rounds, not our request scheduler.
+ *
+ * Shared start pacing is a conservative client policy, not a NIP-77 requirement
+ * or a model of every relay's quotas. Relays can budget NEG-MSG continuations
+ * separately from REQ/NEG-OPEN starts while also imposing a total message cap.
+ * A generic refusal cannot safely tell us which allowance remains available,
+ * so cooldowns stay shared. Start admission does not pace internal continuations.
+ * Do not remove spacing solely because a server advertises NIP-77: the parallel
+ * scheduling experiment in a156687a increased history progress but regressed
+ * foreground readiness. See createReconciledHistory's queue rationale and rerun
+ * its benchmark when changing admission or transfer coordination.
+ */
+export function resilientNegentropy(
+  pool: RelayPool,
+  relay: string,
+  inventory: NostrEvent[],
+  filter: Filter,
+) {
+  return admittedHistoryOperation(pool, relay, (connection) =>
+    connection.negentropy(inventory, filter).pipe(
+      // debounceTime retains its pending check while progress moves the deadline.
+      // timeout({ each }) instead cancels/recreates a native timer every round.
+      connect((progress$) =>
+        merge(
+          progress$,
+          progress$.pipe(
+            startWith(null),
+            // Completion must cancel the watchdog, not flush the debounce.
+            concatWith(NEVER),
+            debounceTime(30_000),
+            mergeMap(() => throwError(() => new TimeoutError())),
+          ),
+        ).pipe(takeUntil(progress$.pipe(ignoreElements(), endWith(null)))),
+      ),
+    ),
+  ).pipe(timeout({ first: 160_000 }));
+}
+
+function admittedHistoryOperation<T>(
+  pool: RelayPool,
+  relay: string,
+  operation: (relay: Relay) => Observable<T>,
+  options: { foreground?: boolean } = {},
+): Observable<T> {
+  return defer(() => {
+    let admissions = historyAdmissions.get(pool);
+    if (!admissions) historyAdmissions.set(pool, (admissions = new Map()));
+    let admission = admissions.get(relay);
+    if (!admission) {
+      admission = { nextStart: 0, active: 0, refusals: 0, resetAfter: 0 };
+      admissions.set(relay, admission);
+    }
+    const state = admission;
+    const now = Date.now();
+    const cooldown = getRateLimitCooldownRemaining(relay);
+    const start = Math.max(now, state.nextStart);
+    // Bound queued reservations. Refused work remains incomplete in the loader.
+    if (cooldown > 0 || state.active >= 5 || start - now > 5_000)
+      throw new HistoryAdmissionError(
+        Math.max(now + cooldown, start, now + 1_000),
+      );
+    // A bounded foreground batch need not pay the background drain interval
+    // for each independent filter. Keep a shared ledger: this is not a bypass
+    // of already reserved work, active capacity, or a relay refusal.
+    state.nextStart = start + (options.foreground ? 100 : 1_000);
+
+    return timer(start - now).pipe(
+      switchMap(() =>
+        defer(() => {
+          // A sibling may have received CLOSED while this page was paced.
+          const remaining = getRateLimitCooldownRemaining(relay);
+          if (remaining > 0 || state.active >= 5)
+            throw new HistoryAdmissionError(
+              Date.now() + Math.max(remaining, 1_000),
+            );
+          const relayObject = pool.relay(relay);
+          state.active++;
+          return new Observable<T>((subscriber) => {
+            // Ignore a stale transport error: opening this request must be allowed
+            // to restart the socket. New failures still terminate this attempt.
+            const errors = relayObject.error$
+              .pipe(skip(1))
+              .subscribe((error) => {
+                if (error !== null) subscriber.error(new TransportError(relay));
+              });
+            subscriber.add(errors);
+            if (subscriber.closed) return;
+            const request = operation(relayObject).subscribe(subscriber);
+            return () => {
+              request.unsubscribe();
+              errors.unsubscribe();
+            };
+          }).pipe(
+            tap({
+              error: (error: unknown) => {
+                if (!isRateLimited(error) || isHistoryTerminalError(error))
+                  return;
+                // Multiple refusals from an already-running batch are one episode.
+                if (getRateLimitCooldownRemaining(relay) > 0) return;
+                if (Date.now() >= state.resetAfter) state.refusals = 0;
+                const delay = Math.min(
+                  (65_000 + Math.random() * 30_000) * 2 ** state.refusals++,
+                  30 * 60_000,
+                );
+                const until = Date.now() + delay;
+                state.resetAfter = until + 5 * 60_000;
+                markRateLimited(relay, until);
+              },
+            }),
+            finalize(() => state.active--),
+          );
+        }),
+      ),
+    );
+  });
+}
+
+/**
  * Resilient one-shot request to a single relay.
  *
  * Uses pool.relay(relay).request() — the proper single-relay one-shot API
@@ -1854,7 +2230,7 @@ export function resilientSingleRelayRequest(
     // is torn down when the request completes naturally — merge would hang
     // because error$ never completes on its own.
     const relayObj = pool.relay(relay);
-    const inner$ = relayObj.request(filters);
+    const inner$ = relayObj.request(filters, { reconnect: false });
     const req$ = new Observable<NostrEvent>((s) => {
       const errSub = relayObj.error$.subscribe((err) => {
         if (err !== null) s.error(new TransportError(relay));
@@ -1872,7 +2248,8 @@ export function resilientSingleRelayRequest(
     if (remaining > 0) return timer(remaining).pipe(switchMap(() => req$));
     return req$;
   }).pipe(
-    tap(() => {
+    tap((event) => {
+      relayEventPresence.observe(event.id, relay);
       // Any event received means the request is succeeding — reset backoff
       // so the next retry (if any) starts from 1s again.
       everSucceeded = true;

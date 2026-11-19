@@ -9,15 +9,15 @@
  *   stream into the EventStore as they arrive;
  *   the EOSE settle signal clears isLoading. The IntersectionObserver sentinel
  *   calls loadMore() which fires the manualPaginate$ subject to fetch the next
- *   backward page. hasMore goes false when a page returns fewer than PAGE_SIZE
- *   events.
+ *   backward batch. hasMore goes false only after every history source
+ *   successfully exhausts its filters.
  *
  * Mode 2 — Search (non-empty committedQuery):
  *   Opens a resilientSubscription with manualPaginate$ for NIP-50
  *   { kinds: [30617], search: query } against the public indexes, while private
  *   services receive an authenticated paginated announcement query that is
  *   matched locally. Simultaneously
- *   searches four NIP-50 profile relays for kind:0 candidates, validates and
+ *   searches three NIP-50 profile relays for kind:0 candidates, validates and
  *   ranks their current EventStore winners, then fetches repositories for the
  *   newly matched authors in bounded, relay-settled requests.
  *   Results are pushed into a per-session BehaviorSubject so the UI always
@@ -72,6 +72,7 @@ import {
   type NamecoinSearchResolution,
 } from "./useNamecoinSearchResolution";
 import { rankProfileSearchCandidates } from "@/lib/profileSearchRanking";
+import type { HistoryBatchResult } from "@/lib/batchHistory";
 import { DEFAULT_MAX_SETTLE_TIME } from "@/lib/settleSignal";
 import { RepositoryListModel } from "@/models/RepositoryListModel";
 import {
@@ -86,7 +87,6 @@ import {
 
 const PROFILE_SEARCH_RELAYS = [
   "wss://relay.ditto.pub",
-  "wss://relay.nostr.band",
   "wss://nostr.wine",
   "wss://search.nos.today",
 ];
@@ -101,10 +101,6 @@ const USER_REPO_TIMEOUT_MS = 10_000;
 const GIT_AUTHORS_KIND = 10017;
 const SOCIAL_FOLLOWS_KIND = 3;
 const EMPTY_PUBKEYS: string[] = [];
-// How long to wait after the last event in a pagination page before concluding
-// the page is done. Covers both the normal case (events arrive then stop) and
-// the zero-events case (relay exhausted — timer fires with count=0).
-const PAGE_SETTLE_MS = 600;
 // Relay EOSE can beat the debounced repository model by a render. When the
 // relay delivered announcements, keep the initial skeleton until the model
 // catches up, but do not let malformed or deleted results hold it forever.
@@ -280,33 +276,31 @@ export function useRepositorySearch(
   // Subject that triggers the next backward page in the active subscription.
   const paginateSubRef = useRef<Subject<void> | null>(null);
 
-  // Settle timer for pagination pages. Started immediately when loadMore() fires
-  // (handles zero-events case) and reset on each incoming event. When it fires,
-  // the page is considered done.
-  const pageSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchRelaysRef = useRef<string[]>([]);
+  const batchResultsRef = useRef(new Map<string, HistoryBatchResult>());
+  const pendingBatchRelaysRef = useRef(new Set<string>());
   const browseModelSettleTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
   const browseAwaitingModelRef = useRef(false);
   const allBrowseReposRef = useRef<ResolvedRepo[] | undefined>(undefined);
-  // Count of events received in the current pagination page.
-  const pageEventCountRef = useRef(0);
-  // Whether we are currently waiting for a pagination page to settle.
   const paginatingRef = useRef(false);
-
-  // Start (or restart) the page settle timer. Called immediately on loadMore()
-  // and on every event that arrives while paginatingRef is true.
-  const armPageSettleTimer = useCallback((onSettle: () => void) => {
-    if (pageSettleTimerRef.current) clearTimeout(pageSettleTimerRef.current);
-    pageSettleTimerRef.current = setTimeout(onSettle, PAGE_SETTLE_MS);
-  }, []);
-
-  const clearPageSettleTimer = useCallback(() => {
-    if (pageSettleTimerRef.current) {
-      clearTimeout(pageSettleTimerRef.current);
-      pageSettleTimerRef.current = null;
-    }
-  }, []);
+  const onHistoryBatch = useCallback(
+    (relay: string, result: HistoryBatchResult) => {
+      batchResultsRef.current.set(relay, result);
+      pendingBatchRelaysRef.current.delete(relay);
+      if (paginatingRef.current && pendingBatchRelaysRef.current.size === 0) {
+        paginatingRef.current = false;
+        setHasMore(
+          batchRelaysRef.current.some(
+            (url) => !batchResultsRef.current.get(url)?.exhausted,
+          ),
+        );
+        setIsLoading(false);
+      }
+    },
+    [],
+  );
 
   // ── Browse mode ────────────────────────────────────────────────────────────
 
@@ -389,11 +383,13 @@ export function useRepositorySearch(
     // Initialise all relays as "searching" for this subscription.
     setRelayStatuses(Object.fromEntries(relays.map((r) => [r, "searching"])));
 
+    batchRelaysRef.current = [...new Set(relays)];
+    batchResultsRef.current.clear();
+    pendingBatchRelaysRef.current.clear();
     const paginate$ = new Subject<void>();
     paginateSubRef.current = paginate$;
 
     // Events received before EOSE (the initial page).
-    let initialPageCount = 0;
     let initialFinished = false;
     let initialRequestTimer: ReturnType<typeof setTimeout> | null = null;
     const requiredRelayCount = new Set(relays).size;
@@ -406,7 +402,7 @@ export function useRepositorySearch(
         clearTimeout(initialRequestTimer);
         initialRequestTimer = null;
       }
-      setHasMore(initialPageCount >= PAGE_SIZE);
+      setHasMore(batchRelaysRef.current.length > 0);
       if ((allBrowseReposRef.current?.length ?? 0) > 0) {
         setIsLoading(false);
         return;
@@ -434,6 +430,7 @@ export function useRepositorySearch(
       [{ kinds: [REPO_KIND], limit: PAGE_SIZE } as Filter],
       {
         manualPaginate$: paginate$,
+        onHistoryBatch,
         limit: PAGE_SIZE,
         onRelayEose: (relay) => {
           setRelayStatuses((prev) => ({ ...prev, [relay]: "success" }));
@@ -452,26 +449,12 @@ export function useRepositorySearch(
         const ev = msg as NostrEvent;
         if (!prepareDiscoveredRepositoryEvent(ev, privateRelays)) return;
         eventStore.add(ev);
-
-        if (paginatingRef.current) {
-          // Counting events in a pagination page — reset the settle timer.
-          pageEventCountRef.current++;
-          armPageSettleTimer(() => {
-            paginatingRef.current = false;
-            setHasMore(pageEventCountRef.current >= PAGE_SIZE);
-            setIsLoading(false);
-          });
-        } else {
-          initialPageCount++;
-        }
       },
       error: () => {
-        clearPageSettleTimer();
         if (initialFinished) setIsLoading(false);
         else finishInitial();
       },
       complete: () => {
-        clearPageSettleTimer();
         if (initialFinished) setIsLoading(false);
         else finishInitial();
       },
@@ -481,7 +464,6 @@ export function useRepositorySearch(
       sub.unsubscribe();
       paginate$.complete();
       paginateSubRef.current = null;
-      clearPageSettleTimer();
       if (initialRequestTimer) clearTimeout(initialRequestTimer);
       browseAwaitingModelRef.current = false;
       if (browseModelSettleTimerRef.current) {
@@ -489,7 +471,7 @@ export function useRepositorySearch(
         browseModelSettleTimerRef.current = null;
       }
     };
-  }, [relayKey, isSearchMode, armPageSettleTimer, clearPageSettleTimer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [relayKey, isSearchMode, onHistoryBatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Search mode ────────────────────────────────────────────────────────────
 
@@ -532,7 +514,6 @@ export function useRepositorySearch(
     setProfileRelayStatuses({});
     setHasMore(true);
     paginatingRef.current = false;
-    clearPageSettleTimer();
 
     // Initialise all relays as "searching" for this subscription.
     setRelayStatuses(Object.fromEntries(relays.map((r) => [r, "searching"])));
@@ -629,6 +610,9 @@ export function useRepositorySearch(
       });
     };
 
+    batchRelaysRef.current = [...new Set(publicRepositoryRelays)];
+    batchResultsRef.current.clear();
+    pendingBatchRelaysRef.current.clear();
     const paginate$ = new Subject<void>();
     paginateSubRef.current = paginate$;
 
@@ -641,7 +625,6 @@ export function useRepositorySearch(
     let publicDirectInitialDone = publicRepositoryRelays.length === 0;
     let privateDirectInitialDone = privateRelays.length === 0;
     let userPathDone = false;
-    let initialPageCount = 0;
 
     const maybeClearInitialLoading = () => {
       const hasDirectResult = [...directRepoCoordinates.keys()].some(
@@ -664,7 +647,7 @@ export function useRepositorySearch(
     const finishDirectInitial = () => {
       if (directInitialDone) return;
       directInitialDone = true;
-      setHasMore(initialPageCount >= PAGE_SIZE);
+      setHasMore(batchRelaysRef.current.length > 0);
       maybeClearInitialLoading();
     };
 
@@ -701,6 +684,7 @@ export function useRepositorySearch(
       ],
       {
         manualPaginate$: paginate$,
+        onHistoryBatch,
         limit: PAGE_SIZE,
         onRelayEose: (relay) => {
           setRelayStatuses((prev) => ({ ...prev, [relay]: "success" }));
@@ -721,25 +705,11 @@ export function useRepositorySearch(
         rememberRepoCoordinate(ev, directRepoCoordinates);
         // Push results regardless of whether eventStore.add was a no-op.
         pushResults();
-
-        if (paginatingRef.current) {
-          pageEventCountRef.current++;
-          armPageSettleTimer(() => {
-            paginatingRef.current = false;
-            const more = pageEventCountRef.current >= PAGE_SIZE;
-            setHasMore(more);
-            setIsLoading(false);
-          });
-        } else {
-          initialPageCount++;
-        }
       },
       error: () => {
-        clearPageSettleTimer();
         finishPublicDirectInitial();
       },
       complete: () => {
-        clearPageSettleTimer();
         finishPublicDirectInitial();
       },
     });
@@ -1017,7 +987,6 @@ export function useRepositorySearch(
       if (profileSearchTimeout) clearTimeout(profileSearchTimeout);
       if (profileIntegrationTimer) clearTimeout(profileIntegrationTimer);
       paginateSubRef.current = null;
-      clearPageSettleTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relays captured via relayKey
   }, [
@@ -1035,8 +1004,7 @@ export function useRepositorySearch(
     accountPubkey,
     gitFollowKey,
     socialFollowKey,
-    armPageSettleTimer,
-    clearPageSettleTimer,
+    onHistoryBatch,
   ]);
 
   // ── loadMore ───────────────────────────────────────────────────────────────
@@ -1049,17 +1017,10 @@ export function useRepositorySearch(
     if (!isSearchMode) {
       setBrowseDisplayLimit((prev) => prev + PAGE_SIZE);
     }
-    pageEventCountRef.current = 0;
     paginatingRef.current = true;
-    // Arm the settle timer immediately — handles the zero-events case where the
-    // relay is exhausted and no events arrive to reset the timer.
-    armPageSettleTimer(() => {
-      paginatingRef.current = false;
-      setHasMore(pageEventCountRef.current >= PAGE_SIZE);
-      setIsLoading(false);
-    });
+    pendingBatchRelaysRef.current = new Set(batchRelaysRef.current);
     paginateSubRef.current.next();
-  }, [hasMore, isLoading, isSearchMode, armPageSettleTimer]);
+  }, [hasMore, isLoading, isSearchMode]);
 
   // ── Assemble final result ──────────────────────────────────────────────────
 

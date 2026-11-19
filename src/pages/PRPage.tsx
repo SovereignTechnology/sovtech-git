@@ -1,3 +1,6 @@
+import { RepositorySourceNotice } from "@/components/RepositorySourceNotice";
+import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
+import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import React, {
   useCallback,
@@ -345,18 +348,22 @@ export default function PRPage() {
 
   // ── "Search more relays" expansion (curated mode) ────────────────────────
   const [searchMoreActive, setSearchMoreActive] = useState(false);
+  const { mode: curationMode, setMode: setCurationMode } =
+    useRepositoryCuration();
 
   const extraSearchGroups = useMemo<RelayGroupSpec[]>(() => {
-    if (!searchMoreActive || repo?.isPrivate) return [];
+    if (!searchMoreActive || curationMode !== "outbox" || repo?.isPrivate)
+      return [];
     return [
       { label: "git index", relays$: gitIndexRelays },
       { label: "fallback relays", relays$: fallbackRelays },
     ];
-  }, [searchMoreActive, repo?.isPrivate]);
+  }, [searchMoreActive, curationMode, repo?.isPrivate]);
 
   const handleSearchMore = useCallback(() => {
+    setCurationMode("outbox");
     setSearchMoreActive(true);
-  }, []);
+  }, [setCurationMode]);
 
   // ── Unified PR/Patch resolution ─────────────────────────────────────────
   const { pr, search } = useResolvedPR(
@@ -1356,6 +1363,15 @@ export default function PRPage() {
     return <Navigate to={subPatchRedirect} replace />;
   }
 
+  if (!pr && search?.found && curationMode === "repo" && !repo?.isPrivate) {
+    return (
+      <RepositorySourceNotice
+        eventId={search.event?.id ?? prId}
+        onExpand={handleSearchMore}
+      />
+    );
+  }
+
   if (showSearchStatus) {
     const repoBasePath = repoToPath(
       pubkey,
@@ -1415,6 +1431,7 @@ export default function PRPage() {
                     <code className="font-mono text-xs text-muted-foreground/80">
                       #{pr.rootEvent.id.slice(0, 8)}
                     </code>
+                    <RepositorySourceBadge eventId={pr.rootEvent.id} />
                     <EventShareButton
                       event={pr.rootEvent}
                       label="Copy link"
@@ -1520,6 +1537,7 @@ export default function PRPage() {
           <InferredPRStackMap
             relation={inferredParent}
             items={inferredStackItems}
+            prs={prs}
             currentRootId={pr.rootEvent.id}
             ambiguousChildren={inferredAmbiguousChildren}
             branchedChildren={inferredBranchedChildren}

@@ -1,6 +1,6 @@
 # Project Overview
 
-This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs, repos via NIP-34 + NIP-22 comments, GRASP repo announcements) built with React 18, TailwindCSS 3, Vite, shadcn/ui, and Applesauce v6.
+This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs, repos via NIP-34 + NIP-22 comments, GRASP repo announcements) built with React 18, TailwindCSS 3, Vite, shadcn/ui, and Applesauce v7.
 
 ## Technology Stack
 
@@ -8,7 +8,7 @@ This is **gitworkshop** — a Nostr-native Git collaboration client (issues, PRs
 - **TailwindCSS 3.x**: utility-first styling
 - **Vite**: dev server + production bundler
 - **shadcn/ui**: 48+ unstyled accessible primitives in `@/components/ui` on Radix UI + Tailwind
-- **Applesauce v6** (`applesauce-core`, `applesauce-relay`, `applesauce-react`, `applesauce-loaders`, `applesauce-actions`, `applesauce-accounts`, `applesauce-signers`, `applesauce-common`, `applesauce-content`): reactive Nostr SDK on RxJS
+- **Applesauce v7** (`applesauce-core`, `applesauce-relay`, `applesauce-react`, `applesauce-loaders`, `applesauce-actions`, `applesauce-accounts`, `applesauce-signers`, `applesauce-common`, `applesauce-content`): reactive Nostr SDK on RxJS
 - **RxJS**: state and reactive data flow via observables (load the `react-rxjs-observables` skill)
 - **React Router**: client-side routing with `BrowserRouter` and automatic scroll-to-top
 - **TypeScript**: type-safe JS. **Never use `any`.**
@@ -59,6 +59,15 @@ shadcn/ui primitives live in `@/components/ui`. List the directory (`ls src/comp
 - **Use `pnpm` when available and working.** npm is supported as a fallback (`npm ci`, `npm run dev`, `npm run pre-commit`). Nix is optional; `nix develop` only provides a pinned Node/pnpm/e2e-test toolchain. For dependency updates, use pnpm first so `pnpm-lock.yaml` remains the source of truth, then refresh and commit `package-lock.json` for npm fresh clones (for example, `npm install --package-lock-only`).
 - **Prefer patching upstream over working around bugs.** When a dependency has a bug or missing feature, use the package manager's patch workflow and commit the resulting patch files/configuration rather than wrapping or duplicating logic in our codebase.
 
+### Dependency updates
+
+When available, consult the local [dependency update runbook](work/dependency-updates.md)
+for dependency changes and security reports. This Git-ignored file is optional
+and is not distributed with the repository. Keep its watchlist focused on active
+findings and upgrade constraints; remove resolved items. If it is absent,
+proceed with the normal dependency checks. Keep private watchlist details out of
+public documentation, commits, and PRs.
+
 ## Android
 
 Android builds and the branding-regeneration script are documented in `docs/andriod.md`.
@@ -107,6 +116,12 @@ fi
 [grasp]: https://github.com/ — see `../ngit-grasp`
 
 ### Benchmarks (`benchmarks/`) — manual only
+
+Before performance optimisation, read the
+[UX priorities and tradeoff guidance](benchmarks/README.md#ux-priorities-and-tradeoffs).
+Use these priorities to assess effects outside the measured scenario. Reuse the
+existing harness, keep measurement scope bounded, and explain likely sacrifices
+and unmeasured risks; a narrow benchmark win alone is not sufficient evidence.
 
 `pnpm bench` runs the browser-driven relay query-budget benchmark. It drives a production build in headless Playwright Chromium, measures REQ frames / filter bytes / relay connections against the committed `benchmarks/baseline.json` (`--compare`), and is never part of pre-commit, `pnpm test`, or CI. The default devShell deliberately omits the ~1 GB browser bundle — run it via `nix develop .#bench --command pnpm bench`, or outside Nix provision a browser once with `npx playwright-core install chromium`. The `playwright-core` devDependency must stay pinned to the exact version of `pkgs.playwright-driver` in `flake.nix`; see `benchmarks/README.md`.
 
@@ -179,7 +194,7 @@ For options, conditional/optional observables, tag-filter casting (`#a`, `#E`, `
 
 Relay fetching for the main collaboration surfaces is already invoked at the page boundary; new code below those pages should _read_ from the EventStore rather than opening its own subscriptions:
 
-- **`RepoLayout`** (`src/pages/repo/RepoLayout.tsx`) — fires `nip34RepoLoader` (via `useIssues` / `usePRs`) and, in outbox mode, `nip34SupplementalRelayLoader`. This loads every issue/PR root + their essentials (status, labels, deletions, cover notes, legacy replies) and NIP-22 comments for the whole repo. It also subscribes to repo meta (kind:7 stars, kind:10018 followers).
+- **`RepoLayout`** (`src/pages/repo/RepoLayout.tsx`) — fires `nip34RepoLoader` once via `useNip34RepoLoader` (`useIssues` / `usePRs` are store-only) and, in outbox mode, `nip34SupplementalRelayLoader`. This loads every issue/PR root + their essentials (status, labels, deletions, cover notes, legacy replies) and NIP-22 comments for the whole repo. It also subscribes to repo meta (kind:7 stars, kind:10018 followers).
 - **`IssuePage` / `PRPage`** — go through `useResolvedIssue` / `useResolvedPR` → `useNip34ItemDetailLoader`, which fires `nip34ListLoader` + `nip34ThreadItemLoader` for the item. The thread loader recursively pulls every event referencing the root or any comment via `#e` / `#E` / `#q` (reactions, zaps, deletions, quotes, child comments) — no kind restriction.
 
 Inside any component or hook on those pages, the right move is `store.getByFilters(...)` / `store.timeline(...)` / `store.model(...)` (see `src/hooks/useInlineComments.ts` for an example). Only reach for `resilientSubscription` or a new `createPaginatedTagValueLoader` instance when the data isn't already in scope of one of the pre-wired loaders.

@@ -454,10 +454,12 @@ agree. Publishing encrypted content to those relays still reveals event
 existence, timing, and approximate size; it does not reveal the plaintext.
 
 Read/archive actions remain immediate while coverage or decryption is pending.
-The store records their updater functions as local deltas, decrypts the current
+The store records their frozen state transitions as durable local deltas, decrypts the current
 remote winner, and replays those deltas over it before signing. It must not
 publish a stale whole-state snapshot merely because local UI state changed
-first. Several rapid actions are debounced into one write. A new remote winner
+first. Several rapid actions are debounced into one write after five quiet
+seconds following the most recent change. Retry, lock acquisition, coverage
+recovery and changes during signing must all respect that deadline. A new remote winner
 replaces the accepted base state, after which still-pending local deltas are
 replayed; this preserves remote reversals such as marking an item unread or
 restoring it. A failed current-envelope or current-state decrypt is not retried
@@ -481,6 +483,63 @@ deletion discovery, a post-write echo request, and a compare-and-swap protocol
 between concurrent clients are excluded. Warm-subscription events reconcile
 cross-client updates, while the durable outbox reports publication delivery
 separately.
+
+Local actions are evaluated once at click time and stored synchronously as frozen
+before/after deltas, each under a unique account-scoped localStorage key. This
+preserves action timestamps, affected IDs, reversals, and pending intent across
+reloads without windows overwriting one another's queues. Every window reads the
+same ordered journal and rebases it over the verified signed winner. Storage
+failures reject the action visibly rather than pretending it was saved.
+
+A small account-scoped localStorage map retains timestamps for IDs still in the
+read or archive list. Accepted state projections record timestamps from locally
+available events and discard metadata only once neither list needs the ID.
+Cutoff pruning uses either loaded events or this optional timestamp evidence;
+unknown IDs are retained. This preserves the existing cutoff policy and NIP-78
+payload, avoids relay reads for compaction, and does not claim complete discovery.
+Concurrent cache eviction can defer compaction but cannot authorize deleting an
+ID with an unknown timestamp.
+
+Same-origin windows serialize publication using an account-scoped Web Lock.
+After durable outbox enqueue, the publisher commits the signed encrypted event
+and the IDs of the included actions as one receipt, then deletes those actions.
+The receipt also retains the highest observed local action sequence so numbering
+does not restart between batches or after reload. Concurrent actions can still
+tie and use the existing deterministic ID order; this does not infer user intent
+across independent devices.
+A crash between receipt and cleanup is recoverable. Locally signed drafts that
+failed publication reconcile through the same decrypted-baseline path as remote
+winners before retry can acknowledge pending actions. Receivers verify the signature
+and exact derived coordinate before dropping acknowledged actions; the receipt
+also hydrates the signed baseline after reload. Relay delivery remains the
+outbox's responsibility. The journal's latest action time guards the five-second
+quiet period at reconciliation, lock acquisition, and after signing. This
+coordinates browser windows, not independent devices; relay quorum and
+cross-device replacement semantics are unchanged. Without Web Locks, editing
+windows (including a reload recovering pending actions) publish automatically;
+a peer can explicitly retry to take over.
+
+The direct-access `/notifications/diagnostics` page shows a live list of saved
+versions, with signed event timestamps in UTC, observation times, short event IDs,
+per-window provenance, and restore actions. Full state opens in a modal. Same-origin
+windows share the IndexedDB journal but prefer their own observations when showing
+an event; independent browsers each retain their own history. Committed journal
+writes notify open pages without polling or additional relay queries.
+
+Only events received by the existing relay subscription are labelled as downloads,
+including older versions it supplies. Shared-window and cache hydration are labelled
+separately. Produced versions are recorded after durable outbox enqueue, not as an
+assertion of relay acknowledgement. The journal retains 100 distinct signed versions per account, independently of
+50 rolling local checkpoints and 20 pre-restore backups. Each signed version
+retains its original production observation and its 12 latest observations.
+A compact Local checkpoints switch exposes unsent state and pre-restore backups
+with the same view and restore controls. Explicit restore is a durable absolute
+replacement intent, so later relay hydration cannot change the selected snapshot. Legacy observations without reliable provenance are labelled as previously
+recorded. Clearing all browser storage removes this local history; replaced events
+that were never retained cannot be reconstructed. Explicit restore saves the current
+projection first, then queues the selected state through the same warm owner and
+five-second publication debounce. Merely opening the list or modal does not restore
+or publish anything. No Nostr schema changes are introduced.
 
 ## Repository selection state
 
@@ -524,6 +583,44 @@ winner. This is eventual reconciliation; losing data can only be recovered while
 some client still retains it. No compare-and-swap, deletion discovery, automatic
 UI mutation retry, or post-write relay query is introduced. Both writers retain
 the durable outbox's delivery retries, independently of preflight readiness.
+
+## GitWorkshop preferences
+
+The account-authored kind `30078` coordinate `gitworkshop-preferences` is a
+**personal singleton** integrated into the active-account identity owner.
+`userIdentitySubscription` includes its exact author/kind/identifier filter in
+the same unpaginated request as the identity kinds. The shared relay frontier
+is the union of NIP-65 outboxes, user indexes, and fallbacks. It never requests
+all kind `30078` events. The notification owner's coordinates stay separate.
+Preferences contain only non-sensitive, unencrypted UI values; no repository
+coordinates enter the query or payload. Page hooks read from the EventStore
+and use `userIdentityCoverage` rather than opening another relay subscription.
+The existing identity/deletion writers retain their outbox/user-index voters;
+deletion discovery keeps its previous outbox/user-index relay frontier.
+
+Mailbox discovery and the outbox/fallback quorum follow the notification-state
+policy above, including covered mailbox absence for accounts without outboxes.
+Fallbacks vote instead of user indexes because indexes may reject kind `30078`.
+A bounded cache read hydrates the coordinate when the account owner starts.
+Saving waits for shared warm coverage and checks the exact cache coordinate if
+no winner is present, then rebases the selected field onto the current
+winner, preserves unknown fields/tags, and rejects malformed content. Account,
+owner lifetime, coverage, relay frontier, and the winner are rechecked after
+signing. Changing accounts or leaving the page cancels outstanding publication.
+
+There is no automatic write on mount or sort-menu selection and no
+notification-key bootstrap. Menu changes are immediate, local to the current
+account and repository component, separately for issues and PRs, until refresh,
+and remain usable while offline.
+The shared in-memory list state retains choices across navigation; Reset clears
+them with the filters. Only the explicit "Set default" menu action (or its manual retry) signs and publishes the
+account-wide `listSort` preference shared by issues and PRs. Readers retain the
+legacy `issueSort` fallback. A saved default seeds lists without a temporary selection; incoming
+default changes do not replace an active local selection. Restoring recent
+activity as the saved default is also an explicit replacement. Writes use durable outbox
+publication to the same outbox/fallback frontier, with visible manual recovery.
+NIP-09 discovery, post-write echo queries, encryption, and compare-and-swap
+between devices are excluded. Simultaneous saves follow NIP-01 replacement.
 
 ## Software publication
 
@@ -600,6 +697,7 @@ policy in the same change.
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Account identity and lists                 | `0`, `3`, `10002`, `10017`, `10018`, `10063`, `10317`, `10318`, `10617`         | Personal singleton; one account-owned identity lease plus the shared deletion lease where required. Initial account creation of `0` and `10002` is the bootstrap-identity exception. |
 | Notification and repository selection sync | Three `30078` coordinates                                                       | Convergent application state; one account-owned encrypted envelope/state owner.                                                                                                      |
+| GitWorkshop sorting preferences            | `30078:gitworkshop-preferences`                                                 | Personal singleton; exact filter in the shared account identity lease, outbox/fallback voters, and bounded cache hydration.                                                          |
 | Repository metadata and state              | `30617`, `30618`                                                                | Repository authority graph and repository operational state; one page-owned repository evidence scope plus focused evidence only for genuinely new author coordinates.               |
 | Software applications and releases         | `32267`, `30063`                                                                | Publisher-owned addressable; one publisher lease plus one debounced exact release-candidate lease.                                                                                   |
 | Software assets                            | `3063`                                                                          | Regular append-only event; no replaceable preflight.                                                                                                                                 |

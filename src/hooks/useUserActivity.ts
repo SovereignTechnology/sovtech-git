@@ -25,7 +25,11 @@
 import { useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
-import { pool } from "@/services/nostr";
+import {
+  ValidStatusEventsModel,
+  statusRootsKey,
+} from "@/models/ValidStatusEventsModel";
+import { pool, deletionEvents$ } from "@/services/nostr";
 import { gitIndexRelays } from "@/services/settings";
 import { mapEventsToStore } from "applesauce-core";
 import { onlyEvents } from "applesauce-relay";
@@ -355,11 +359,27 @@ export function useUserActivity(
     return (
       store.timeline([filter]) as unknown as Observable<NostrEvent[]>
     ).pipe(
-      map((events) =>
-        events
-          .filter(isGitActivity)
-          .sort((a, b) => b.created_at - a.created_at)
-          .slice(0, ACTIVITY_LIMIT),
+      switchMap((events) =>
+        store
+          .model(
+            ValidStatusEventsModel,
+            statusRootsKey(events),
+            deletionEvents$,
+          )
+          .pipe(
+            map((validIds) =>
+              events
+                .filter(isGitActivity)
+                .filter(
+                  (event) =>
+                    !(STATUS_KINDS_ACTIVITY as readonly number[]).includes(
+                      event.kind,
+                    ) || validIds.has(event.id),
+                )
+                .sort((a, b) => b.created_at - a.created_at)
+                .slice(0, ACTIVITY_LIMIT),
+            ),
+          ),
       ),
     );
   }, [pubkey, filterKey, store]);

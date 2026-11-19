@@ -1,5 +1,16 @@
+import { queryLocalCache } from "./localCache";
+import {
+  observeRepositoryCacheRestore,
+  loadRepositoryCache,
+} from "@/lib/repositoryCache";
+import { relayEventPresence } from "@/lib/relayEventPresence";
+import { instrumentEventStore } from "@/lib/perfRuntime";
 import { EventStore, mapEventsToStore } from "applesauce-core";
-import { fakeVerifyEvent, persistEventsToCache } from "applesauce-core/helpers";
+import {
+  fakeVerifyEvent,
+  markFromCache,
+  persistEventsToCache,
+} from "applesauce-core/helpers";
 import type { Filter } from "applesauce-core/helpers";
 import {
   createAddressLoader,
@@ -19,6 +30,7 @@ import {
   Subject,
   Subscription,
   combineLatest,
+  concatMap,
   merge,
   distinctUntilChanged,
   firstValueFrom,
@@ -26,6 +38,10 @@ import {
   of,
   timer,
   EMPTY,
+  defer,
+  finalize,
+  share,
+  ReplaySubject,
 } from "rxjs";
 import {
   catchError,
@@ -39,6 +55,9 @@ import {
 import { MailboxesModel } from "applesauce-core/models";
 import {
   cacheRequest,
+  parallelCacheRequest,
+  releasingCacheRequest,
+  createRepositoryCacheWriter,
   loadDeletionEvents,
   saveDeletionEvent,
   saveEvents,
@@ -46,12 +65,7 @@ import {
 import { PersistentDeleteManager } from "./persistentDeleteManager";
 import { nip05IdbCache, loadAllNip05FromIdb } from "./nip05IdbCache";
 import { setHintEventStore } from "@/factories/hints";
-import {
-  fallbackRelays,
-  lookupRelays,
-  gitIndexRelays,
-  relayCurationMode,
-} from "./settings";
+import { fallbackRelays, lookupRelays, gitIndexRelays } from "./settings";
 import {
   ISSUE_KIND,
   REPO_KIND,
@@ -72,6 +86,7 @@ import {
   type PaginatedTagValueResponse,
 } from "@/lib/tagValuePaginatedLoader";
 import {
+  resilientRequest,
   resilientAdditiveSubscription,
   type AdditiveFilterChunk,
 } from "@/lib/resilientSubscription";
@@ -82,6 +97,11 @@ import {
   type RelayGroupResolver,
   unwrapRelayGroupId,
 } from "./outbox";
+import {
+  configureRelayHistory,
+  advertisesNegentropy,
+} from "@/lib/relayHistory";
+import { createReconciledHistory } from "@/lib/reconciledHistory";
 import { normalizeUrl } from "@/lib/url";
 import { isPersonalSingletonKind } from "@/lib/personalSingletons";
 import { relayGroupUrls$ } from "@/models/RepositoryRelayGroup";
@@ -94,6 +114,7 @@ import {
   getPrivateRepositoryRelays,
   getPrivateRelayTrustSession,
   isPrivateRepositoryCoordinate,
+  isPrivateRepositoryEventId,
   isTrustedPrivateRepositoryRelay,
   markPrivateRelayEvent,
 } from "@/services/privateRepositoryScope";
@@ -130,6 +151,8 @@ eventStore.verifyEvent = fakeVerifyEvent;
 // Persist events to the local nostrdb
 persistEventsToCache(eventStore, saveEvents);
 
+if (import.meta.env.VITE_PROFILE === "1") instrumentEventStore(eventStore);
+
 /**
  * Resolves after durable deletion state has been restored. main.tsx waits for
  * this before rendering so a stale cached original cannot precede its
@@ -149,6 +172,25 @@ setHintEventStore(eventStore);
  * Use this to query events and publish to relays.
  */
 export const pool = new RelayPool();
+
+// Never disclose private cached IDs to public relays during reconciliation.
+// Private authenticated transports keep the established request path.
+const publicHistoryStore = {
+  insert$: eventStore.insert$.pipe(
+    filter((event) => !isPrivateRepositoryEventId(event.id)),
+  ),
+  getByFilters: (filters: Filter | Filter[]) =>
+    eventStore
+      .getByFilters(filters)
+      .filter((event) => !isPrivateRepositoryEventId(event.id)),
+};
+configureRelayHistory(pool, {
+  enabled: (relay) =>
+    !isTrustedPrivateRepositoryRelay(relay) &&
+    advertisesNegentropy(pool, relay),
+  hasInventory: (filter) => publicHistoryStore.getByFilters(filter).length > 0,
+  load: createReconciledHistory(pool, publicHistoryStore),
+});
 
 /**
  * Global relay liveness tracker.
@@ -185,9 +227,8 @@ liveness.connectToPool(pool);
 // While a caller is subscribed, capping at 30min gives auto-revival probes
 // for relays that have come back without manual intervention.
 //
-// Requires patches/applesauce-relay@6.2.1.patch: count failures when arming
-// recovery, including WebSocket errors without a close event. Otherwise
-// attempts can stay at zero and every retry uses the first 1s delay.
+// Applesauce v7 includes our recovery-attempt fix: count failures when
+// arming recovery, including WebSocket errors without a close event.
 const RECONNECT_PHASES_MS: number[] = [
   // Phase 1 — burst (attempts 1-3)
   1_000,
@@ -213,6 +254,10 @@ function reconnectDelayMs(attempts: number): number {
 }
 
 pool.add$.subscribe((relay) => {
+  // Capability discovery never blocks initial REQs. Unknown/unsupported relays
+  // retain ordinary coverage; later owners can use advertised reconciliation.
+  if (!isTrustedPrivateRepositoryRelay(relay.url))
+    relay.information$.pipe(take(1)).subscribe();
   relay.reconnectTimer = (_error, attempts) =>
     timer(reconnectDelayMs(attempts));
 
@@ -591,20 +636,29 @@ export async function publish(
  * - Checks IndexedDB cache first
  * - Queries lookup relays for missing events
  */
-export const eventLoader = createEventLoaderForStore(eventStore, pool, {
-  cacheRequest,
-  lookupRelays: lookupRelays.getValue(),
-  extraRelays: fallbackRelays,
-  followRelayHints: true,
-  bufferTime: 1000, // Batch requests within 1 second
-});
+// The optional cache runs alongside the entire SDK loading sequence, never
+// delaying disk hits or advancement from relay hints to public fallback relays.
+const loaderRelayRequest = (relays: string[], filters: Filter[]) =>
+  resilientRequest(pool, relays, filters).pipe(onlyEvents());
+
+export const eventLoader = createEventLoaderForStore(
+  eventStore,
+  loaderRelayRequest,
+  {
+    cacheRequest: releasingCacheRequest,
+    lookupRelays: lookupRelays.getValue(),
+    extraRelays: fallbackRelays,
+    followRelayHints: true,
+    bufferTime: 1000, // Batch requests within 1 second
+  },
+);
 
 /**
  * Loader for addressable events (NIP-33).
  * Used for loading articles, profiles, and other replaceable events.
  */
-export const addressLoader = createAddressLoader(pool, {
-  cacheRequest,
+export const addressLoader = createAddressLoader(loaderRelayRequest, {
+  cacheRequest: releasingCacheRequest,
   extraRelays: fallbackRelays,
   eventStore,
   lookupRelays: lookupRelays.getValue(),
@@ -614,14 +668,14 @@ export const addressLoader = createAddressLoader(pool, {
  * Loader for reactions (kind 7).
  * Efficiently loads and caches reactions for events.
  */
-export const reactionsLoader = createReactionsLoader(pool, {
-  cacheRequest,
+export const reactionsLoader = createReactionsLoader(loaderRelayRequest, {
+  cacheRequest: parallelCacheRequest,
   eventStore,
 });
 
 /** Create loader for loading zaps for other events */
-export const zapsLoader = createZapsLoader(pool, {
-  cacheRequest,
+export const zapsLoader = createZapsLoader(loaderRelayRequest, {
+  cacheRequest: parallelCacheRequest,
   extraRelays: fallbackRelays,
   eventStore,
 });
@@ -634,13 +688,18 @@ export const zapsLoader = createZapsLoader(pool, {
  * their own pool.subscription so that e.g. a list of 20 issue authors produces
  * one REQ rather than 20.
  *
+ * Query configured fallback relays as well as lookup relays so an unavailable
+ * or incomplete profile index does not require visiting the user's page.
+ * Identity lookups are independent of repository relay curation.
+ *
  * The eventStore option deduplicates events that come back from relays.
  * Call-site deduplication (skip if already in store) is the responsibility of
  * the caller — see useLoadProfile / useProfilesForPubkeys.
  */
-export const profileLoader = createAddressLoader(pool, {
-  cacheRequest,
+export const profileLoader = createAddressLoader(loaderRelayRequest, {
+  cacheRequest: releasingCacheRequest,
   eventStore,
+  extraRelays: fallbackRelays,
   lookupRelays: lookupRelays.getValue(),
   bufferTime: 200,
 });
@@ -668,7 +727,10 @@ dnsIdentityLoader.expiration = 60 * 60 * 24 * 30; // 30 days in seconds
 export const nip05WarmupReady: Promise<void> = loadAllNip05FromIdb().then(
   (entries) => {
     for (const [address, identity] of Object.entries(entries)) {
-      dnsIdentityLoader.identities.set(address, identity);
+      const current = dnsIdentityLoader.identities.get(address);
+      if (!current || current.checked < identity.checked) {
+        dnsIdentityLoader.identities.set(address, identity);
+      }
     }
   },
 );
@@ -723,7 +785,7 @@ const CI_COMMIT_RESULTS_BUFFER = 500;
  * tradeoff vs. creating an additional singleton loader and subscription.
  */
 export const nip34EssentialsLoader = createPaginatedTagValueLoader(pool, "e", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   kinds: [
     1630,
@@ -748,7 +810,7 @@ export const nip34EssentialsLoader = createPaginatedTagValueLoader(pool, "e", {
  * land first.
  */
 export const nip34CommentsLoader = createPaginatedTagValueLoader(pool, "E", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   kinds: [1111, 1619, ...CI_EVENT_KINDS],
   bufferTime: NIP34_COMMENTS_BUFFER,
@@ -772,7 +834,11 @@ export const nip34EssentialDeletionsLoader = createPaginatedTagValueLoader(
   pool,
   "e",
   {
-    cacheRequest,
+    // Startup hydration can fail, and cached deletions can arrive afterward.
+    // Keep this targeted read to recover withdrawals missing from memory,
+    // including when relays are unavailable. Root-item queries do not cover
+    // deletions whose #e tag names a label or status event instead of the root.
+    cacheRequest: parallelCacheRequest,
     eventStore,
     kinds: [5],
     bufferTime: NIP34_ESSENTIAL_DELETIONS_BUFFER,
@@ -798,7 +864,7 @@ export const ciResultsByCommitLoader = createPaginatedTagValueLoader(
   pool,
   "c",
   {
-    cacheRequest,
+    cacheRequest: parallelCacheRequest,
     eventStore,
     kinds: [...CI_EVENT_KINDS],
     bufferTime: CI_COMMIT_RESULTS_BUFFER,
@@ -810,7 +876,7 @@ export const ciResultsByCommitLoader = createPaginatedTagValueLoader(
  * via lowercase `e` tag. No kind restriction. Only fired on detail pages.
  */
 const nip34ThreadReplyLoader = createPaginatedTagValueLoader(pool, "e", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -821,7 +887,7 @@ const nip34ThreadReplyLoader = createPaginatedTagValueLoader(pool, "e", {
  * Only fired on detail pages.
  */
 const nip34ThreadRootLoader = createPaginatedTagValueLoader(pool, "E", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -831,7 +897,7 @@ const nip34ThreadRootLoader = createPaginatedTagValueLoader(pool, "E", {
  * No kind restriction. Only fired on detail pages.
  */
 const nip34ThreadQuoteLoader = createPaginatedTagValueLoader(pool, "q", {
-  cacheRequest,
+  cacheRequest: parallelCacheRequest,
   eventStore,
   bufferTime: NIP34_THREAD_BUFFER,
 });
@@ -842,7 +908,7 @@ const nip34ThreadQuoteLoader = createPaginatedTagValueLoader(pool, "q", {
 // Pure RxJS observable factories — no React, no hooks. Consumed by React
 // hooks via use$(), which handles subscription lifecycle.
 //
-// Two levels, each non-additive (no overlap):
+// Two levels with overlapping coverage but different query scope:
 //
 //   nip34ListLoader    — list level: essentials + comments for a single item.
 //                        Also used by nip34RepoLoader to fire both loaders
@@ -872,27 +938,44 @@ const REACTION_KIND = 7;
 /** Kind 10018 — NIP-51 Git repositories follow list; used for repo follower counts. */
 const GIT_REPOS_FOLLOW_KIND = 10018 as const;
 
+/** Active essentials requests, shared across list, preview and notification consumers. */
+const itemEssentialsRequests = new Map<
+  string,
+  Observable<PaginatedTagValueResponse>
+>();
+
 /**
- * List-level loader for a single item.
- *
- * Fires both essentials (status, labels, deletions) and comments loaders for
- * the given item ID against the provided relay list. Each loader handles its
- * own historical fetch (backward pagination until exhausted) and persistent
- * live subscription.
- *
- * The relay list is a static snapshot — callers are responsible for
- * reactivity. nip34RepoLoader re-fires this function when the RelayGroup
- * gains new relays. useNip34ItemLoader re-subscribes via use$() when
- * repoRelayKey changes (driven by useRelayGroupUrls).
- *
- * Because nip34EssentialsLoader and nip34CommentsLoader are singleton
- * instances, calls within the same buffer window are batched into a single
- * REQ per relay automatically.
- *
- * @param itemId - The event ID of the issue / patch / PR
- * @param relays - Relay URLs to query (snapshot at call time)
+ * Load essentials and withdrawals without comments. Share each item/relay pair
+ * across callers, including calls in different batching windows. Release the
+ * entry when its last subscriber leaves; the singleton loaders still batch
+ * different items into relay requests.
  */
-export function nip34ListLoader(
+export function nip34ItemEssentialsLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return merge(
+    ...[...new Set(relays.map(normalizeUrl))].map((relay) =>
+      defer(() => {
+        const key = JSON.stringify([itemId, relay]);
+        let request = itemEssentialsRequests.get(key);
+        if (!request) {
+          request = createItemEssentialsRequest(itemId, [relay]).pipe(
+            finalize(() => itemEssentialsRequests.delete(key)),
+            share({
+              connector: () => new ReplaySubject<PaginatedTagValueResponse>(1),
+              resetOnRefCountZero: true,
+            }),
+          );
+          itemEssentialsRequests.set(key, request);
+        }
+        return request;
+      }),
+    ),
+  );
+}
+
+function createItemEssentialsRequest(
   itemId: string,
   relays: string[],
 ): Observable<PaginatedTagValueResponse> {
@@ -923,22 +1006,72 @@ export function nip34ListLoader(
       },
     });
 
-    const commentsSub = nip34CommentsLoader({
-      value: itemId,
-      relays,
-    }).subscribe({
-      next: (msg) => subscriber.next(msg),
-    });
-
     return () => {
       essentialsSub.unsubscribe();
-      commentsSub.unsubscribe();
     };
   });
 }
 
+/** Active focused comment requests, shared across repository and detail owners. */
+const itemCommentsRequests = new Map<
+  string,
+  Observable<PaginatedTagValueResponse>
+>();
+
 /**
- * Max inbox relay URLs to query per item author when resolveAuthorInbox is
+ * Keep focused comment/PR-update/CI loading available immediately on direct
+ * entry, without repeating a repository owner's active item/relay request.
+ * Consumers read existing events from the store; replay only the latest signal.
+ * Relays requested together remain active until their last consumer leaves.
+ */
+export function nip34ItemCommentsLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return defer(() => {
+    const requests = new Set<Observable<PaginatedTagValueResponse>>();
+    const missingRelays: string[] = [];
+    for (const relay of new Set(relays.map(normalizeUrl))) {
+      const request = itemCommentsRequests.get(JSON.stringify([itemId, relay]));
+      if (request) requests.add(request);
+      else missingRelays.push(relay);
+    }
+    if (missingRelays.length > 0) {
+      const keys = missingRelays.map((relay) =>
+        JSON.stringify([itemId, relay]),
+      );
+      // Keep one pointer for newly needed relays so multi-relay repository
+      // loading does not fill the singleton's batch-size limit more quickly.
+      const request = nip34CommentsLoader({
+        value: itemId,
+        relays: missingRelays,
+      }).pipe(
+        finalize(() => keys.forEach((key) => itemCommentsRequests.delete(key))),
+        share({
+          connector: () => new ReplaySubject<PaginatedTagValueResponse>(1),
+          resetOnRefCountZero: true,
+        }),
+      );
+      for (const key of keys) itemCommentsRequests.set(key, request);
+      requests.add(request);
+    }
+    return merge(...requests);
+  });
+}
+
+/** Full list-level loading: essentials, withdrawals, and comments. */
+export function nip34ListLoader(
+  itemId: string,
+  relays: string[],
+): Observable<PaginatedTagValueResponse> {
+  return merge(
+    nip34ItemEssentialsLoader(itemId, relays),
+    nip34ItemCommentsLoader(itemId, relays),
+  );
+}
+
+/**
+ * Max inbox relay URLs to query per item author when outbox expansion is
  * enabled. Keeps the relay connection count bounded even for authors with many
  * read relays declared in their kind:10002.
  */
@@ -955,6 +1088,8 @@ const MAX_AUTHOR_INBOX_RELAYS = 3;
  * selected pubkey/dTag) must be a new loader subscription, not an emission.
  */
 export interface Nip34RepoLoaderInputs {
+  /** Declared repository relays, excluding supplemental outbox coverage. */
+  cacheRelays?: string[];
   /** Confirmed member coordinate strings for the repository. */
   coords: string[];
   /** Role history used to authorise PR updates for merge-base inference. */
@@ -1039,8 +1174,6 @@ export function nip34SupplementalRelayLoader(
   coords$: Observable<string[]>,
   relayGroup: RelayGroup,
 ): Observable<NostrEvent> {
-  const resolveAuthorInbox = relayCurationMode.getValue() === "outbox";
-
   return new Observable<NostrEvent>((subscriber) => {
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
@@ -1049,16 +1182,21 @@ export function nip34SupplementalRelayLoader(
     const itemAdditions = new Subject<AdditiveFilterChunk>();
 
     function fireLoaders(id: string, relays: string[]): void {
-      nip34ListLoader(id, relays).subscribe({
-        next: (msg) => {
-          if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-        },
-      });
+      // Release this owner's demand; shared consumers keep their subscriptions.
+      subscriber.add(
+        nip34ListLoader(id, relays).subscribe({
+          next: (msg) => {
+            if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
+          },
+        }),
+      );
     }
 
     function fireAuthorInboxLoaders(ev: NostrEvent): void {
       const perItemQueried = new Set(knownRelayUrls);
-      addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe();
+      subscriber.add(
+        addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe(),
+      );
       const s = eventStore
         .model(MailboxesModel, ev.pubkey)
         .pipe(
@@ -1072,11 +1210,7 @@ export function nip34SupplementalRelayLoader(
             .filter((r) => !perItemQueried.has(r));
           if (newRelays.length === 0) return;
           for (const r of newRelays) perItemQueried.add(r);
-          nip34ListLoader(ev.id, newRelays).subscribe({
-            next: (msg) => {
-              if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-            },
-          });
+          fireLoaders(ev.id, newRelays);
         });
       inboxSubs.add(s);
     }
@@ -1099,11 +1233,22 @@ export function nip34SupplementalRelayLoader(
         }
       });
 
+    function discover(event: NostrEvent): void {
+      if (!isRepositoryRootItem(event, coordinateSet) || seenIds.has(event.id))
+        return;
+      seenIds.add(event.id);
+      fireLoaders(event.id, [...knownRelayUrls]);
+      fireAuthorInboxLoaders(event);
+    }
+    // Expansion also enriches roots already found by the persistent repo
+    // owner, even if no supplemental relay carries the root itself.
+    const cachedRootsSub = eventStore.insert$.subscribe(discover);
+
     const itemSub = resilientAdditiveSubscription(
       pool,
       relayGroupUrls$(relayGroup),
       { initial: [], additions$: itemAdditions },
-      { reconnect: true, gapFill: true, settle: false },
+      { reconnect: true, gapFill: true, settle: false, history: true },
     )
       .pipe(
         onlyEvents(),
@@ -1111,14 +1256,7 @@ export function nip34SupplementalRelayLoader(
         mapEventsToStore(eventStore),
       )
       .subscribe({
-        next: (event) => {
-          const ev = event as NostrEvent;
-          if (!seenIds.has(ev.id)) {
-            seenIds.add(ev.id);
-            fireLoaders(ev.id, [...knownRelayUrls]);
-            if (resolveAuthorInbox) fireAuthorInboxLoaders(ev);
-          }
-        },
+        next: discover,
         error: (err) => subscriber.error(err),
       });
 
@@ -1131,7 +1269,10 @@ export function nip34SupplementalRelayLoader(
         for (const coord of new Set(coords)) {
           if (coordinateSet.has(coord)) continue;
           coordinateSet.add(coord);
-          itemAdditions.next(repoItemChunk(coord));
+          const chunk = repoItemChunk(coord);
+          itemAdditions.next(chunk);
+          for (const event of eventStore.getByFilters([...chunk.filters]))
+            discover(event);
         }
       },
       error: (err) => subscriber.error(err),
@@ -1142,6 +1283,7 @@ export function nip34SupplementalRelayLoader(
       relaySub.unsubscribe();
       itemSub.unsubscribe();
       coordsSub.unsubscribe();
+      cachedRootsSub.unsubscribe();
       inboxSubs.unsubscribe();
     };
   });
@@ -1191,14 +1333,21 @@ export function nip34RepoLoader(
   inputs$: Observable<Nip34RepoLoaderInputs>,
   relayGroup: RelayGroup,
   privateRepository = false,
+  onCacheRestore?: (events: NostrEvent[] | undefined) => void,
+  onLoadingChange?: (loading: boolean) => void,
 ): Observable<NostrEvent> {
-  const resolveAuthorInbox =
-    !privateRepository && relayCurationMode.getValue() === "outbox";
-
   return new Observable<NostrEvent>((subscriber) => {
+    const cacheWriter = privateRepository
+      ? undefined
+      : createRepositoryCacheWriter();
+    const pending = new Set<string>();
+    const loading = (key: string, active: boolean) => {
+      if (active) pending.add(key);
+      else pending.delete(key);
+      onLoadingChange?.(pending.size > 0);
+    };
     const seenIds = new Set<string>();
     const knownRelayUrls = new Set<string>();
-    const inboxSubs = new Subscription();
 
     // Grow-only coordinate state shared by every subscription below.
     // coordinateSet is read by isRepositoryRootItem at delivery time, so
@@ -1217,36 +1366,19 @@ export function nip34RepoLoader(
     const metaAdditions = new Subject<AdditiveFilterChunk>();
 
     function fireLoaders(id: string, relays: string[]): void {
-      nip34ListLoader(id, relays).subscribe({
-        next: (msg) => {
-          if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-        },
-      });
-    }
-
-    function fireAuthorInboxLoaders(ev: NostrEvent): void {
-      const perItemQueried = new Set(knownRelayUrls);
-      addressLoader({ kind: 10002, pubkey: ev.pubkey }).subscribe();
-      const s = eventStore
-        .model(MailboxesModel, ev.pubkey)
-        .pipe(
-          filter((m): m is NonNullable<typeof m> => m !== undefined),
-          take(1),
-        )
-        .subscribe((mailboxes) => {
-          const newRelays = mailboxes.inboxes
-            .slice(0, MAX_AUTHOR_INBOX_RELAYS)
-            .map(normalizeUrl)
-            .filter((r) => !perItemQueried.has(r));
-          if (newRelays.length === 0) return;
-          for (const r of newRelays) perItemQueried.add(r);
-          nip34ListLoader(ev.id, newRelays).subscribe({
-            next: (msg) => {
-              if (msg !== "EOSE") subscriber.next(msg as NostrEvent);
-            },
-          });
-        });
-      inboxSubs.add(s);
+      // Release this owner's demand; shared consumers keep their subscriptions.
+      loading(`item:${id}`, true);
+      subscriber.add(
+        nip34ListLoader(id, relays).subscribe({
+          next: (msg) => {
+            if (msg === "EOSE") loading(`item:${id}`, false);
+            else {
+              cacheWriter?.consider(msg as NostrEvent);
+              subscriber.next(msg as NostrEvent);
+            }
+          },
+        }),
+      );
     }
 
     // When new relays join the group, re-fire existing items' loaders against
@@ -1283,13 +1415,27 @@ export function nip34RepoLoader(
           { reconnect: true, gapFill: true, settle: false },
         )
           .pipe(onlyEvents(), mapEventsToStore(eventStore))
-          .subscribe({ error: (err) => subscriber.error(err) });
+          .subscribe({
+            next: (event) => cacheWriter?.consider(event),
+            error: (err) => subscriber.error(err),
+          });
 
     const itemSub = resilientAdditiveSubscription(
       pool,
       relayGroupUrls$(relayGroup),
       { initial: [], additions$: itemAdditions },
-      { reconnect: true, gapFill: true, settle: false },
+      {
+        reconnect: true,
+        gapFill: true,
+        settle: false,
+        history: true,
+        // Start inventory reconciliation before seeded item batches fill the
+        // shared history queue. Each coordinate is already an immutable chunk.
+        deltaBufferSize: privateRepository ? undefined : 1,
+        onHistoryComplete: (_relay, key, covered) => {
+          if (covered) loading(`inventory:${key}`, false);
+        },
+      },
     )
       .pipe(
         onlyEvents(),
@@ -1299,6 +1445,7 @@ export function nip34RepoLoader(
       .subscribe({
         next: (event) => {
           const ev = event as NostrEvent;
+          cacheWriter?.consider(ev);
           if (!REPO_ITEM_KINDS.some((kind) => kind === ev.kind)) return;
           if (!seenIds.has(ev.id)) {
             seenIds.add(ev.id);
@@ -1306,7 +1453,6 @@ export function nip34RepoLoader(
             // (relayGroupUrls$ is a BehaviorSubject so relaySub fires
             // synchronously before itemSub can emit).
             fireLoaders(ev.id, [...knownRelayUrls]);
-            if (resolveAuthorInbox) fireAuthorInboxLoaders(ev);
           }
         },
         error: (err) => subscriber.error(err),
@@ -1394,48 +1540,135 @@ export function nip34RepoLoader(
       )
       .subscribe();
 
+    function restoreCachedEvents(cached: NostrEvent[]): NostrEvent[] {
+      for (const event of cached) {
+        markFromCache(event);
+        eventStore.add(event);
+      }
+      const restored = cached.filter((event) => eventStore.hasEvent(event.id));
+      relayEventPresence.acceptCached(restored.map((event) => event.id));
+      return restored;
+    }
+
+    function seedCachedItems(coords: string[]): void {
+      if (privateRepository || !coords.length) return;
+      for (const event of eventStore.getByFilters({
+        kinds: [...REPO_ITEM_KINDS],
+        "#a": coords,
+      })) {
+        if (
+          isPrivateRepositoryEventId(event.id) ||
+          !isRepositoryRootItem(event, coordinateSet) ||
+          seenIds.has(event.id)
+        )
+          continue;
+        seenIds.add(event.id);
+        cacheWriter?.consider(event);
+        fireLoaders(event.id, [...knownRelayUrls]);
+      }
+    }
+
     // Subscribed after every consumer above so a synchronous first emission
     // (BehaviorSubject) reaches the live additive subscriptions. Growth is
     // content-keyed: only genuinely new coordinates or changed role-history
     // content produce chunk emissions; anything else is a strict no-op.
-    const inputsSub = inputs$.subscribe({
-      next: ({ coords, roleHistory }) => {
-        const newCoords = [...new Set(coords)].filter(
-          (coord) => !coordinateSet.has(coord),
-        );
-        const roleHistoryKey = roleHistoryCacheKey(roleHistory);
-        const roleHistoryChanged = roleHistoryKey !== lastRoleHistoryKey;
-        if (newCoords.length === 0 && !roleHistoryChanged) return;
-        for (const coord of newCoords) {
-          coordinateSet.add(coord);
-          const parsed = parseRepoCoordinate(coord);
-          if (parsed) maintainerPubkeys.add(parsed.pubkey);
-        }
-        // Software applications span authors × coordinates; emit the pairs
-        // not yet covered (new author × all coordinates, all authors × new
-        // coordinates), pushed before the item chunks so the small
-        // application REQ is not queued behind the item backlog.
-        for (const pubkey of maintainerPubkeys) {
-          for (const coord of coordinateSet) {
-            const chunk = softwareApplicationChunk(pubkey, coord);
-            if (emittedAppChunkKeys.has(chunk.key)) continue;
-            emittedAppChunkKeys.add(chunk.key);
-            appAdditions.next(chunk);
+    const inputsSub = inputs$
+      .pipe(
+        concatMap((input) =>
+          defer(() => {
+            const coords = [...new Set(input.coords)].filter(
+              (coord) => !coordinateSet.has(coord),
+            );
+            if (privateRepository || !coords.length)
+              return of({ ...input, cached: [] as NostrEvent[] });
+            onCacheRestore?.(undefined);
+            return new Observable<typeof input & { cached: NostrEvent[] }>(
+              (initial) => {
+                let forwarded = false;
+                const restore = observeRepositoryCacheRestore(
+                  coords,
+                  cacheRequest,
+                ).subscribe((result) => {
+                  if (!forwarded) {
+                    forwarded = true;
+                    initial.next({
+                      ...input,
+                      cached: result.state === "ready" ? result.events : [],
+                    });
+                    initial.complete();
+                  } else if (result.state === "ready") {
+                    // A stalled read may finish after network discovery starts.
+                    // Restore dependencies before roots and seed newly recovered
+                    // IDs without replaying old role-history/coordinate inputs.
+                    restoreCachedEvents(result.events);
+                    seedCachedItems(coords);
+                  }
+                });
+                // Keep late cache recovery owned by the repository, not the
+                // one-shot input emission that releases subsequent input updates.
+                subscriber.add(restore);
+                return () => {
+                  if (!forwarded) restore.unsubscribe();
+                };
+              },
+            );
+          }),
+        ),
+      )
+      .subscribe({
+        next: ({ coords, roleHistory, cacheRelays, cached }) => {
+          cacheWriter?.setRelays(cacheRelays ?? []);
+          const restored = restoreCachedEvents(cached);
+          onCacheRestore?.(restored);
+          const newCoords = [...new Set(coords)].filter(
+            (coord) => !coordinateSet.has(coord),
+          );
+          const roleHistoryKey = roleHistoryCacheKey(roleHistory);
+          const roleHistoryChanged = roleHistoryKey !== lastRoleHistoryKey;
+          if (newCoords.length === 0 && !roleHistoryChanged) return;
+          for (const coord of newCoords) {
+            coordinateSet.add(coord);
+            const parsed = parseRepoCoordinate(coord);
+            if (parsed) maintainerPubkeys.add(parsed.pubkey);
           }
-        }
-        for (const coord of newCoords) {
-          itemAdditions.next(repoItemChunk(coord));
-          metaAdditions.next(repoMetaChunk(coord));
-        }
-        if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
-        if (roleHistoryChanged) {
-          lastRoleHistoryKey = roleHistoryKey;
-          roleHistory$.next(roleHistory);
-        }
-      },
-      error: (err) => subscriber.error(err),
-      // Completion means no further growth — the subscription lives on.
-    });
+          // Software applications span authors × coordinates; emit the pairs
+          // not yet covered (new author × all coordinates, all authors × new
+          // coordinates), pushed before the item chunks so the small
+          // application REQ is not queued behind the item backlog.
+          for (const pubkey of maintainerPubkeys) {
+            for (const coord of coordinateSet) {
+              const chunk = softwareApplicationChunk(pubkey, coord);
+              if (emittedAppChunkKeys.has(chunk.key)) continue;
+              emittedAppChunkKeys.add(chunk.key);
+              appAdditions.next(chunk);
+            }
+          }
+          for (const coord of newCoords) {
+            const chunk = repoItemChunk(coord);
+            loading(`inventory:${chunk.key}`, true);
+            itemAdditions.next(chunk);
+            metaAdditions.next(repoMetaChunk(coord));
+          }
+          seedCachedItems(newCoords);
+          if (!privateRepository && newCoords.length > 0) {
+            subscriber.add(
+              loadRepositoryCache(newCoords, queryLocalCache).subscribe(
+                (events) => {
+                  restoreCachedEvents(events);
+                  seedCachedItems(newCoords);
+                },
+              ),
+            );
+          }
+          if (newCoords.length > 0) coordsList$.next([...coordinateSet].sort());
+          if (roleHistoryChanged) {
+            lastRoleHistoryKey = roleHistoryKey;
+            roleHistory$.next(roleHistory);
+          }
+        },
+        error: (err) => subscriber.error(err),
+        // Completion means no further growth — the subscription lives on.
+      });
 
     return () => {
       relaySub.unsubscribe();
@@ -1444,7 +1677,7 @@ export function nip34RepoLoader(
       repoMetaSub.unsubscribe();
       stackCandidateSub.unsubscribe();
       inputsSub.unsubscribe();
-      inboxSubs.unsubscribe();
+      cacheWriter?.close();
     };
   });
 }

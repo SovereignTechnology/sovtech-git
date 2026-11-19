@@ -25,15 +25,25 @@ interface PrivateGitRelayListCache {
   relayUrls: string[];
 }
 
-function privateGitRelayListCacheKey(pubkey: string): string {
-  return `private_git_relay_list:${pubkey}`;
+// Retain recent versions because relays can replay older events after reload.
+const PRIVATE_GIT_RELAY_LIST_CACHE_LIMIT = 5;
+const pendingDecodes = new Map<string, Promise<string[]>>();
+
+function privateGitRelayListCacheKey(pubkey: string, eventId?: string): string {
+  const prefix = `private_git_relay_list:${pubkey}`;
+  return eventId ? `${prefix}:${eventId}` : prefix;
 }
 
 function loadPrivateGitRelayListCache(
   pubkey: string,
+  eventId: string,
 ): PrivateGitRelayListCache | undefined {
   try {
-    const raw = localStorage.getItem(privateGitRelayListCacheKey(pubkey));
+    // Read the previous single-entry format too, without losing an already
+    // approved decryption when upgrading.
+    const raw =
+      localStorage.getItem(privateGitRelayListCacheKey(pubkey, eventId)) ??
+      localStorage.getItem(privateGitRelayListCacheKey(pubkey));
     if (!raw) return undefined;
 
     const parsed = JSON.parse(raw) as unknown;
@@ -41,7 +51,7 @@ function loadPrivateGitRelayListCache(
 
     const candidate = parsed as Record<string, unknown>;
     if (
-      typeof candidate.eventId !== "string" ||
+      candidate.eventId !== eventId ||
       !Array.isArray(candidate.relayUrls) ||
       !candidate.relayUrls.every(
         (relay): relay is string => typeof relay === "string",
@@ -50,10 +60,12 @@ function loadPrivateGitRelayListCache(
       return undefined;
     }
 
-    return {
-      eventId: candidate.eventId,
+    const cache = {
+      eventId,
       relayUrls: normalizePrivateGitRelayUrls(candidate.relayUrls),
     };
+    savePrivateGitRelayListCache(pubkey, cache);
+    return cache;
   } catch {
     return undefined;
   }
@@ -64,10 +76,57 @@ function savePrivateGitRelayListCache(
   cache: PrivateGitRelayListCache,
 ): void {
   try {
+    const prefix = privateGitRelayListCacheKey(pubkey);
+    const currentKey = privateGitRelayListCacheKey(pubkey, cache.eventId);
     localStorage.setItem(
-      privateGitRelayListCacheKey(pubkey),
-      JSON.stringify(cache),
+      currentKey,
+      JSON.stringify({ ...cache, lastUsed: Date.now() }),
     );
+
+    const entries: { key: string; lastUsed: number }[] = [];
+    // Include the legacy single-entry cache in the limit. Entries written
+    // before recency tracking are evicted first; a hit promotes them.
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key || (key !== prefix && !key.startsWith(`${prefix}:`))) {
+        continue;
+      }
+      let lastUsed = 0;
+      try {
+        const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+        if (typeof value === "object" && value !== null) {
+          const record = value as Record<string, unknown>;
+          if (
+            typeof record.lastUsed === "number" &&
+            Number.isFinite(record.lastUsed)
+          ) {
+            lastUsed = record.lastUsed;
+          }
+          // Remove the legacy duplicate after successfully storing its
+          // promoted per-event entry.
+          if (key === prefix && record.eventId === cache.eventId) {
+            entries.push({ key, lastUsed: -Infinity });
+            continue;
+          }
+        }
+      } catch {
+        // Malformed cache records are also candidates for eviction.
+      }
+      entries.push({ key, lastUsed });
+    }
+    entries.sort((a, b) => {
+      if (a.key === currentKey) return -1;
+      if (b.key === currentKey) return 1;
+      return b.lastUsed - a.lastUsed;
+    });
+    for (const [index, entry] of entries.entries()) {
+      if (
+        index >= PRIVATE_GIT_RELAY_LIST_CACHE_LIMIT ||
+        entry.lastUsed === -Infinity
+      ) {
+        localStorage.removeItem(entry.key);
+      }
+    }
   } catch {
     // Storage is an optimization; decoding still works without it.
   }
@@ -193,8 +252,28 @@ export async function decodePrivateGitRelayListEvent(
       "Private Git relay list has an invalid public envelope",
     );
   }
-  const cached = loadPrivateGitRelayListCache(pubkey);
-  if (cached?.eventId === event.id) return cached.relayUrls;
+  const cached = loadPrivateGitRelayListCache(pubkey, event.id);
+  if (cached) return cached.relayUrls;
+
+  const key = privateGitRelayListCacheKey(pubkey, event.id);
+  const pending = pendingDecodes.get(key);
+  if (pending) return [...(await pending)];
+
+  const promise = decryptPrivateGitRelayListEvent(event, pubkey, signer);
+  pendingDecodes.set(key, promise);
+  try {
+    return [...(await promise)];
+  } finally {
+    // Rejections must remain retryable through the caller's manual retry.
+    pendingDecodes.delete(key);
+  }
+}
+
+async function decryptPrivateGitRelayListEvent(
+  event: NostrEvent,
+  pubkey: string,
+  signer: EventSigner,
+): Promise<string[]> {
   if (!signer.nip44) {
     throw new PrivateGitRelayListDecodeError(
       "signer",

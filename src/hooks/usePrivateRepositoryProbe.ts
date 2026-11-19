@@ -58,6 +58,17 @@ function uniqueRelayUrls(relays: readonly string[]): string[] {
   return [...new Set(relays.map(normalizeUrl))].sort();
 }
 
+class IncompletePrivateSnapshotError extends Error {
+  constructor(
+    relayUrl: string,
+    readonly hasEvents: boolean,
+  ) {
+    super(
+      `Private Git service relay ${relayUrl} did not complete its response safely`,
+    );
+  }
+}
+
 async function requestRelay(
   relayUrl: string,
   filters: Filter[],
@@ -69,8 +80,9 @@ async function requestRelay(
     PRIVATE_PROBE_TIMEOUT_MS,
   );
   if (!snapshot.complete) {
-    throw new Error(
-      `Private repository relay ${relayUrl} did not complete its response safely`,
+    throw new IncompletePrivateSnapshotError(
+      relayUrl,
+      snapshot.events.length > 0,
     );
   }
   return snapshot.events;
@@ -296,13 +308,15 @@ async function probePrivateRepository(
       authors,
       "#d": [dTag],
     } as Filter;
-    const responses = await Promise.all(
+    const responses = await Promise.allSettled(
       discoveryRelays.map(async (relay) => ({
         relay,
         events: await requestRelay(relay, [filter]),
       })),
     );
-    for (const response of responses) {
+    for (const result of responses) {
+      if (result.status !== "fulfilled") continue;
+      const response = result.value;
       const announcements = response.events.filter(
         (event) =>
           verifyEvent(event) &&
@@ -320,6 +334,32 @@ async function probePrivateRepository(
           if (!queriedAuthors.has(subject)) pendingAuthors.add(subject);
         }
       }
+    }
+    const failure = responses.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") {
+      // A failed private service does not establish that an unknown route is
+      // private. Continue ordinary discovery unless we have privacy evidence.
+      const canDiscoverPublic =
+        events.size === 0 &&
+        responses.every(
+          (result) =>
+            result.status === "fulfilled" ||
+            (result.reason instanceof IncompletePrivateSnapshotError &&
+              !result.reason.hasEvents),
+        ) &&
+        !knownPrivateInScope &&
+        !knownIsPrivate &&
+        privateHintRelays.length === 0 &&
+        !relayHints.some((relay) => listedSet.has(normalizeUrl(relay)));
+      if (canDiscoverPublic) return { status: "absent", relayUrls: [] };
+      return {
+        status: "unavailable",
+        relayUrls: [],
+        error:
+          failure.reason instanceof Error
+            ? failure.reason.message
+            : "Private Git service discovery did not complete safely.",
+      };
     }
   }
 
@@ -409,7 +449,7 @@ async function probePrivateRepository(
   };
 }
 
-/** Resolve private services completely before ordinary repository discovery. */
+/** Check private services before admitting ordinary repository discovery. */
 export function usePrivateRepositoryProbe(
   pubkey: string | undefined,
   dTag: string | undefined,
@@ -475,8 +515,8 @@ export function usePrivateRepositoryProbe(
     }
     return defer(() => {
       const known = getKnownRepositoryScope(pubkey, dTag, knownAnnouncement);
-      // A verified public announcement is a synchronous answer. Emitting
-      // loading first can unmount open composers on each announcement update.
+      // A verified public announcement is a synchronous answer. Avoid
+      // unmounting composers on each announcement update.
       // Quarantined coordinates and private components still require discovery.
       if (
         known.validKnownAnnouncement &&

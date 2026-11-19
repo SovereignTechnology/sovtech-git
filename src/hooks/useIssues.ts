@@ -1,26 +1,22 @@
-import { useEffect, useMemo } from "react";
+import type { IEventStore } from "applesauce-core";
+import { useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
-import type { RelayGroup } from "applesauce-relay";
 import {
   coordsCacheKey,
   roleHistoryCacheKey,
   type RepositoryRoleHistory,
   type ResolvedIssueLite,
-  type RepoQueryOptions,
 } from "@/lib/nip34";
 import { IssueListModel } from "@/models/IssueListModel";
 import type { Observable } from "rxjs";
-import { BehaviorSubject, EMPTY } from "rxjs";
-import { catchError } from "rxjs/operators";
-import { nip34RepoLoader, type Nip34RepoLoaderInputs } from "@/services/nostr";
 
 // ---------------------------------------------------------------------------
 // Bulk hook (repo issue list)
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch and reactively resolve issues for a repository.
+ * Resolve repository issues from the store; RepoLayout owns relay loading.
  *
  * Accepts either a single coordinate string or an array of coordinate strings
  * (one per maintainer in the chain). Passing all maintainer coordinates
@@ -35,23 +31,19 @@ import { nip34RepoLoader, type Nip34RepoLoaderInputs } from "@/services/nostr";
  * keyed on the sorted coordinate string. Multiple components subscribing to
  * the same repo share one model instance and one set of store subscriptions.
  *
- * Always pass repoRelayGroup from useResolvedRepository. When outbox curation
- * mode is enabled, the caller is responsible for separately subscribing to
- * extraRelaysForMaintainerMailboxCoverage so events from those relays land in
- * the store; this hook reads from the store regardless of which group fetched
- * the events.
+ * Reads events from both the base repository and supplemental relay owners.
+ * Call useNip34RepoLoader once at the page boundary to fetch their roots.
  *
- * @param repoCoords     - Coordinate string(s) for the repository
- * @param repoRelayGroup - Base RelayGroup from useResolvedRepository
- * @param options        - Query options including relay hints from the URL/settings
+ * @param repoCoords - Repository presentation coordinates
+ * @param roleHistory - Role history for resolving item essentials
  */
 export function useIssues(
   repoCoords: string | string[] | undefined,
-  repoRelayGroup: RelayGroup | undefined,
-  options: RepoQueryOptions,
   roleHistory?: RepositoryRoleHistory,
+  view?: IEventStore,
 ): ResolvedIssueLite[] | undefined {
-  const store = useEventStore();
+  const canonical = useEventStore();
+  const store = view ?? canonical;
 
   // Normalise to a sorted array for consistent filter building and cache keys.
   const coords = useMemo(() => {
@@ -63,54 +55,11 @@ export function useIssues(
 
   const cacheKey = coords ? coordsCacheKey(coords) : "";
 
-  // Structural key: the resolver rebuilds roleHistory on every
-  // announcement-graph emission, so identity-based deps would restart the
-  // relay subscription (fresh seenIds, full re-fetch) on emissions that did
-  // not change role content.
+  // Rebuilt role-history objects only change this model when content changes.
   const roleHistoryKey = useMemo(
     () => roleHistoryCacheKey(roleHistory),
     [roleHistory],
   );
-
-  // Reactive loader inputs anchored on the relay group, which is model-cached
-  // per (pubkey, dTag) — so the relay subscription below survives coordinate
-  // growth and role-history changes, restarting only when the repository
-  // identity changes.
-  const inputs$ = useMemo(
-    () =>
-      new BehaviorSubject<Nip34RepoLoaderInputs>({
-        coords: coords ?? [],
-        roleHistory,
-      }),
-    // Intentionally NOT keyed on coords/roleHistory — they are fed in below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [repoRelayGroup],
-  );
-  useEffect(() => {
-    if (!coords || coords.length === 0) return;
-    inputs$.next({ coords, roleHistory });
-    // Content-keyed deps: pushes happen only when the coordinate set or the
-    // role-history content changes; the loader additionally no-ops on
-    // unchanged inputs, so re-pushes are free.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputs$, cacheKey, roleHistoryKey]);
-
-  // Fetch issues from relay and pipe each newly discovered issue ID into
-  // nip34ListLoader via nip34RepoLoader. The factory handles dedup (seenIds
-  // in closure) and closes cleanly on unsubscribe. Coordinate growth and
-  // role-history changes flow through inputs$ as additive delta REQs instead
-  // of restarting the subscription. Filter merging with useNip34ItemLoader
-  // calls is automatic because both share the same singleton loader
-  // instances.
-  const hasCoords = !!coords && coords.length > 0;
-  use$(() => {
-    if (!hasCoords || !repoRelayGroup) return undefined;
-    return nip34RepoLoader(
-      inputs$,
-      repoRelayGroup,
-      options.privateRepository,
-    ).pipe(catchError(() => EMPTY));
-  }, [hasCoords, repoRelayGroup, inputs$, options.privateRepository]);
 
   // Subscribe to the model — cached by the store, shared across components.
   return use$(() => {

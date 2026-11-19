@@ -11,7 +11,9 @@ lerna-debug.log*
 node_modules
 .pnpm-store
 dist
+dist-perf
 dist-ssr
+perf-reports
 *.local
 .ai/
 yarn.lock
@@ -37,3 +39,6 @@ package-lock.json
 
 # Benchmark run reports (committed baseline lives at benchmarks/baseline.json)
 benchmarks/results/
+
+# Local working material
+/work/

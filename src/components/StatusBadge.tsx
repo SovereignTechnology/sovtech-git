@@ -7,7 +7,8 @@ interface StatusBadgeProps {
   status: IssueStatus;
   className?: string;
   /**
-   * When "pr", uses PR-specific labels (e.g. "Merged" instead of "Resolved").
+   * When "pr", uses PR-specific labels and icons (e.g. "Merged" instead of
+   * "Resolved").
    * Default: "issue".
    */
   variant?: "issue" | "pr";
@@ -26,10 +27,11 @@ export function StatusIcon({
   const config = statusConfig[status];
   const override = variant === "pr" ? prStatusOverrides[status] : undefined;
   const Icon = override?.icon ?? config.icon;
-  // Extract the text-colour class from the config so the icon is coloured correctly.
-  const colourClass = config.className
+  // Extract the text-colour classes so the icon is coloured correctly.
+  const colourClass = (override?.className ?? config.className)
     .split(" ")
-    .find((c) => c.startsWith("text-"));
+    .filter((c) => c.startsWith("text-") || c.startsWith("dark:text-"))
+    .join(" ");
   return <Icon className={cn("h-3.5 w-3.5", colourClass, className)} />;
 }
 
@@ -48,7 +50,7 @@ export function StatusBadge({
       variant="outline"
       className={cn(
         "gap-1 font-medium transition-colors",
-        config.className,
+        override?.className ?? config.className,
         className,
       )}
     >

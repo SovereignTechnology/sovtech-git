@@ -2,7 +2,202 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduce timer churn during repository history negotiation and event downloads while preserving inactivity deadlines and stalled-source fallback.
+
+- Keep software application and release publication checks active after initial rendering instead of permanently reporting every relay as stopped.
+
+- Theme scrollbars consistently across dialogs, sidebars, editors, and horizontal scrollers in light and dark mode.
+
+- Synchronize account and signer switches across browser tabs without restoring stale selections; synchronize logout while preserving existing signer connections.
+
+- Explain repository local-relay access inline and resume waiting reads on approval, including relays on localhost:4869.
+
+- Fetch Nostr-announced commits even when Git servers have moved to a newer tip, instead of incorrectly reporting them as unavailable. Give servers advertising the expected tip a three-second head start before trying others, while allowing slow requests to finish.
+
+- Show "authorization required" for git servers that answer HTTP 401/403, instead of reporting them as unreachable.
+
+- Keep locally submitted comments visible in Curated issue and PR threads with their publishing progress while waiting for repository relays.
+
+### Changed
+
+- Show native Nix CI provider offerings independently, with advertised systems, isolation, capacity and expiry, while retaining legacy provider capabilities.
+
+- Update Applesauce for batched timelines, cached failed casts, and reduced relay/loader timer churn, with upstream core 7.1.3 broad-filter fixes and loaders 7.2.0 cache release signals replacing both local patches.
+
+- Coordinate local relay discovery, bunker signers, and internal Git connections with endpoint approval and browser network permissions. Explain local connections before browser permission prompts, offer optional local caching after login, and keep public Git proxy fallback while excluding recognized internal servers.
+
+- Load secondary routes and repository views on demand, then warm unused pages one at a time during quiet periods in relay traffic and browser activity.
+
+- Update the development and CI GRASP integration-test server to ngit-grasp 3.0.10, including its repository-expiry cleanup fix. Use the upstream certificate dependency fixes in place of local lockfile patches.
+
+### Removed
+
+- Retire Netlify deployment configuration and CI tooling after the hosting migration; production nsite publishing remains active.
+
+## [4.3.0] - 2026-10-28
+
+**Better performance & clearer relay choices**
+
+Performance is a major focus of this release: fewer duplicate relay queries, less
+repeated processing as events arrive, and less redundant downloading of cached
+history on relays that support reconciliation. Shared loaders, batched list and CI
+updates, and search indexing only when needed reduce background work while
+browsing busy repositories. Cached issues and pull requests return with their known
+statuses before relay refresh, while improved history loading recovers older
+conversations that relay limits could previously hide.
+
+Public repositories now default to Curated relay views, with clearer source labels
+and an Expanded option for wider discovery. Switch views without reloading and
+remember your choice per repository. Refreshed status icons, more readable PR
+stacks, and better profile loading make ongoing work easier to follow.
+
+The release also brings broad security updates across app dependencies and Android
+build tools, an Applesauce v7 upgrade, and reproducible Nix-based release workflows
+that keep Android compilation separate from signing secrets.
+
 ### Added
+
+- Remember Curated or Expanded relay choices per repository in this browser, with a Default option that inherits the global repository view setting.
+
+- Add an opt-in profiling build with relay waterfalls, long-frame observations, and cache timings for isolated performance investigations.
+
+- Delete software releases you published, optionally including their asset events; the deletion request goes to your outbox, the repository relays, and Zapstore for Android releases.
+
+### Changed
+
+- Patch the Nix npm fallback and its bundled HTTP dependencies while preserving the Node runtime.
+
+- Update development and CI to pnpm 10.34.9 for package-install security fixes, with explicit esbuild and SWC build-script approvals.
+
+- Update Android builds to Java 21.0.13 and Gradle 8.14.6, with patched networking, cryptography, archive, XML, and collection dependencies for build tools, lint, and unit-test models.
+
+- Update CI publication tools to ngit 3.0.4 and Netlify CLI 27.14.2, using patched Nix native libraries for ngit and refreshed Netlify runtime dependencies.
+
+- Update the GRASP integration fixture to 3.0.9 with refreshed certificate verification and root certificates.
+
+- Upgrade Vitest to version 4 for patched test-server dependencies and adapt browser-observer mocks to its constructor semantics.
+
+- Update the Nix development and CI environment to Node.js 24.22.1 with its native security fixes and pinned certificate bundle, align shell pnpm with CI, and refresh the matching Playwright browser tooling. Remove the unsupported Intel macOS shell target; Linux and Apple Silicon targets remain.
+
+- Restore cached repository items with their known statuses before relay refresh, and cache new collaboration events only after repository-relay confirmation.
+
+- Default public repository views to relay-confirmed items and discussion, with per-event source labels and a responsive on-page menu for switching between Curated and Expanded relays without reloading. Existing explicit preferences are preserved.
+
+- Reconcile public repository history with NIP-77 when matching events are cached, fetching missing IDs through shared rate-limit admission and retaining coverage-aware fallback for unsupported relays.
+
+- Share focused comment, PR-update and CI queries between repository lists and detail pages, preserving immediate loading on direct entry.
+
+- Share one repository item loader between issue and PR lists, avoiding duplicate root subscriptions while retaining additive maintainer and relay discovery.
+
+- Reuse event tag-value indexes when dispatching batched loader results, reducing repeated tag scans across subscribers.
+
+- Build local fuzzy-search indexes only while searching, avoiding indexing work when browsing repositories, issues, and PRs.
+
+- Coalesce CI workflow grouping during event bursts, preserving the first and latest results while reducing repeated work for PR, commit, and repository checks.
+
+- Coalesce issue/PR and essentials list rebuilds during event bursts, preserving initial and latest results while limiting repeated UI derivation work.
+
+- Upgrade to Applesauce v7 with paced, coverage-aware automatic history loading; retain repository fetch ownership, verification policy, and explicit batch-triggered search and notification history using v7 coverage.
+
+- Run Nostr CI checks, previews, web deployments and Android releases through pinned Nix apps, with Android compilation separated from secret-bearing signing.
+
+- Use GitHub's Octicons and colour conventions for issue, PR and patch statuses: closed and draft PRs get their own shapes, merged and resolved items are purple instead of pink, and patches share the PR icons.
+
+### Fixed
+
+- Keep page content from shifting sideways when navigating between pages with and without a scrollbar.
+
+- Keep cached NIP-05 routes available while refreshing expired mappings, including during transient network failures.
+
+- Update the browser event-cache adapter to remove unused lookup dependencies with upstream security findings, retaining existing cache backend selection and support for legacy injected providers.
+
+- Update Zod to version 4 with compatible form resolvers for upstream collection-validation security fixes; preserve existing draft and repository-selection schemas.
+
+- Upgrade React Router to version 7 for current redirect and URL-handling security fixes while retaining the existing declarative routes.
+
+- Update compatible JavaScript dependencies for upstream security fixes, including Capacitor navigation guards, Vite development-server protections, React Router redirects and fflate ZIP parsing. Refresh affected build-tool dependencies while preserving the Applesauce patch.
+
+- Load author profiles from configured fallback relays as well as profile indexes, so issue names and avatars can appear without visiting each user's profile page.
+
+- Remember the five most recently used decrypted private Git service list versions per account and share concurrent decrypt requests to avoid repeated signer prompts after reloads.
+
+- Preserve slow repository cache restores and load cached statuses before supplemental relay items, avoiding count churn when a warm cache takes more than three seconds to read.
+
+- Restore cached public repository announcements before relay discovery so warm issue/PR views can load without waiting for network privacy classification.
+
+- Recover older repository issues and PRs when relays cap the initial root query, including late maintainer coordinates and supplemental relays.
+
+- Release superseded issue/PR list queries immediately as roots and essentials arrive, avoiding continued processing by obsolete cached models.
+
+- Release repository-owned item and author-mailbox subscriptions when leaving the repository, while preserving active shared consumers.
+
+- Avoid repeated broad tag-index scans when opening populated issue/PR timelines with Applesauce v7.
+
+- Avoid re-querying empty tag history after a successful initial EOSE while keeping live updates active.
+
+- Remove avoidable per-filter waiting from explicit notification history batches while preserving shared concurrency limits and relay cooldowns.
+
+- Honour limits on local event-store queries without time bounds through Applesauce v7's query implementation. Existing Android signer restoration, exact-ID deletion and WebSocket recovery fixes remain supplied upstream.
+
+- Continue repository search history from each completed initial filter response, preserving inclusive timestamp boundaries instead of repeating the first page.
+
+- Load automatic history beyond relay result caps without treating failed or cancelled pages as exhausted; report saturated timestamp boundaries as incomplete.
+
+- Automatically continue public repository discovery when a private Git service is unavailable and no private repository evidence exists; avoid labelling unknown repositories private.
+
+- Show long inferred PR stacks in top-to-bottom columns on wider screens so every title stays readable instead of truncating to fit one row.
+
+## [4.2.1] - 2026-10-01
+
+**Reliable notification sync & recovery**
+
+### Fixed
+
+- Preserve read/archive IDs for unloaded notifications and cache their timestamps locally so cutoff compaction does not require fetching them again.
+
+- Bind notification models to the current store instance so recreating the store cannot show stale unread or dismissed items.
+
+- Preserve pending notification actions across reloads and freeze their timestamps and affected items so other windows replay the same intent.
+
+- Batch notification publication after five quiet seconds and coordinate open windows to avoid duplicate state events; retries and changes during signing respect the same delay.
+
+- Sync notification read/archive changes between open windows, including unread and unarchive reversals, and discard stale publish drafts when state changes during signing.
+
+- Preserve notification action order between publication batches and reconcile failed drafts before retrying, retaining recovery checkpoints when publication fails.
+
+- Reload notification state owners together during development so hot updates cannot leave stale sync subscriptions active.
+
+### Added
+
+- Show status icons and readable status labels for PRs in inferred stacks.
+
+- Show notification discovery loading on the page and bell badge, and settle empty history loads without implying complete relay coverage.
+
+- Add a direct-access `/notifications/diagnostics` page with a live version list, UTC event and observation timestamps, per-window production/download provenance, restore actions, and full state in a modal. Retain 100 distinct signed versions independently from local checkpoints and pre-restore backups, available through a compact view switch.
+
+## [4.2.0] - 2026-10-01
+
+**Better discovery & reliable collaboration**
+
+Find repositories and conversations faster with fuzzy search, flexible sorting,
+and composer suggestions. Dashboard ordering now syncs privately across devices,
+while status handling and merge recovery give a clearer picture of ongoing work.
+
+### Added
+
+- Search issues and PRs by author using an npub, nprofile, or full hexadecimal public key.
+
+- Add thumbs-down reactions alongside the existing quick reactions.
+
+- Add repository announcement deletion with confirmation to the settings Danger zone. Maintainers can delete their own announcement and its prior versions.
+
+- Add issue and PR sorting by creation date, activity, and reply count in either direction, keeping recent activity as the default. Sort choices persist per repository until refresh, like filters; an explicit Set default menu action syncs the choice across repositories and devices through NIP-78.
+
+- Search and select reaction emojis by name, with category browsing and skin tones alongside the existing quick reactions.
+
+- Suggest repository labels, issues, and PRs when typing `#` in the composer. Prioritize exact IDs, then open items by recent activity, while keeping closed and merged items searchable.
 
 - Search and filter repository workflow runs by workflow, trigger, status, branch, requester and coordinator, with responsive rows and expandable run details.
 
@@ -10,10 +205,31 @@
 
 ### Changed
 
+- Share status essentials requests per item and relay across lists, previews, and notifications, without fetching unused comments for off-page items.
+
 - Require an observed relay list and coverage of every outbox relay (all but one when there are at least three) before creating the shared notification key. Routine notification sync keeps its existing relay quorum.
 - Order the dashboard's My repositories by usage, with public pin order breaking equal scores and recent activity breaking remaining ties. Visited repositories rank above unvisited pins until their usage decays below the cutoff; public profile pinning stays unchanged.
+- Add typo-tolerant, relevance-ranked local search for repository, issue, and pull request lists while preserving exact event ID and facet filtering behavior.
 
 ### Fixed
+
+- Keep relative README and Markdown file links inside the repository at the selected branch, tag, or commit, including filenames with encoded characters.
+
+- Ignore hashtags inside Markdown code when deriving issue labels and comment metadata.
+
+- Render Nostr references in status update bodies with embedded previews.
+
+- Exclude invalid status events from unread notifications and recent-activity ordering, and summarize the latest valid unread status change after reopenings.
+
+- Apply shared status validity checks to embedded previews, notifications, activity feeds, lists, and detail timelines. Only changes targeting the item from its author or a confirmed member at publication time count; withdrawn changes are excluded, and late repository history updates the displayed result.
+
+- Only show status changes targeting the current issue or PR in its timeline, preventing closures of other items that merely mention it from appearing as "set status to closed".
+
+- Load current issue and PR statuses for homepage notifications instead of leaving resolved, closed, or merged items with the open-looking fallback icon.
+
+- Remember issue and PR filters independently per repository when navigating away and back; refreshing the page or selecting Reset restores the default view.
+
+- Convert typed or pasted short issue/PR references such as `#6aa901d6` into Nostr links when a unique loaded item matches, while retaining description-derived labels for other hashtags.
 
 - Keep mention suggestions clickable inside dialogs, dismiss suggestions first with Escape, and fit them within the visible viewport.
 

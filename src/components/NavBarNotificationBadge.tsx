@@ -1,12 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
-import { Bell } from "lucide-react";
+import { Bell, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useUnreadNotificationCount } from "@/hooks/useNotifications";
+import { useNotificationBadge } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * Only renders when the user is logged in (the parent should gate on activeAccount).
  */
 export function NavBarNotificationBadge() {
-  const unreadCount = useUnreadNotificationCount();
+  const { unreadCount, loading } = useNotificationBadge();
   const location = useLocation();
   const isActive = location.pathname === "/notifications";
 
@@ -27,8 +27,20 @@ export function NavBarNotificationBadge() {
           asChild
           className={cn("h-8 w-8 relative", isActive && "bg-accent")}
         >
-          <Link to="/notifications" aria-label="Notifications">
+          <Link
+            to="/notifications"
+            aria-label={
+              loading ? "Notifications, loading activity" : "Notifications"
+            }
+            aria-busy={loading}
+          >
             <Bell className="h-4 w-4" />
+            {loading && (
+              <Loader2
+                aria-hidden="true"
+                className="absolute -bottom-1 -left-1 h-3 w-3 motion-safe:animate-spin"
+              />
+            )}
             {unreadCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-pink-500 px-1 text-[10px] font-medium text-white leading-none">
                 {unreadCount > 99 ? "99+" : unreadCount}
@@ -38,9 +50,11 @@ export function NavBarNotificationBadge() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {unreadCount > 0
-          ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
-          : "Notifications"}
+        {loading
+          ? "Loading notifications…"
+          : unreadCount > 0
+            ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
+            : "Notifications"}
       </TooltipContent>
     </Tooltip>
   );

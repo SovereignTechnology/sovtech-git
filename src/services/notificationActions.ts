@@ -16,8 +16,8 @@ import {
   isNotificationEventFromSelf,
   isEventRead,
   isEventArchived,
-  advanceReadCutoff,
-  advanceArchivedCutoff,
+  advanceReadCutoff as computeReadCutoff,
+  advanceArchivedCutoff as computeArchivedCutoff,
   REPO_STARS_PREFIX,
   REPO_ZAPS_PREFIX,
   REACTION_KIND,
@@ -28,6 +28,34 @@ import { eventStore } from "@/services/nostr";
 import type { NostrEvent } from "nostr-tools";
 import type { NotificationStoreEntry } from "./notificationStore";
 import { updateReadState } from "./notificationStore";
+
+import { readNotificationTimestamps } from "./notificationTimestamps";
+
+function advanceReadCutoff(
+  events: NostrEvent[],
+  state: NotificationReadState,
+  pubkey: string,
+) {
+  return computeReadCutoff(
+    events,
+    state,
+    pubkey,
+    readNotificationTimestamps(pubkey),
+  );
+}
+
+function advanceArchivedCutoff(
+  events: NostrEvent[],
+  state: NotificationReadState,
+  pubkey: string,
+) {
+  return computeArchivedCutoff(
+    events,
+    state,
+    pubkey,
+    readNotificationTimestamps(pubkey),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -571,6 +599,20 @@ export function actionMarkEventsAsUnarchived(
   if (archiveCutoffLowered) entry.historyLoader?.recheckArchiveCutoff();
 }
 
+function compactKnownIds(
+  ids: string[],
+  events: NostrEvent[],
+  cutoff: number,
+  pubkey: string,
+): string[] {
+  const timestamps = readNotificationTimestamps(pubkey);
+  for (const event of events) timestamps.set(event.id, event.created_at);
+  return [...new Set(ids)].filter((id) => {
+    const timestamp = timestamps.get(id);
+    return timestamp === undefined || timestamp > cutoff;
+  });
+}
+
 export function actionMarkAllAsRead(entry: NotificationStoreEntry): void {
   updateReadState(entry, (prev) => {
     const events = getAllNotificationEvents(entry);
@@ -582,19 +624,28 @@ export function actionMarkAllAsRead(entry: NotificationStoreEntry): void {
           !isNotificationEventFromSelf(ev, self) && ev.created_at > tenDaysAgo,
       )
       .map((ev) => ev.id);
-    return { ...prev, rb: tenDaysAgo, ri: newRi };
+    return {
+      ...prev,
+      rb: tenDaysAgo,
+      ri: compactKnownIds([...prev.ri, ...newRi], events, tenDaysAgo, self),
+    };
   });
 }
 
 export function actionMarkAllAsArchived(entry: NotificationStoreEntry): void {
-  updateReadState(entry, (_prev) => {
+  updateReadState(entry, (prev) => {
     const events = getAllNotificationEvents(entry);
     const self = entry.pubkey;
     const tenDaysAgo = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 10;
     const allIds = events
       .filter((ev) => !isNotificationEventFromSelf(ev, self))
       .map((ev) => ev.id);
-    return { rb: tenDaysAgo, ri: allIds, ab: tenDaysAgo, ai: allIds };
+    return {
+      rb: tenDaysAgo,
+      ri: compactKnownIds([...prev.ri, ...allIds], events, tenDaysAgo, self),
+      ab: tenDaysAgo,
+      ai: compactKnownIds([...prev.ai, ...allIds], events, tenDaysAgo, self),
+    };
   });
 }
 

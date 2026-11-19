@@ -3,7 +3,7 @@
  * user's own replaceable events.
  *
  * Keeps a live subscription open on the UNION of the user's outbox relays AND
- * the configured lookup/index relays for all replaceable event kinds that
+ * the configured lookup/index and fallback relays for replaceable events that
  * define who the user is, where they publish, and what they follow:
  *
  *   kind 0     — profile metadata
@@ -15,6 +15,7 @@
  *   kind 10317 — Grasp server list
  *   kind 10318 — encrypted private Git relay list
  *   kind 10617 — pinned git repositories list
+ *   kind 30078 — exact gitworkshop-preferences coordinate (separate filter)
  *
  * Events are piped directly into the EventStore (and therefore the IndexedDB
  * cache via persistEventsToCache) so they are immediately available to any
@@ -34,12 +35,17 @@
  *   stop();
  */
 
-import { Subscription, combineLatest, of } from "rxjs";
+import { Subscription, combineLatest, of, from, timeout } from "rxjs";
 import { map, distinctUntilChanged } from "rxjs/operators";
 import { mapEventsToStore } from "applesauce-core";
 import { onlyEvents } from "applesauce-relay";
 import { eventStore, pool } from "./nostr";
-import { lookupRelays } from "./settings";
+import { lookupRelays, fallbackRelays } from "./settings";
+import { cacheRequest } from "./cache";
+import {
+  PREFERENCES_KIND,
+  PREFERENCES_IDENTIFIER,
+} from "@/casts/GitWorkshopPreferences";
 import type { Filter } from "applesauce-core/helpers";
 import { resilientSubscription } from "@/lib/resilientSubscription";
 import { createRelaySubscriptionCoverage } from "@/lib/relaySubscriptionCoverage";
@@ -64,7 +70,7 @@ export const USER_REPLACEABLE_KINDS = PERSONAL_SINGLETON_KINDS;
 
 /**
  * Open a persistent subscription for the user's replaceable events on the
- * UNION of their outbox relays and the configured lookup/index relays.
+ * UNION of their outbox, lookup/index, and fallback relays.
  *
  * Using both relay sets (not one as fallback for the other) ensures we
  * catch updates published from other clients that may have written to
@@ -86,18 +92,36 @@ export function startUserIdentitySubscription(
     authors: [pubkey],
   };
 
+  const preferencesFilter = {
+    kinds: [PREFERENCES_KIND],
+    authors: [pubkey],
+    "#d": [PREFERENCES_IDENTIFIER],
+  } as Filter;
+
+  // Keep deletion discovery on its existing outbox/lookup frontier.
   // Build a reactive relay list: union of outboxRelays + lookupRelays,
   // normalized and deduplicated. lookupRelays is a BehaviorSubject so changes
   // to the configured lookup relays are picked up automatically.
   const outbox$ =
     outboxRelays instanceof Array ? of(outboxRelays) : outboxRelays;
 
-  const relays$ = combineLatest([outbox$, lookupRelays]).pipe(
+  const deletionRelays$ = combineLatest([outbox$, lookupRelays]).pipe(
     map(([outbox, lookup]) => [
       ...new Set([...outbox, ...lookup].map(normalizeUrl)),
     ]),
     distinctUntilChanged(
       (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
+    ),
+  );
+
+  // One stable two-filter request serves identity and application preferences.
+  // Each writer still selects its own voting groups from this shared coverage.
+  const relays$ = combineLatest([deletionRelays$, fallbackRelays]).pipe(
+    map(([identity, fallback]) =>
+      [...new Set([...identity, ...fallback].map(normalizeUrl))].sort(),
+    ),
+    distinctUntilChanged(
+      (a, b) => a.length === b.length && a.every((url, i) => url === b[i]),
     ),
   );
 
@@ -119,16 +143,21 @@ export function startUserIdentitySubscription(
   //   - lastReceivedAt-aware reconnect (avoids replaying full relay history)
   //   - foreground resume gap-fill (recovers events missed while backgrounded)
   //   - EOSE settle signal (not critical here but harmless)
-  const sub: Subscription = resilientSubscription(pool, relays$, [filter], {
-    reconnect: true,
-    gapFill: true,
-    settle: false, // no consumer needs the EOSE signal here
-    paginate: false,
-    // This lease gates all personal replaceable writes for the session. A
-    // boot-time relay cap or transient outage must not make it terminal.
-    retryCount: Infinity,
-    onRelayLifecycle: (event) => coverage.onLifecycle(event),
-  })
+  const sub: Subscription = resilientSubscription(
+    pool,
+    relays$,
+    [filter, preferencesFilter],
+    {
+      reconnect: true,
+      gapFill: true,
+      settle: false, // no consumer needs the EOSE signal here
+      paginate: false,
+      // This lease gates all personal replaceable writes for the session. A
+      // boot-time relay cap or transient outage must not make it terminal.
+      retryCount: Infinity,
+      onRelayLifecycle: (event) => coverage.onLifecycle(event),
+    },
+  )
     .pipe(onlyEvents(), mapEventsToStore(eventStore))
     .subscribe({
       error: (err) => {
@@ -147,10 +176,26 @@ export function startUserIdentitySubscription(
   }
   const stopDeletionCoverage = startUserPersonalDeletionSubscription(
     pubkey,
-    relays$,
+    deletionRelays$,
   );
 
+  // Restore the exact app coordinate without invoking an address loader.
+  // Missing-state writers retain a bounded cache check if this read failed.
+  const cacheSub = from(cacheRequest([preferencesFilter]))
+    .pipe(timeout(1_000))
+    .subscribe({
+      next: (events) => {
+        if (!stopped) events.forEach((event) => eventStore.add(event));
+      },
+      error: (error) =>
+        console.warn(
+          "[userIdentitySubscription] preference cache hydration failed:",
+          error,
+        ),
+    });
+
   return () => {
+    cacheSub.unsubscribe();
     stopDeletionCoverage();
     stopCoverage();
     sub.unsubscribe();

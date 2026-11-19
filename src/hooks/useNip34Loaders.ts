@@ -1,3 +1,4 @@
+import { useRepositoryCuration } from "./useRepositoryCuration";
 import { useEffect, useMemo } from "react";
 import { use$ } from "./use$";
 import { useEventStore } from "./useEventStore";
@@ -17,14 +18,9 @@ import {
   liveness,
   nip34ListLoader,
   nip34ThreadItemLoader,
-  eventStore as globalEventStore,
   pool,
 } from "@/services/nostr";
-import {
-  gitIndexRelays,
-  fallbackRelays,
-  relayCurationMode,
-} from "@/services/settings";
+import { gitIndexRelays, fallbackRelays } from "@/services/settings";
 import { normalizeUrl } from "@/lib/url";
 import { relayGroupUrls$ } from "@/models/RepositoryRelayGroup";
 
@@ -195,9 +191,9 @@ function useAuthorInboxDeltaRelays(
  * Two loading levels:
  *
  *   list (always) — essentials (status, labels, deletions) + comments.
- *     Fires nip34ListLoader. Merges automatically with nip34RepoLoader
- *     calls from useIssues / usePRs because both use the same singleton
- *     loader instances — applesauce batches them into one relay subscription.
+ *     Fires nip34ListLoader. Shares active essentials and comment requests
+ *     per item/relay with the repository owner, even across batching windows.
+ *     Different items are batched by the underlying singleton loaders.
  *
  *   thread (when includeThread is true) — reactions + zaps on root and
  *     recursively on each comment. Fires nip34ThreadItemLoader. Does NOT
@@ -444,12 +440,15 @@ export function useNip34ItemDetailLoader(
   retryKey?: number,
   privateRepository = false,
 ): Nip34ItemDetailLoaderResult {
-  const curationMode = use$(relayCurationMode);
+  const { mode: curationMode } = useRepositoryCuration();
+  const visibleStore = useEventStore();
+  const visibleRoot = use$(
+    () => (itemId ? visibleStore.event(itemId) : undefined),
+    [itemId, visibleStore],
+  );
 
   // ── 1. Check if event is already in the store ────────────────────────────
-  const alreadyInStore = itemId
-    ? globalEventStore.getByFilters([{ ids: [itemId] }]).length > 0
-    : false;
+  const alreadyInStore = !!visibleRoot;
 
   // ── 2. Search for root event via useEventSearch ──────────────────────────
   // Build relay groups based on curation mode:

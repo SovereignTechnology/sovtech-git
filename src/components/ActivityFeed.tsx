@@ -15,10 +15,12 @@
  *       "first line of comment 2"
  *     "closed  ·  2 days ago"  ← status changes
  *
- * The component is stateless w.r.t. data — it receives raw events from
- * useUserActivity and renders them.
+ * Receives activity events from useUserActivity and resolves each item's
+ * status evidence before describing status changes as applied.
  */
 
+import { getNip10References } from "applesauce-common/helpers";
+import { useItemEssentials } from "@/hooks/useItemEssentials";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -56,6 +58,7 @@ import {
   STATUS_RESOLVED,
   STATUS_CLOSED,
   STATUS_DRAFT,
+  STATUS_KINDS,
   extractPatchSubject,
 } from "@/lib/nip34";
 import { cn } from "@/lib/utils";
@@ -160,9 +163,8 @@ function isRootItem(kind: number): boolean {
  * Resolution order:
  *   1. NIP-22 comments (kind 1111): uppercase `E` tag — NIP-22 root pointer.
  *      This directly identifies the issue/PR/patch that was commented on.
- *   2. Status events (1630-1633) and cover notes (1624): lowercase `e` tag
- *      with a "root" marker, falling back to the first lowercase `e` tag.
- *      (These events are not NIP-22 and don't use uppercase E.)
+ *   2. Status events (1630-1633): the shared NIP-10 root reference.
+ *   3. Cover notes (1624): root-marked lowercase `e`, then first lowercase `e`.
  */
 function getParentEventId(event: NostrEvent): string | undefined {
   // NIP-22 comments use uppercase E for the thread root
@@ -170,7 +172,11 @@ function getParentEventId(event: NostrEvent): string | undefined {
     return event.tags.find(([t]) => t === "E")?.[1];
   }
 
-  // Status events and cover notes: prefer e tag with "root" marker
+  if ((STATUS_KINDS as readonly number[]).includes(event.kind)) {
+    return getNip10References(event).root?.e?.id;
+  }
+
+  // Cover notes: prefer e tag with "root" marker
   const rootMarked = event.tags.find(
     ([t, , , marker]) => t === "e" && marker === "root",
   )?.[1];
@@ -562,6 +568,7 @@ function ItemGroupRow({
   const resolvedParent = useParentEvent(orphanParentId);
 
   const effectiveRoot = item.rootEvent ?? resolvedParent;
+  const resolved = useItemEssentials(effectiveRoot);
   const title = effectiveRoot
     ? getActivityTitle(effectiveRoot)
     : item.fallbackTitle;
@@ -572,11 +579,7 @@ function ItemGroupRow({
     (ev) => ev.kind === COMMENT_KIND || ev.kind === COVER_NOTE_KIND,
   );
   const statusChanges = item.events.filter(
-    (ev) =>
-      ev.kind === STATUS_OPEN ||
-      ev.kind === STATUS_RESOLVED ||
-      ev.kind === STATUS_CLOSED ||
-      ev.kind === STATUS_DRAFT,
+    (ev) => resolved?.validStatusEventIds?.has(ev.id) ?? false,
   );
   const rootCreated = item.rootEvent !== undefined;
 

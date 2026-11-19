@@ -455,6 +455,7 @@ export default function RepoCodePage() {
                   fileBytes={activeExplorer.fileBytes}
                   cloneUrls={cloneUrls}
                   commitHash={activeExplorer.commitHash}
+                  gitRef={currentRef}
                 />
               </>
             )}
@@ -468,6 +469,7 @@ export default function RepoCodePage() {
               <ReadmeViewer
                 pool={pool}
                 commitHash={activeExplorer.commitHash}
+                gitRef={currentRef}
                 readmePath={readmeEntry.path}
                 readmeName={readmeEntry.name}
                 cloneUrls={cloneUrls}
@@ -1806,6 +1808,7 @@ function FileContentViewer({
   fileBytes,
   cloneUrls,
   commitHash,
+  gitRef,
 }: {
   filename: string;
   filePath: string;
@@ -1813,6 +1816,7 @@ function FileContentViewer({
   fileBytes: Uint8Array | null;
   cloneUrls: string[];
   commitHash: string | null;
+  gitRef: string;
 }) {
   const copyToClipboard = useCopyToClipboard();
   const mediaType = useMemo(
@@ -2062,6 +2066,7 @@ function FileContentViewer({
           viewMode={viewMode}
           cloneUrls={cloneUrls}
           commitHash={commitHash}
+          gitRef={gitRef}
           onDownload={handleDownload}
         />
       </CardContent>
@@ -2078,6 +2083,7 @@ function FileContentBody({
   viewMode,
   cloneUrls,
   commitHash,
+  gitRef,
   onDownload,
 }: {
   filename: string;
@@ -2088,6 +2094,7 @@ function FileContentBody({
   viewMode: ViewMode;
   cloneUrls: string[];
   commitHash: string | null;
+  gitRef: string;
   onDownload: () => void;
 }) {
   // Image (raster)
@@ -2194,6 +2201,7 @@ function FileContentBody({
               content={content}
               cloneUrls={cloneUrls}
               commitHash={commitHash}
+              gitRef={gitRef}
               filePath={filePath}
               allowHtml
             />
@@ -2221,12 +2229,14 @@ import { BookOpen } from "lucide-react";
 function ReadmeViewer({
   pool,
   commitHash,
+  gitRef,
   readmePath,
   readmeName,
   cloneUrls,
 }: {
   pool: GitGraspPool;
   commitHash: string;
+  gitRef: string;
   readmePath: string;
   readmeName: string;
   cloneUrls: string[];
@@ -2349,6 +2359,7 @@ function ReadmeViewer({
               content={content}
               cloneUrls={cloneUrls}
               commitHash={commitHash}
+              gitRef={gitRef}
               filePath={readmePath}
               allowHtml
             />

@@ -1,3 +1,5 @@
+import { TimelineModel } from "applesauce-core/models";
+import { coalesceBursts } from "@/lib/coalesceBursts";
 import { combineLatest, of } from "rxjs";
 import { auditTime, switchMap, map } from "rxjs/operators";
 import type { Model } from "applesauce-core/event-store";
@@ -5,9 +7,6 @@ import {
   PATCH_KIND,
   PR_KIND,
   PR_UPDATE_KIND,
-  LABEL_KIND,
-  DELETION_KIND,
-  STATUS_KINDS,
   COMMENT_KIND,
   LEGACY_REPLY_KINDS,
   pubkeyFromCoordinate,
@@ -19,8 +18,7 @@ import {
 import { hasNameValueTag, type Filter } from "applesauce-core/helpers";
 import type { NostrEvent } from "nostr-tools";
 
-/** All essential kinds fetched alongside PRs/patches. */
-const ESSENTIALS_KINDS = [...STATUS_KINDS, LABEL_KIND, DELETION_KIND] as const;
+import { ItemEssentialEventsModel } from "./ItemEssentialEventsModel";
 
 /**
  * PRListModel — subscribes to patches (kind:1617) and PRs (kind:1618) and
@@ -74,20 +72,25 @@ export function PRListModel(
 
         const ids = events.map((e) => e.id);
 
-        const essentials$ = store.timeline([
-          { kinds: [...ESSENTIALS_KINDS], "#e": ids } as Filter,
-        ]);
+        // The outer list model is shared. These changing ID sets belong only
+        // to this snapshot: caching them would keep obsolete queries active
+        // throughout the store's model keep-warm window.
+        const essentials$ = ItemEssentialEventsModel(ids.sort().join(","))(
+          store,
+        );
         // Comments (kind:1111) and PR Updates (kind:1619) both use the
         // uppercase E root tag. Split them here so PR Updates don't inflate
         // comment counts but still factor into lastActivityAt.
-        const commentsAndUpdates$ = store.timeline([
+        const commentsAndUpdates$ = TimelineModel([
           { kinds: [COMMENT_KIND, PR_UPDATE_KIND], "#E": ids } as Filter,
-        ]);
+        ])(store);
         // Legacy replies (kind 1, 1622) via NIP-10 #e tag
-        const legacyReplies$ = store.timeline([
+        const legacyReplies$ = TimelineModel([
           { kinds: [...LEGACY_REPLY_KINDS], "#e": ids } as Filter,
-        ]);
-        const zaps$ = store.timeline([{ kinds: [9735], "#e": ids } as Filter]);
+        ])(store);
+        const zaps$ = TimelineModel([{ kinds: [9735], "#e": ids } as Filter])(
+          store,
+        );
 
         return combineLatest([
           essentials$,
@@ -95,6 +98,8 @@ export function PRListModel(
           legacyReplies$,
           zaps$,
         ]).pipe(
+          // Keep the latest snapshot without rebuilding the entire list per event.
+          coalesceBursts(),
           map(
             ([
               essentialEvents,
@@ -112,12 +117,13 @@ export function PRListModel(
               );
               return buildResolvedPRs(
                 events,
-                essentialEvents as NostrEvent[],
+                essentialEvents.essentials,
                 commentEvents,
                 zapEvents as NostrEvent[],
                 memberSet,
                 prUpdateEvents,
                 roleHistory,
+                essentialEvents.deletions,
               );
             },
           ),

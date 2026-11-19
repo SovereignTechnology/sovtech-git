@@ -32,9 +32,20 @@ import {
 } from "@/services/settings";
 import { RepositoryModel } from "@/models/RepositoryModel";
 import { RepositoryRelayGroup } from "@/models/RepositoryRelayGroup";
-import type { Filter } from "applesauce-core/helpers";
-import { BehaviorSubject, combineLatest, defer, Observable, of } from "rxjs";
+import { markFromCache, type Filter } from "applesauce-core/helpers";
+import { cacheRequest } from "@/services/cache";
+import { loadPublicRepositoryAnnouncements } from "@/lib/repositoryCache";
 import {
+  BehaviorSubject,
+  combineLatest,
+  defer,
+  from,
+  Observable,
+  of,
+} from "rxjs";
+import {
+  tap,
+  mergeMap,
   debounceTime,
   distinctUntilChanged,
   map,
@@ -214,6 +225,19 @@ export function useResolvedRepository(
     ...relayHints,
   ]);
   const privateProbeStatus = privateProbe?.status;
+
+  // A cached public announcement lets the existing privacy probe resolve
+  // immediately. Waiting for that probe before reading disk would make a warm
+  // repository visit depend on network classification of its relay hints.
+  // Fresh discovery/deletion coverage below still runs independently.
+  use$(() => {
+    if (!pubkey || !dTag) return undefined;
+    return loadPublicRepositoryAnnouncements(dTag, cacheRequest).pipe(
+      mergeMap((events) => from(events)),
+      tap(markFromCache),
+      mapEventsToStore(globalEventStore),
+    );
+  }, [pubkey, dTag]);
 
   // ── Layer 1: search for the repo announcement via useEventSearch ─────────
   // Check if the event is already in the store — skip the search if so.

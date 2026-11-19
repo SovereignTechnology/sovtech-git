@@ -16,6 +16,7 @@ import {
   GitCommitHorizontal,
   Inbox,
   Loader2,
+  LockKeyhole,
   SearchX,
   Server,
   ServerCrash,
@@ -37,6 +38,7 @@ import type { GitExplorerErrorDetail } from "@/hooks/useGitExplorer";
 
 type ServerProblem =
   | "connection-error"
+  | "unauthorized"
   | "not-found"
   | "empty"
   | "branch-not-found"
@@ -90,6 +92,9 @@ function classifyServer(
   if (!urlState || urlState.status === "untested") return "checking";
 
   if (urlState.status === "error" || urlState.status === "permanent-failure") {
+    // A 401/403 means the server rejected the request for authentication or
+    // authorization reasons; it is not a connection failure.
+    if (urlState.lastErrorKind === "unauthorized") return "unauthorized";
     return urlState.lastErrorKind === "not-git" ||
       urlState.lastErrorKind === "http-error"
       ? "not-found"
@@ -184,6 +189,15 @@ function problemMeta(
         label: "connection error",
         detailText: connectionErrorText(urlState?.lastErrorKind),
       };
+    case "unauthorized":
+      return {
+        icon: (
+          <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" />
+        ),
+        label: "authorization required",
+        detailText:
+          "the server answered but refused the request (HTTP 401/403)",
+      };
     case "not-found":
       return {
         icon: (
@@ -269,6 +283,7 @@ function ServerRow({
   const { icon, label, detailText } = problemMeta(problem, urlState, detail);
   const isError =
     problem === "connection-error" ||
+    problem === "unauthorized" ||
     problem === "not-found" ||
     problem === "fetch-error";
   const displayUrl = isGrasp ? condenseGraspUrl(url) : shortLabel(url);
@@ -314,13 +329,24 @@ function ServerRow({
 // Headline
 // ---------------------------------------------------------------------------
 
-function headlineFor(detail: GitExplorerErrorDetail): {
+function headlineFor(
+  detail: GitExplorerErrorDetail,
+  allUnauthorized: boolean,
+): {
   icon: React.ReactNode;
   headline: string;
   description: string;
 } {
   switch (detail.kind) {
     case "no-servers":
+      if (allUnauthorized) {
+        return {
+          icon: <LockKeyhole className="h-8 w-8 text-destructive/70" />,
+          headline: "The git server requires authorization",
+          description:
+            "Every announced clone URL refused access (HTTP 401/403), so this browser could not retrieve the code.",
+        };
+      }
       return {
         icon: <ServerCrash className="h-8 w-8 text-destructive/70" />,
         headline: "No git server is serving this repository",
@@ -376,7 +402,12 @@ export function CodeUnavailable({
   graspCloneUrls = [],
   recovery,
 }: CodeUnavailableProps) {
-  const { icon, headline, description } = headlineFor(detail);
+  const allUnauthorized =
+    cloneUrls.length > 0 &&
+    cloneUrls.every(
+      (url) => classifyServer(urls[url], detail) === "unauthorized",
+    );
+  const { icon, headline, description } = headlineFor(detail, allUnauthorized);
 
   const graspUrls = cloneUrls.filter((u) => graspCloneUrls.includes(u));
   const otherUrls = cloneUrls.filter((u) => !graspUrls.includes(u));

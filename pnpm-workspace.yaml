@@ -1,0 +1,9 @@
+{
+  "allowBuilds": {
+    "@swc/core": true,
+    "esbuild": true
+  },
+  "overrides": {
+    "@tailwindcss/typography>postcss-selector-parser": "6.1.5"
+  }
+}

@@ -12,7 +12,15 @@ export default tseslint.config(
   // not project source and must not be linted by the repository-wide command.
   // CI also keeps pnpm's store inside the checkout, including temporary source
   // trees created while preparing Git/tarball dependencies.
-  { ignores: ["dist", ".pnpm-store/**", "android/**/build/**"] },
+  {
+    ignores: [
+      "dist",
+      "dist-perf",
+      "perf-reports",
+      ".pnpm-store/**",
+      "android/**/build/**",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

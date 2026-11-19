@@ -1,0 +1,120 @@
+import { getReplaceableIdentifier, type Filter } from "applesauce-core/helpers";
+import type { NostrEvent } from "nostr-tools";
+import { catchError, defer, finalize, from, map, of, Observable } from "rxjs";
+import {
+  ISSUE_KIND,
+  PR_ROOT_KINDS,
+  REPO_KIND,
+  getRepoIsPrivate,
+  isRepositoryRootItem,
+  repoCoordinate,
+} from "./nip34";
+import {
+  isPrivateRepositoryCoordinate,
+  isPrivateRepositoryEvent,
+} from "@/services/privateRepositoryScope";
+
+export const REPOSITORY_CACHE_FALLBACK_MS = 30_000;
+const essentialKinds = [1630, 1631, 1632, 1633, 1985, 1624, 5];
+
+/** Publish one coherent cache read, never roots followed by missing statuses.
+ * Cancellation discards the result; ordinary relay discovery recovers
+ * evicted or unavailable data. Cache contents do not prove freshness/completeness.
+ */
+export function loadRepositoryCache(
+  coords: string[],
+  read: (filters: Filter[]) => Promise<NostrEvent[]>,
+) {
+  return defer(() => {
+    const controller = new AbortController();
+    const readActive = async (filters: Filter[]) => {
+      controller.signal.throwIfAborted();
+      const result = await read(filters);
+      controller.signal.throwIfAborted();
+      return result;
+    };
+    return from(
+      (async () => {
+        const roots = (
+          await readActive([
+            { kinds: [ISSUE_KIND, ...PR_ROOT_KINDS], "#a": coords },
+          ])
+        ).filter((event) => isRepositoryRootItem(event, new Set(coords)));
+        if (!roots.length) return [];
+        const ids = roots.map((event) => event.id);
+        const children = await readActive([
+          { kinds: essentialKinds, "#e": ids },
+          { kinds: [1619], "#E": ids },
+        ]);
+        const withdrawals = children.length
+          ? await readActive([
+              { kinds: [5], "#e": children.map((event) => event.id) },
+            ])
+          : [];
+        // Deletions first, then dependencies, then roots: models must never observe
+        // a cached root before its already-known status or withdrawal is restored.
+        const events = [
+          ...withdrawals,
+          ...children.filter((event) => event.kind === 5),
+          ...children.filter((event) => event.kind !== 5),
+          ...roots,
+        ];
+        return [...new Map(events.map((event) => [event.id, event])).values()];
+      })(),
+    ).pipe(finalize(() => controller.abort()));
+  }).pipe(catchError(() => of([] as NostrEvent[])));
+}
+
+export type RepositoryCacheRestore =
+  | { state: "ready"; events: NostrEvent[] }
+  | { state: "fallback" };
+
+/** Storage latency is not evidence that the cache is empty. A prolonged stall
+ * releases network discovery, but the coherent read stays alive until it
+ * succeeds, fails or its repository owner leaves.
+ */
+export function observeRepositoryCacheRestore(
+  coords: string[],
+  read: (filters: Filter[]) => Promise<NostrEvent[]>,
+) {
+  return new Observable<RepositoryCacheRestore>((subscriber) => {
+    const fallback = setTimeout(
+      () => subscriber.next({ state: "fallback" }),
+      REPOSITORY_CACHE_FALLBACK_MS,
+    );
+    const restore = loadRepositoryCache(coords, read).subscribe((events) => {
+      clearTimeout(fallback);
+      subscriber.next({ state: "ready", events });
+      subscriber.complete();
+    });
+    return () => {
+      clearTimeout(fallback);
+      restore.unsubscribe();
+    };
+  });
+}
+
+/** Restore public discovery inputs without claiming fresh relay coverage.
+ * Identifier-scoped discovery is safe only because RepositoryModel still
+ * resolves reciprocal membership from the route's selected author.
+ */
+export function loadPublicRepositoryAnnouncements(
+  identifier: string,
+  read: (filters: Filter[]) => Promise<NostrEvent[]>,
+) {
+  return defer(() => read([{ kinds: [REPO_KIND], "#d": [identifier] }])).pipe(
+    map((events) =>
+      events.filter(
+        (event) =>
+          event.kind === REPO_KIND &&
+          getReplaceableIdentifier(event) === identifier &&
+          !getRepoIsPrivate(event) &&
+          !isPrivateRepositoryEvent(event) &&
+          !isPrivateRepositoryCoordinate(
+            repoCoordinate(event.pubkey, identifier),
+          ),
+      ),
+    ),
+    catchError(() => of([] as NostrEvent[])),
+  );
+}

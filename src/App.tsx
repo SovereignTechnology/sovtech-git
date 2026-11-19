@@ -17,6 +17,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthModalProvider } from "@/contexts/AuthModalContext";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { LocalNetworkControls } from "@/components/LocalNetworkControls";
 import AppRouter from "./AppRouter";
 
 const head = createHead({
@@ -33,6 +34,7 @@ function App() {
               <TooltipProvider>
                 <Toaster />
                 <AuthModal />
+                <LocalNetworkControls />
                 <Suspense>
                   <AppRouter />
                 </Suspense>

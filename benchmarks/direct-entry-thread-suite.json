@@ -1,0 +1,20 @@
+{
+  "rounds": 3,
+  "strategies": ["shared", "thread-only"],
+  "defaults": {
+    "port": 4192,
+    "mode": "baseline",
+    "cap": 1000,
+    "latencyMs": 20,
+    "commentLatencyMs": 400,
+    "phaseMs": 6000
+  },
+  "scenarios": [
+    {
+      "name": "thread-cold-navigation",
+      "journey": "cold",
+      "navigateAtMs": 1200
+    },
+    { "name": "thread-return-with-activity", "journey": "return" }
+  ]
+}

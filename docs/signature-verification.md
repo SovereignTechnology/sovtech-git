@@ -22,6 +22,31 @@ ingestion, and most popular clients do not re-verify on read.
 locally persisted authority to _drop_ other events; the volume is tiny and the
 integrity value is real, so they remain fully verified.
 
+## Applesauce 7.1 adoption review
+
+The main store and curated read projection still use `fakeVerifyEvent`; the
+7.1 dependency update does not enable bulk signature verification. Separate
+checks remain for deletion evidence, private relay traffic, private relay-list
+validation, notification synchronization, and signer/authentication operations.
+In particular, the private-relay message observer verifies each received event
+before quarantine handling. Public-repository benchmarks do not measure that
+path, and a crypto hotspot alone does not identify its caller.
+
+Applesauce's `OptimisticEventVerifier` is the native candidate for future
+sampling. It supplies bounded signature-result caches, persisted relay evidence,
+and verification outcome observables. Its default policy initially checks every
+signature, earns trust over 14 qualifying days and 10,000 verified events, and
+reduces checking toward a 10% floor. It hashes every candidate and checks events
+without relay provenance fully. Its custom verifier option can use a faster
+implementation, but does not itself move work off the main thread.
+
+That policy is not a drop-in implementation of the deferred, provenance-based
+plan below. Enabling it on the main store would restore cold-start verification
+cost. Evaluate it with real signed data and cold/warm trust states before changing
+admission policy; keep checks that authorize deletion or private state separate
+from probabilistic acceptance. Prefer adapting upstream where practical over
+maintaining a second sampling engine.
+
 ## Planned replacement: relay-trust with randomized spot-checks
 
 The compensating control we intend to build is provenance-based trust with
