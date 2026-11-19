@@ -25,6 +25,16 @@ import { describe, expect, it } from "vitest";
  * signed fields as src/sovtech/signed.ts does.
  */
 describe("nostr-tools isolation", () => {
+  /**
+   * The signed fields only. finalizeEvent marks its result as verified under
+   * the symbol key, and a spread would copy that mark, so the events below
+   * are built field by field and start with no cached verdict.
+   */
+  function fresh(event: NostrEvent, content = event.content): NostrEvent {
+    const { id, pubkey, created_at, kind, tags, sig } = event;
+    return { id, pubkey, created_at, kind, tags, content, sig };
+  }
+
   function signed(): NostrEvent {
     return finalizeEvent(
       {
@@ -38,11 +48,11 @@ describe("nostr-tools isolation", () => {
   }
 
   it("verifies a genuine event", () => {
-    expect(verifyEvent(signed())).toBe(true);
+    expect(verifyEvent(fresh(signed()))).toBe(true);
   });
 
   it("rejects a forged event that fakeVerifyEvent marked", () => {
-    const forged = { ...signed(), content: "changed after signing" };
+    const forged = fresh(signed(), "changed after signing");
     expect(fakeVerifyEvent(forged)).toBe(true);
     expect(verifyEvent(forged)).toBe(false);
   });
