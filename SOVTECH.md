@@ -493,7 +493,9 @@ request pipeline.
 
 - **guard:** `ci/sovtech/gate.sh --phase history`, before any dependency code
   runs.
-- **verify:** Node 24 and pnpm 9.15.9 through corepack (both asserted),
+- **verify:** Node 24 and pnpm through corepack (both asserted; the version is
+  upstream's `packageManager` pin and must be exactly 9.15.9 or 10.34.9, so a
+  new upstream pnpm fails closed until a reviewed change adds it),
   `pnpm install --frozen-lockfile`, upstream's `pnpm test`, then
   `gate.sh --phase dist` on the built `dist`.
 - **recheck** (MRs and `main`): `gate.sh --phase recheck` on verify's `dist`

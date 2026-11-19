@@ -162,8 +162,8 @@ def cmd_build_info(args: argparse.Namespace) -> int:
             raise CIError("--%s must be a 40-hex commit id" % name)
     if not re.fullmatch(r"v24\.\d+\.\d+", args.node):
         raise CIError("--node must be a v24.x.y version")
-    if args.pnpm != "9.15.9":
-        raise CIError("--pnpm must be 9.15.9")
+    if args.pnpm not in ("9.15.9", "10.34.9"):
+        raise CIError("--pnpm must be 9.15.9 or 10.34.9")
     if not re.fullmatch(r"sovtech-v[0-9A-Za-z.+-]+", args.tag):
         raise CIError("--tag must be a sovtech-v* tag")
     if not args.pipeline_id.isdigit() or not args.source_date_epoch.isdigit():

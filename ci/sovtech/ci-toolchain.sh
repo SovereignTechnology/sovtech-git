@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Assert the CI toolchain before any dependency is installed: Node major 24
-# and pnpm 9.15.9 through corepack (upstream's packageManager pin). Installs
-# a pnpm shim in $HOME/.local/bin, which the job puts first on PATH, and
-# records the versions for build-info.json.
+# and one exact pnpm version through corepack. The version is upstream's
+# packageManager pin, and it must be one of PNPM_ALLOWED: a new upstream pnpm
+# fails closed here until a reviewed change adds it. Two versions are allowed
+# while a sync moves the fork from one to the next, because main and the sync
+# branch are tested by the same gate. Installs a pnpm shim in
+# $HOME/.local/bin, which the job puts first on PATH, and records the
+# versions for build-info.json.
 #
 # Usage: ci/sovtech/ci-toolchain.sh RECORD_FILE
 set -euo pipefail
 
-readonly PNPM_VERSION=9.15.9 NODE_MAJOR=24
+readonly PNPM_ALLOWED=(9.15.9 10.34.9) NODE_MAJOR=24
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 die() {
@@ -22,7 +26,14 @@ node_version=$(node --version)
   die "node must be major $NODE_MAJOR, found $node_version"
 
 pinned=$(python3 -I -c 'import json; print(json.load(open("package.json"))["packageManager"])')
-[[ $pinned == "pnpm@$PNPM_VERSION" ]] || die "package.json packageManager is not pnpm@$PNPM_VERSION"
+[[ $pinned =~ ^pnpm@([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
+  die "package.json packageManager is not pnpm@<exact version> (found: $pinned)"
+allowed=0
+for candidate in "${PNPM_ALLOWED[@]}"; do
+  [[ $candidate == "${BASH_REMATCH[1]}" ]] && allowed=1
+done
+((allowed)) || die "package.json packageManager $pinned is not one of: ${PNPM_ALLOWED[*]}"
+readonly PNPM_VERSION=${BASH_REMATCH[1]}
 
 corepack_version=$(corepack "pnpm@$PNPM_VERSION" --version)
 [[ $corepack_version == "$PNPM_VERSION" ]] || die "corepack pnpm@$PNPM_VERSION reported another version"
