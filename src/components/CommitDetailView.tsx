@@ -36,6 +36,8 @@ import { safeFormatDistanceToNow, safeFormat } from "@/lib/utils";
 import type { Commit } from "@/lib/vendored/git-natural-api";
 import type { GitGraspPool } from "@/lib/git-grasp-pool";
 import { CommitDiffView } from "@/components/CommitDiffView";
+import { CommitCoAuthors } from "@/components/CommitCoAuthors";
+import { withoutTrailingCoAuthors } from "@/lib/commitTrailers";
 import { CommitMessageBody } from "@/components/CommitMessageBody";
 import type { NostrEvent } from "nostr-tools";
 import type { InlineCommentMap } from "@/hooks/useInlineComments";
@@ -232,7 +234,12 @@ function CommitDetail({
   const committerTs =
     (commit.committer?.timestamp ?? commit.author.timestamp) * 1000;
   const subject = commit.message.split("\n")[0];
-  const body = commit.message.split("\n").slice(2).join("\n").trim();
+  // The header lists the co-authors, so their trailers are left out here.
+  const body = withoutTrailingCoAuthors(commit.message)
+    .split("\n")
+    .slice(2)
+    .join("\n")
+    .trim();
   const parentHash = commit.parents?.[0] ?? null;
 
   const handleCopy = async () => {
@@ -310,6 +317,8 @@ function CommitDetail({
                   </div>
                 </div>
               )}
+
+            <CommitCoAuthors message={commit.message} />
           </div>
 
           {/* Hash + parent links */}

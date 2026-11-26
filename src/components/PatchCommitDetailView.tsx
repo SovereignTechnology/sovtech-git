@@ -62,6 +62,8 @@ import { eventIdToNevent } from "@/lib/routeUtils";
 import { DiffView } from "@/components/DiffView";
 import { UserLink } from "@/components/UserAvatar";
 import type { InlineCommentMap } from "@/hooks/useInlineComments";
+import { CommitCoAuthors } from "@/components/CommitCoAuthors";
+import { withoutTrailingCoAuthors } from "@/lib/commitTrailers";
 import { CommitMessageBody } from "@/components/CommitMessageBody";
 import {
   verifyPatchChainCommitHashes,
@@ -460,7 +462,12 @@ export function PatchCommitDetailView({
   const committerTs =
     (commit.committer?.timestamp ?? commit.author.timestamp) * 1000;
   const subject = commit.message.split("\n")[0];
-  const body = commit.message.split("\n").slice(2).join("\n").trim();
+  // The header lists the co-authors, so their trailers are left out here.
+  const body = withoutTrailingCoAuthors(commit.message)
+    .split("\n")
+    .slice(2)
+    .join("\n")
+    .trim();
 
   // Resolve parent commit context.
   // When the commit has no parents (parent-commit tag was absent) but we have
@@ -867,6 +874,8 @@ export function PatchCommitDetailView({
                   </div>
                 </div>
               )}
+
+            <CommitCoAuthors message={commit.message} />
           </div>
 
           {/* Hash + verification + parent links */}
