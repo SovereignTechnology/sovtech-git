@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRecoveryToast } from "@/hooks/useRecoveryToast";
 /**
@@ -638,7 +639,7 @@ export function PRUpdatePushEvent({
         : displayCommits.length > 0
           ? displayCommits.map((c) => ({
               hash: c.hash,
-              subject: c.message.split("\n")[0],
+              subject: getCommitSubject(c.message),
             }))
           : null;
 

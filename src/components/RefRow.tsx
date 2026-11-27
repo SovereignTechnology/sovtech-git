@@ -20,6 +20,7 @@
  *    message + timestamp. Otherwise the row falls back to the same lazy
  *    `pool.getSingleCommit` fetch the compact density uses.
  */
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Tooltip,
@@ -303,12 +304,6 @@ function commitTimestamp(c: Commit | null | undefined): number | null {
   return c.committer?.timestamp ?? c.author.timestamp;
 }
 
-function firstLine(message: string | undefined): string {
-  if (!message) return "";
-  const nl = message.indexOf("\n");
-  return nl === -1 ? message : message.slice(0, nl);
-}
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -505,7 +500,7 @@ function ExpandedRefRow({
   );
   const commit = divergence?.latestCommit ?? lazyCommit;
   const commitTs = commitTimestamp(commit);
-  const commitMessage = firstLine(commit?.message);
+  const commitMessage = getCommitSubject(commit?.message ?? "");
 
   const sourceIsGitServer = effectiveSource !== "nostr";
   const isAbsent =

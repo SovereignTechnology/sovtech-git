@@ -15,6 +15,29 @@ function parseIdentity(value: string): CommitCoAuthor | undefined {
 const SCISSORS = "# ------------------------ >8 ------------------------";
 const BLANK = /^[ \t\r]*$/;
 
+/**
+ * Git 2.54's %s folds the first nonblank paragraph into one line. %b starts
+ * at the next nonblank line, preserving indentation and trailing whitespace.
+ * https://github.com/git/git/blob/v2.54.0/pretty.c#L977-L1014
+ */
+function subjectParagraph(message: string) {
+  const parts: string[] = [];
+  let offset = 0;
+  while (offset < message.length) {
+    const newline = message.indexOf("\n", offset);
+    const end = newline < 0 ? message.length : newline;
+    const line = message.slice(offset, end).replace(/[ \t\r]+$/, "");
+    offset = newline < 0 ? end : end + 1;
+    if (line) parts.push(line);
+    else if (parts.length) break;
+  }
+  return { subject: parts.join(" "), end: offset };
+}
+
+export function getCommitSubject(message: string): string {
+  return subjectParagraph(message).subject;
+}
+
 /** Git's ignored_log_message_bytes() excludes a trailing run of comments,
  * empty lines and legacy conflict paths, or everything below scissors.
  * https://github.com/git/git/blob/v2.54.0/commit.c
@@ -48,7 +71,14 @@ function logMessageEnd(lines: string[]): number {
  */
 export function parseCommitMessage(message: string) {
   const lines = message.split("\n");
-  const subject = lines[0].replace(/\r$/, "");
+  const { subject, end: subjectEnd } = subjectParagraph(message);
+  let bodyStart = subjectEnd;
+  while (bodyStart < message.length) {
+    const newline = message.indexOf("\n", bodyStart);
+    const end = newline < 0 ? message.length : newline;
+    if (!BLANK.test(message.slice(bodyStart, end))) break;
+    bodyStart = newline < 0 ? end : end + 1;
+  }
   const coAuthors: CommitCoAuthor[] = [];
   let end = logMessageEnd(lines);
   while (
@@ -102,7 +132,7 @@ export function parseCommitMessage(message: string) {
   }
   return {
     subject,
-    body: lines.slice(1).join("\n").trim(),
+    body: message.slice(bodyStart),
     coAuthors,
   };
 }

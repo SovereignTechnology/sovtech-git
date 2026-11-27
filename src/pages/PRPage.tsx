@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { RepositorySourceNotice } from "@/components/RepositorySourceNotice";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
@@ -1632,7 +1633,7 @@ export default function PRPage() {
                         ? originalPRCommits.length > 0
                           ? originalPRCommits.map((c) => ({
                               hash: c.hash,
-                              subject: c.message.split("\n")[0],
+                              subject: getCommitSubject(c.message),
                               href: prBasePath
                                 ? `${prBasePath}/commit/${c.hash}`
                                 : undefined,
@@ -1663,7 +1664,7 @@ export default function PRPage() {
                         : prCommits.length > 0
                           ? prCommits.map((c) => ({
                               hash: c.hash,
-                              subject: c.message.split("\n")[0],
+                              subject: getCommitSubject(c.message),
                               href: prBasePath
                                 ? `${prBasePath}/commit/${c.hash}`
                                 : undefined,

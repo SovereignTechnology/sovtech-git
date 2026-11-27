@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import {
   Suspense,
@@ -1427,7 +1428,7 @@ function CodeBar({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium truncate leading-snug">
-                  {headCommit.message.split("\n")[0]}
+                  {getCommitSubject(headCommit.message)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {headCommit.author.name} &middot;{" "}
