@@ -36,6 +36,8 @@ import { safeFormatDistanceToNow, safeFormat } from "@/lib/utils";
 import type { Commit } from "@/lib/vendored/git-natural-api";
 import type { GitGraspPool } from "@/lib/git-grasp-pool";
 import { CommitDiffView } from "@/components/CommitDiffView";
+import { CommitCoAuthors } from "@/components/CommitCoAuthors";
+import { parseCommitMessage } from "@/lib/commitTrailers";
 import { CommitMessageBody } from "@/components/CommitMessageBody";
 import type { NostrEvent } from "nostr-tools";
 import type { InlineCommentMap } from "@/hooks/useInlineComments";
@@ -231,8 +233,10 @@ function CommitDetail({
   const authorTs = commit.author.timestamp * 1000;
   const committerTs =
     (commit.committer?.timestamp ?? commit.author.timestamp) * 1000;
-  const subject = commit.message.split("\n")[0];
-  const body = commit.message.split("\n").slice(2).join("\n").trim();
+  const { subject, body, coAuthors } = useMemo(
+    () => parseCommitMessage(commit.message),
+    [commit.message],
+  );
   const parentHash = commit.parents?.[0] ?? null;
 
   const handleCopy = async () => {
@@ -310,6 +314,8 @@ function CommitDetail({
                   </div>
                 </div>
               )}
+
+            <CommitCoAuthors coAuthors={coAuthors} />
           </div>
 
           {/* Hash + parent links */}
