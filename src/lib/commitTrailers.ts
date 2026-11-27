@@ -1,79 +1,108 @@
-/**
- * Co-authors named in a git commit message.
- *
- * Git credits co-authors with `Co-authored-by:` trailers, one `Name <email>`
- * per line, in the last paragraph of the message. Like the author and
- * committer, they are unverified claims.
- */
-
 export interface CommitCoAuthor {
   name: string;
   email?: string;
 }
 
-const CO_AUTHOR_TRAILER = /^co-authored-by:(.*)$/i;
-const NAME_AND_EMAIL = /^(.*?)\s*<([^<>]*)>$/;
+function parseIdentity(value: string): CommitCoAuthor | undefined {
+  const match = /<([^<>]+)>$/.exec(value);
+  if (!match) return value ? { name: value } : undefined;
 
-function parseCoAuthorLine(line: string): CommitCoAuthor | undefined {
-  const value = CO_AUTHOR_TRAILER.exec(line.trim())?.[1].trim();
-  if (!value) return undefined;
-
-  const match = NAME_AND_EMAIL.exec(value);
-  const email = match?.[2].trim() || undefined;
-  const name = (match ? match[1].trim() : value) || email;
-  if (!name) return undefined;
-  return email && email !== name ? { name, email } : { name };
+  const email = match[1].trim();
+  const name = value.slice(0, match.index).trim();
+  return name && email ? { name, email } : { name: name || email || value };
 }
 
-/**
- * Split a full commit message into lines and find where its last paragraph
- * starts. A start of 0 means the message is only a subject paragraph, which
- * holds no trailers.
+const SCISSORS = "# ------------------------ >8 ------------------------";
+const BLANK = /^[ \t\r]*$/;
+
+/** Git's ignored_log_message_bytes() excludes a trailing run of comments,
+ * empty lines and legacy conflict paths, or everything below scissors.
+ * https://github.com/git/git/blob/v2.54.0/commit.c
  */
-function lastParagraph(message: string): { lines: string[]; start: number } {
-  const lines = message.trimEnd().split(/\r?\n/);
-  let start = lines.length;
-  while (start > 0 && lines[start - 1].trim() !== "") start--;
-  return { lines, start };
-}
-
-/**
- * Parse the `Co-authored-by:` trailers of a full commit message (subject
- * included). Only the last paragraph is read, as git does for trailers, so a
- * line quoting the convention earlier in the body is not taken as a co-author.
- * Repeated entries are returned once, in message order.
- */
-export function parseCoAuthors(message: string): CommitCoAuthor[] {
-  const { lines, start } = lastParagraph(message);
-  if (start === 0) return [];
-
-  const coAuthors: CommitCoAuthor[] = [];
-  const seen = new Set<string>();
-  for (const line of lines.slice(start)) {
-    const coAuthor = parseCoAuthorLine(line);
-    if (!coAuthor) continue;
-
-    const key = `${coAuthor.name}\n${coAuthor.email?.toLowerCase() ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    coAuthors.push(coAuthor);
+function logMessageEnd(lines: string[]): number {
+  let end = 0;
+  let inConflicts = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const terminated = i + 1 < lines.length;
+    if (terminated && line === SCISSORS) break;
+    if (terminated && line === "Conflicts:") {
+      inConflicts = true;
+      continue;
+    }
+    if (!line || line.startsWith("#") || (inConflicts && line.startsWith("\t")))
+      continue;
+    inConflicts = false;
+    end = i + 1;
   }
-  return coAuthors;
+  return end;
 }
 
 /**
- * The commit message without the `Co-authored-by:` trailers that end it, for
- * display next to a list of the co-authors. Only lines that
- * {@link parseCoAuthors} returns are removed, and only while they are the
- * last lines: co-author trailers followed by another trailer are kept, so the
- * remaining trailer block reads as it was written.
+ * Co-author extraction follows Git 2.54's default trailer rules for committed
+ * messages (git interpret-trailers --parse --no-divider). See
+ * find_trailer_block_start() for paragraph recognition and unfold_value()
+ * for continuation lines. The browser uses the default separator and comment
+ * prefix. Deduplication applies only to the separate list of co-authors.
+ * https://github.com/git/git/blob/v2.54.0/trailer.c#L858-L1010
  */
-export function withoutTrailingCoAuthors(message: string): string {
-  const { lines, start } = lastParagraph(message);
-  if (start === 0) return message;
+export function parseCommitMessage(message: string) {
+  const lines = message.split("\n");
+  const subject = lines[0].replace(/\r$/, "");
+  const coAuthors: CommitCoAuthor[] = [];
+  let end = logMessageEnd(lines);
+  while (
+    end > 0 &&
+    (BLANK.test(lines[end - 1]) || lines[end - 1].startsWith("#"))
+  )
+    end--;
+  let start = end;
+  while (start > 0 && !BLANK.test(lines[start - 1])) start--;
 
-  let end = lines.length;
-  while (end > start && parseCoAuthorLine(lines[end - 1])) end--;
-  if (end === lines.length) return message;
-  return lines.slice(0, end).join("\n").trimEnd();
+  if (start > 0) {
+    let trailers = 0;
+    let prose = 0;
+    let hasGitTrailer = false;
+    const seen = new Set<string>();
+
+    for (let i = start; i < end; ) {
+      const first = i;
+      const line = lines[i++];
+      if (line.startsWith("#")) continue;
+      const cherryPick = line.startsWith("(cherry picked from commit ");
+      if (line.startsWith("Signed-off-by: ") || cherryPick) {
+        hasGitTrailer = true;
+      }
+      const match = /^([a-z\d-]+)[ \t]*:([\s\S]*)$/i.exec(line);
+      if (!match && !cherryPick) {
+        prose++;
+        continue;
+      }
+      trailers++;
+      while (i < end && /^[ \t\r]/.test(lines[i])) i++;
+      if (match?.[1].toLowerCase() !== "co-authored-by") continue;
+      const value = [match[2], ...lines.slice(first + 1, i)]
+        .join("\n")
+        .replace(/\n[ \t\r]*/g, " ")
+        .replace(/^[ \t\r]+|[ \t\r]+$/g, "");
+      const author = parseIdentity(value);
+      if (!author) continue;
+      const key = JSON.stringify([author.name, author.email?.toLowerCase()]);
+      if (!seen.has(key)) {
+        seen.add(key);
+        coAuthors.push(author);
+      }
+    }
+
+    // A mixed paragraph qualifies only with a Git-generated trailer and
+    // at least one trailer for every three ordinary lines.
+    if (prose && !(hasGitTrailer && trailers * 3 >= prose)) {
+      coAuthors.length = 0;
+    }
+  }
+  return {
+    subject,
+    body: lines.slice(1).join("\n").trim(),
+    coAuthors,
+  };
 }

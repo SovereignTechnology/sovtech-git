@@ -1,18 +1,16 @@
 /**
  * CommitCoAuthors — the co-authors cell of a commit header card, next to the
- * author and committer. Renders nothing when the message names none.
+ * author and committer. parseCommitMessage in @/lib/commitTrailers supplies
+ * the credits and documents the Git trailer rules used to extract them.
  */
-import { useMemo } from "react";
 import { Users } from "lucide-react";
-import { parseCoAuthors } from "@/lib/commitTrailers";
+import type { CommitCoAuthor } from "@/lib/commitTrailers";
 
 interface CommitCoAuthorsProps {
-  /** The full commit message, subject included. */
-  message: string;
+  coAuthors: CommitCoAuthor[];
 }
 
-export function CommitCoAuthors({ message }: CommitCoAuthorsProps) {
-  const coAuthors = useMemo(() => parseCoAuthors(message), [message]);
+export function CommitCoAuthors({ coAuthors }: CommitCoAuthorsProps) {
   if (coAuthors.length === 0) return null;
 
   return (
