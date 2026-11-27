@@ -1041,8 +1041,14 @@ export function NIP19Page() {
   } else if (pointer) {
     if (!event) return <LoadingState message="Fetching event…" />;
 
+    const hintRelays = "relays" in pointer ? (pointer.relays ?? []) : [];
+    if (event.kind === SOFTWARE_RELEASE_KIND) {
+      return (
+        <SoftwareReleaseRedirect release={event} hintRelays={hintRelays} />
+      );
+    }
+
     if (event.kind === SOFTWARE_APPLICATION_KIND) {
-      const hintRelays = "relays" in pointer ? (pointer.relays ?? []) : [];
       return (
         <SoftwareApplicationRedirect
           application={event}
@@ -1053,7 +1059,6 @@ export function NIP19Page() {
 
     // For any event kind this app doesn't have a dedicated page for, show a
     // preview with a link to njump.me so users aren't left with a blank 404.
-    const hintRelays = "relays" in pointer ? (pointer.relays ?? []) : [];
     return <UnsupportedEventPage event={event} relayHints={hintRelays} />;
   } else if (isNip05(identifier)) {
     // Bare domain (danconwaydev.com) or _@domain.com — resolve to user page
