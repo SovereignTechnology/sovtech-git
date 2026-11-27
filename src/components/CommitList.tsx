@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
 import type { ErrorRetryState } from "@/hooks/useErrorRetry";
@@ -752,7 +753,7 @@ function MergedInGroup({
     direction === "oldest-first" ? [...commits].reverse() : commits;
   const subRows = expanded
     ? ordered.map((commit) => {
-        const subject = commit.message.split("\n")[0];
+        const subject = getCommitSubject(commit.message);
         const timestamp =
           commit.committer?.timestamp ?? commit.author.timestamp;
         return (
@@ -869,7 +870,7 @@ export function CommitRow({
 }) {
   const copyToClipboard = useCopyToClipboard();
   const [copied, setCopied] = useState(false);
-  const subject = commit.message.split("\n")[0];
+  const subject = getCommitSubject(commit.message);
   const shortHash = commit.hash.slice(0, 8);
 
   const handleCopy = async () => {

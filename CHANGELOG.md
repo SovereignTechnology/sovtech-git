@@ -2,7 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Show the co-authors named in a commit's `Co-authored-by:` trailers on commit pages, next to the author and committer (by Sjors Provoost).
+
 ### Fixed
+
+- Open CI workflow and job permalinks at the corresponding event on the repository Actions page.
 
 - Reduce timer churn during repository history negotiation and event downloads while preserving inactivity deadlines and stalled-source fallback.
 

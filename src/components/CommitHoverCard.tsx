@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useErrorRetry } from "@/hooks/useErrorRetry";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
@@ -95,7 +96,7 @@ function CommitHoverCardBody({ hash, pool }: CommitHoverCardBodyProps) {
     );
   }
 
-  const subject = commit.message.split("\n")[0];
+  const subject = getCommitSubject(commit.message);
   const authorTsSecs = commit.author.timestamp;
   const shortHash = commit.hash.slice(0, 7);
   const parentHash = commit.parents?.[0] ?? null;

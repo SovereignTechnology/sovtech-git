@@ -1,3 +1,4 @@
+import { useUnreadHighlight } from "@/hooks/useUnreadHighlight";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useErrorRetry } from "@/hooks/useErrorRetry";
 import { ErrorRetryAction } from "@/components/ErrorRetryAction";
@@ -23,6 +24,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { nip19, type NostrEvent } from "nostr-tools";
 import { formatDistanceToNow } from "date-fns";
@@ -703,6 +705,7 @@ export function CIRunRow({
 /** Expanded body of a workflow run: timing, jobs, logs, and artifacts. */
 export function CIRunDetails({
   run,
+  targetAnchor,
   nowSeconds,
   canRetry = false,
   expandedTrustResolution,
@@ -710,6 +713,7 @@ export function CIRunDetails({
   className,
 }: {
   run: CIWorkflowRun;
+  targetAnchor?: string;
   nowSeconds: number;
   canRetry?: boolean;
   expandedTrustResolution?: CITrustResolution;
@@ -745,6 +749,7 @@ export function CIRunDetails({
         <CIJobRow
           key={job.jobId}
           job={job}
+          targetAnchor={targetAnchor}
           trustResolution={
             providerTrust
               ? getCIJobTrustResolution(providerTrust, run, job)
@@ -813,15 +818,22 @@ function ManualRetryButton({ workflowResult }: { workflowResult: NostrEvent }) {
   );
 }
 
-function CIJobRow({
+export function CIJobRow({
   job,
+  targetAnchor,
   trustResolution,
 }: {
   job: CIJobResult;
+  targetAnchor?: string;
   trustResolution?: CITrustResolution;
 }) {
   const [showLog, setShowLog] = useState(false);
   const { result } = job;
+  const anchorId =
+    targetAnchor && result.event.id.startsWith(targetAnchor)
+      ? targetAnchor
+      : undefined;
+  const { ref, highlight } = useUnreadHighlight(anchorId ?? "");
   const hasLog = result.log.trim().length > 0;
   const duration = formatCIDuration(result.duration);
   const hasResultMetadata =
@@ -859,7 +871,15 @@ function CIJobRow({
   );
 
   return (
-    <div className="rounded-lg bg-card [container-type:inline-size]">
+    <div
+      id={anchorId}
+      ref={ref as RefObject<HTMLDivElement>}
+      className={cn(
+        "scroll-mt-20 rounded-lg bg-card [container-type:inline-size]",
+        highlight === "strong" && "ring-2 ring-pink-500/60",
+        highlight === "subtle" && "ring-1 ring-pink-500/25",
+      )}
+    >
       <div className="flex items-center gap-2 rounded-t-lg bg-muted/60 px-3 py-2 text-xs">
         <CIStatusIcon status={job.status} className="h-3.5 w-3.5" />
         <span className="truncate font-mono">{result.name ?? job.jobId}</span>

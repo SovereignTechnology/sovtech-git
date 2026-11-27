@@ -96,6 +96,8 @@ interface RepoActionsListProps {
   basePath: string;
   canRetry: boolean;
   title?: string;
+  anchor?: string;
+  missingAnchorContent?: ReactNode;
   coordinatorRelationships?: ReadonlyMap<string, CICoordinatorRelationship>;
   serviceControls?: readonly CIServiceControl[];
   coordinatorAvailability?: ReadonlyMap<
@@ -112,6 +114,8 @@ export function RepoActionsList({
   basePath,
   canRetry,
   title = "Actions",
+  anchor,
+  missingAnchorContent,
   coordinatorRelationships = EMPTY_RELATIONSHIPS,
   serviceControls = EMPTY_SERVICE_CONTROLS,
   coordinatorAvailability,
@@ -432,6 +436,15 @@ export function RepoActionsList({
     [visibleUnconfirmedRuns],
   );
 
+  const targetedRun =
+    anchor &&
+    filteredRuns?.find(
+      ({ run }) =>
+        run.workflowResult?.event.id.startsWith(anchor) ||
+        run.pendingRun?.event.id.startsWith(anchor) ||
+        run.jobs.some((job) => job.result.event.id.startsWith(anchor)),
+    )?.run;
+
   const resetDependentFilters = () => {
     setWorkflowFilter(ALL);
     setTriggerFilter(ALL);
@@ -679,6 +692,11 @@ export function RepoActionsList({
             </div>
           )}
 
+        {anchor &&
+          filteredRuns &&
+          !targetedRun &&
+          !hasActiveFilters &&
+          missingAnchorContent}
         {!filteredRuns ? (
           <ul className="divide-y divide-border">
             {Array.from({ length: 5 }).map((_, index) => (
@@ -696,6 +714,7 @@ export function RepoActionsList({
             {visibleAcceptedRuns.map(({ run, requester, trustResolution }) => (
               <RepoActionRunRow
                 key={run.key}
+                targetAnchor={targetedRun === run ? anchor : undefined}
                 run={run}
                 requester={requester}
                 rowLayout={rowLayout}
@@ -726,6 +745,7 @@ export function RepoActionsList({
                 ({ run, requester, trustResolution }) => (
                   <RepoActionRunRow
                     key={run.key}
+                    targetAnchor={targetedRun === run ? anchor : undefined}
                     run={run}
                     requester={requester}
                     rowLayout={rowLayout}
@@ -795,6 +815,7 @@ function coordinatorAvailabilityLabel(
 
 function RepoActionRunRow({
   run,
+  targetAnchor,
   requester,
   rowLayout,
   trustResolution,
@@ -804,6 +825,7 @@ function RepoActionRunRow({
   trust,
 }: {
   run: CIWorkflowRun;
+  targetAnchor?: string;
   requester: string | undefined;
   rowLayout: CIRunListRowLayout;
   trustResolution: CITrustResolution | undefined;
@@ -819,6 +841,7 @@ function RepoActionRunRow({
   return (
     <CIRunListRow
       run={run}
+      targetAnchor={targetAnchor}
       requester={requester}
       layout={rowLayout}
       canRetry={canRetry}

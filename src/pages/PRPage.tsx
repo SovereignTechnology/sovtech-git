@@ -1,3 +1,4 @@
+import { getCommitSubject } from "@/lib/commitTrailers";
 import { RepositorySourceNotice } from "@/components/RepositorySourceNotice";
 import { RepositorySourceBadge } from "@/components/RepositorySourceBadge";
 import { useRepositoryCuration } from "@/hooks/useRepositoryCuration";
@@ -109,6 +110,7 @@ import { usePatchChain } from "@/hooks/usePatchChain";
 import { useInlineComments } from "@/hooks/useInlineComments";
 import {
   PATCH_KIND,
+  getPatchSetParentId,
   PR_KIND,
   extractPatchDiff,
   hasAcceptedRepositoryReference,
@@ -314,9 +316,7 @@ export default function PRPage() {
       return undefined;
     const event = (subPatchEvents as NostrEvent[])[0];
     if (!event || event.kind !== PATCH_KIND) return undefined;
-    // A root patch has no #e tag pointing to another patch.
-    // A sub-patch has an #e tag referencing the root patch event.
-    const rootPatchId = event.tags.find(([t]) => t === "e")?.[1];
+    const rootPatchId = getPatchSetParentId(event);
     if (!rootPatchId) return undefined; // this IS the root patch
     // Build the redirect: replace the sub-patch segment with the root patch
     // nevent, and append /commit/<nevent-of-sub-patch>.
@@ -1359,6 +1359,28 @@ export default function PRPage() {
   // ── Sub-patch redirect (after all hooks) ─────────────────────────────────
   // If the URL points to a sub-patch event, redirect to the root patch's PR
   // page with the sub-patch shown as a commit detail.
+  // Older permalinks used the first e tag as the parent even for a root
+  // patch. Recover the selected commit from the repository's known roots.
+  if (prId && prCommitId?.length === 64 && prCommitId !== prId) {
+    const original = prs?.find(
+      (item) => item.id === prCommitId && item.itemType === "patch",
+    );
+    if (
+      original &&
+      original.event.tags.find(([tag]) => tag === "e")?.[1] === prId
+    ) {
+      const patchSegment = eventIdToNevent(
+        prCommitId,
+        repoRelayHintsForRedirect,
+      );
+      return (
+        <Navigate
+          to={`${basePath}/prs/${patchSegment}/commit/${patchSegment}`}
+          replace
+        />
+      );
+    }
+  }
   if (subPatchRedirect) {
     return <Navigate to={subPatchRedirect} replace />;
   }
@@ -1632,7 +1654,7 @@ export default function PRPage() {
                         ? originalPRCommits.length > 0
                           ? originalPRCommits.map((c) => ({
                               hash: c.hash,
-                              subject: c.message.split("\n")[0],
+                              subject: getCommitSubject(c.message),
                               href: prBasePath
                                 ? `${prBasePath}/commit/${c.hash}`
                                 : undefined,
@@ -1663,7 +1685,7 @@ export default function PRPage() {
                         : prCommits.length > 0
                           ? prCommits.map((c) => ({
                               hash: c.hash,
-                              subject: c.message.split("\n")[0],
+                              subject: getCommitSubject(c.message),
                               href: prBasePath
                                 ? `${prBasePath}/commit/${c.hash}`
                                 : undefined,

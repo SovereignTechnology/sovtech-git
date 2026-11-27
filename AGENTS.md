@@ -80,6 +80,10 @@ current and never remove it during release. Give each release a short descriptiv
 title, followed by categorized changes. For larger releases, add a short summary
 between the title and the changes to explain the main themes.
 
+For external contributions, credit the contributor at the end of the relevant
+changelog entry, before the final period, using `(by Contributor Name)`
+(e.g. `(by Sjors Provoost).`).
+
 ## Releases
 
 For every stable release, the `stable` branch and matching `v<version>` tag

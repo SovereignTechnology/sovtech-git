@@ -5,7 +5,13 @@
  * details (timing, jobs, logs, artifacts) as the compact CIRunRow.
  */
 
-import { type MouseEvent, type ReactNode, useState } from "react";
+import {
+  type RefObject,
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useState,
+} from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   AlertTriangle,
@@ -45,6 +51,7 @@ import { NsitePreviewLink } from "./PRNsitePreview";
 import { CICoordinatorLink } from "./CICoordinatorLink";
 import { CITrustContextLabel } from "./CITrustContextLabel";
 import { useCurrentUnixSeconds } from "@/hooks/useCurrentUnixSeconds";
+import { useUnreadHighlight } from "@/hooks/useUnreadHighlight";
 import { CIRunDetails } from "./CIChecksPanel";
 
 const OUTCOME_BADGE_CLASSES: Record<CIRunOutcome, string> = {
@@ -129,6 +136,7 @@ function RunStatusGlyph({ run }: { run: CIWorkflowRun }) {
 
 export function CIRunListRow({
   run,
+  targetAnchor,
   requester,
   layout,
   canRetry = false,
@@ -139,6 +147,7 @@ export function CIRunListRow({
   providerTrust,
 }: {
   run: CIWorkflowRun;
+  targetAnchor?: string;
   /** Confirmed-maintainer requester of the run, when validated by the caller. */
   requester?: string;
   layout: CIRunListRowLayout;
@@ -150,7 +159,10 @@ export function CIRunListRow({
   expandedTrustResolution?: CITrustResolution;
   providerTrust?: CITrustContextState;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!targetAnchor);
+  useEffect(() => {
+    if (targetAnchor) setOpen(true);
+  }, [targetAnchor]);
   const { inlineActions } = layout;
   const isPending = run.status === "pending";
   const nowSeconds = useCurrentUnixSeconds(isPending);
@@ -168,6 +180,8 @@ export function CIRunListRow({
     run.workflowResult?.event ??
     run.pendingRun?.event ??
     run.jobs[0]?.result.event;
+  const anchorId = primaryEvent?.id.slice(0, 15);
+  const { ref, highlight } = useUnreadHighlight(anchorId ?? "");
   const nsitePreview = findNsitePreview([run]);
   const maintainerDirected =
     expandedTrustResolution?.phase === "settled" &&
@@ -234,7 +248,15 @@ export function CIRunListRow({
   );
 
   return (
-    <li className="[container-type:inline-size]">
+    <li
+      id={anchorId}
+      ref={ref as RefObject<HTMLLIElement>}
+      className={cn(
+        "scroll-mt-20 [container-type:inline-size]",
+        highlight === "strong" && "ring-2 ring-inset ring-pink-500/60",
+        highlight === "subtle" && "ring-1 ring-inset ring-pink-500/25",
+      )}
+    >
       <Collapsible open={open} onOpenChange={setOpen}>
         <div
           className={cn(
@@ -368,6 +390,7 @@ export function CIRunListRow({
               run={run}
               nowSeconds={nowSeconds}
               canRetry={canRetry}
+              targetAnchor={targetAnchor}
               providerTrust={providerTrust}
             />
           </div>
