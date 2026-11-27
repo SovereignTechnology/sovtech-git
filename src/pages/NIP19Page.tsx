@@ -24,6 +24,7 @@ import {
   REPO_KIND,
   ISSUE_KIND,
   PATCH_KIND,
+  getPatchSetParentId,
   PR_KIND,
   PR_UPDATE_KIND,
   getRootRepositoryCoordinates,
@@ -810,7 +811,7 @@ function EventRedirect({
     // the user lands on the root PR page with the sub-patch commit highlighted,
     // rather than treating the sub-patch as a standalone root PR.
     if (kind === PATCH_KIND) {
-      const rootPatchId = event.tags.find(([t]) => t === "e")?.[1];
+      const rootPatchId = getPatchSetParentId(event);
       if (rootPatchId) {
         const subPatchNevent = eventIdToNevent(eventId, hintRelays);
         const rootNevent = eventIdToNevent(rootPatchId, hintRelays);

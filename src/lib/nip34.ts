@@ -12,6 +12,7 @@ import {
 } from "applesauce-common/helpers";
 import {
   getOrComputeCachedValue,
+  hasNameValueTag,
   parseReplaceableAddress,
 } from "applesauce-core/helpers";
 import { ISSUE_LABEL_NAMESPACE } from "@/factories/IssueLabelFactory";
@@ -60,6 +61,24 @@ export const PATCH_CHAIN_TAGS = new Set([
   "root",
   "cover-letter",
 ]);
+
+/** Original root patches may reference other events (e.g. a bounty).
+ * Revision roots still belong to the original patch set, even with t:root.
+ */
+export function getPatchSetParentId(event: NostrEvent): string | undefined {
+  if (event.kind !== PATCH_KIND) return undefined;
+  if (
+    hasNameValueTag(event, "t", "root") &&
+    !hasNameValueTag(event, "t", "root-revision") &&
+    !hasNameValueTag(event, "t", "revision-root")
+  )
+    return undefined;
+  return (
+    event.tags.find(
+      ([tag, , , marker]) => tag === "e" && marker === "root",
+    )?.[1] ?? event.tags.find(([tag]) => tag === "e")?.[1]
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Patch message parsing
