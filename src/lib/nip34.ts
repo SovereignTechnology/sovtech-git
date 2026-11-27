@@ -62,69 +62,57 @@ export const PATCH_CHAIN_TAGS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
-// Patch message parsing (ported from gitworkshop)
+// Patch message parsing
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the commit message from a git format-patch string.
- * Returns subject + optional body separated by a blank line.
+ * Recover the subject and body from a plain-text [PATCH] mail when a NIP-34
+ * description does not supply them. The message/patch boundary is intended
+ * to match patchbreak() in Git v2.54.0 mailinfo.c. MIME decoding and the
+ * choice to prefer an event description are outside this comparison.
+ *
+ * To check a suspected boundary bug, feed the same mail to this function and
+ * to Git 2.54.0: `git mailinfo msg diff < patch.eml`. Compare the Subject
+ * from stdout and the text in msg (this helper trims body edges). Add the
+ * example to nip34-patch-message.test.ts before changing the boundary.
+ * https://github.com/git/git/blob/v2.54.0/mailinfo.c
  */
 export function extractPatchMessage(s: string): string | undefined {
-  try {
-    const subjectMatch = s.match(/^Subject: \[PATCH[^\]]*\] (.*)$/m);
-    if (!subjectMatch) return undefined;
+  const lines = s.split(/\r?\n/);
+  const headerEnd = lines.indexOf("");
+  const headers = headerEnd < 0 ? lines : lines.slice(0, headerEnd);
+  const subjectIndex = headers.findIndex((line) => /^Subject: /i.test(line));
+  if (subjectIndex < 0) return undefined;
 
-    const subjectLineEnd = (subjectMatch.index ?? 0) + subjectMatch[0].length;
-    const remaining = s.substring(subjectLineEnd);
-
-    let subject = subjectMatch[1];
-    const lines = remaining.split("\n");
-    let bodyStartIndex = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      if (i === 0 && lines[i] === "") {
-        bodyStartIndex = i + 1;
-        break;
-      } else if (lines[i].startsWith(" ")) {
-        subject += "\n" + lines[i].substring(1);
-        bodyStartIndex = i + 1;
-      } else if (lines[i] === "") {
-        bodyStartIndex = i + 1;
-        break;
-      } else {
-        bodyStartIndex = i;
-        break;
-      }
-    }
-
-    const bodyLines = lines.slice(bodyStartIndex);
-    let message = subject;
-    let messageEndIndex = bodyLines.length;
-
-    for (let i = 0; i < bodyLines.length; i++) {
-      const line = bodyLines[i];
-      if (line.match(/^ .+ \| \d+/)) {
-        messageEndIndex = i;
-        break;
-      }
-      if (line.startsWith("diff --git ")) {
-        messageEndIndex = i;
-        break;
-      }
-    }
-
-    if (messageEndIndex > 0) {
-      let bodyText = bodyLines.slice(0, messageEndIndex).join("\n").trim();
-      if (bodyText === "---" || bodyText.endsWith("\n---")) {
-        bodyText = bodyText.replace(/\n?---$/, "").trim();
-      }
-      if (bodyText) message += "\n\n" + bodyText;
-    }
-
-    return message;
-  } catch {
-    return undefined;
+  let subjectHeader = headers[subjectIndex];
+  for (
+    let i = subjectIndex + 1;
+    i < headers.length && /^[ \t]/.test(headers[i]);
+    i++
+  ) {
+    subjectHeader += " " + headers[i].trimStart();
   }
+  const subject = /^Subject: \[PATCH[^\]]*\] (.*)$/i.exec(subjectHeader)?.[1];
+  if (subject === undefined || headerEnd < 0) return subject;
+
+  // A bare divider needs a terminating newline. An old-file header starts
+  // with three dashes, one space, and a filename, even without a newline.
+  let end = headerEnd + 1;
+  for (; end < lines.length; end++) {
+    const line = lines[end];
+    if (
+      line.startsWith("diff -") ||
+      line.startsWith("Index: ") ||
+      /^--- (?:[^ \t\r]|$)/.test(line) ||
+      (end + 1 < lines.length && /^---[ \t\r]*$/.test(line))
+    )
+      break;
+  }
+  const body = lines
+    .slice(headerEnd + 1, end)
+    .join("\n")
+    .trim();
+  return body ? subject + "\n\n" + body : subject;
 }
 
 /**
