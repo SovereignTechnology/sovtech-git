@@ -67,6 +67,8 @@ import {
   SOFTWARE_RELEASE_KIND,
 } from "@/casts/Software";
 import { ZAPSTORE_RELAY_URL } from "@/hooks/useSoftwareReleases";
+import { CI_EVENT_KINDS, CI_RESULT_KIND, CI_RUN_KIND } from "@/lib/ci";
+import { loadRelayQueryUntilSettled } from "@/lib/relayQuerySettlement";
 import { RepositoryModel } from "@/models/RepositoryModel";
 
 // ---------------------------------------------------------------------------
@@ -381,10 +383,11 @@ function RepoPathRedirect({
   // Forward the hash fragment too (e.g. #<anchorId> for comment permalinks).
   // subPath may already contain a fragment (e.g. "/issues/nevent1...#abc123");
   // only append location.hash if subPath doesn't already have one.
-  const subPathHasHash = subPath.includes("#");
-  const hash = !subPathHasHash && location.hash ? location.hash : "";
-
-  return <Navigate to={`${repoPath}${subPath}${search}${hash}`} replace />;
+  const [pathname, fragment] = subPath.split("#");
+  const hash = fragment ? `#${fragment}` : location.hash;
+  return (
+    <Navigate to={{ pathname: repoPath + pathname, search, hash }} replace />
+  );
 }
 
 /** Get the uppercase `E` root tag from a NIP-22 comment (kind 1111). */
@@ -409,6 +412,76 @@ function getNip10RootId(event: NostrEvent): string | undefined {
   // Single e tag — this event is a direct reply to that event
   if (eTags.length === 1) return eTags[0]?.[1];
   return undefined;
+}
+
+function CIEventRedirect({
+  event,
+  hintRelays,
+}: {
+  event: NostrEvent;
+  hintRelays: string[];
+}) {
+  const coords = getRepoCoords(event);
+  if (!coords.length) return <NotFound />;
+  return (
+    <RepoCoordsRedirect
+      coords={coords}
+      hintRelays={dedupeRelays([
+        ...getRepoCoordRelayHints(event),
+        ...hintRelays,
+      ])}
+      subPath={`/actions#${event.id.slice(0, 15)}`}
+    />
+  );
+}
+
+/** A progress address can outlive its marker. A completed attempt carries
+ * the same run identifier in an r tag and is signed by the coordinator. */
+function CIProgressRedirect({
+  pubkey,
+  runId,
+  hintRelays,
+}: {
+  pubkey: string;
+  runId: string;
+  hintRelays: string[];
+}) {
+  const filters = useMemo<Filter[]>(
+    () => [
+      { kinds: [CI_RUN_KIND], authors: [pubkey], "#d": [runId] },
+      ...(runId.startsWith("refs/")
+        ? []
+        : [{ kinds: [CI_RESULT_KIND], authors: [pubkey], "#r": [runId] }]),
+    ],
+    [pubkey, runId],
+  );
+  const hintsKey = hintRelays.join(",");
+  const lookup = use$(
+    () =>
+      loadRelayQueryUntilSettled(
+        pool,
+        dedupeRelays([
+          ...hintRelays,
+          ...gitIndexRelays.getValue(),
+          ...fallbackRelays.getValue(),
+        ]),
+        filters,
+        eventStore,
+      ),
+    [filters, hintsKey],
+  );
+  const events = use$(() => eventStore.timeline(filters), [filters]);
+  if (!lookup?.settled || !events)
+    return <LoadingState message="Finding workflow run…" />;
+  const results = events.filter((event) => event.kind === CI_RESULT_KIND);
+  if (results.length > 1) return <NotFound />;
+  const event =
+    results[0] ?? events.find((event) => event.kind === CI_RUN_KIND);
+  return event ? (
+    <CIEventRedirect event={event} hintRelays={hintRelays} />
+  ) : (
+    <NotFound />
+  );
 }
 
 interface SoftwareApplicationPointer {
@@ -761,6 +834,24 @@ function EventRedirect({
     );
   }
 
+  if (kind === CI_RUN_KIND) {
+    const runId = getReplaceableIdentifier(event);
+    if (runId)
+      return (
+        <CIProgressRedirect
+          pubkey={event.pubkey}
+          runId={runId}
+          hintRelays={dedupeRelays([
+            ...hintRelays,
+            ...getRepoCoordRelayHints(event),
+          ])}
+        />
+      );
+  }
+  if (CI_EVENT_KINDS.some((ciKind) => ciKind === kind)) {
+    return <CIEventRedirect event={event} hintRelays={hintRelays} />;
+  }
+
   if (kind === SOFTWARE_APPLICATION_KIND) {
     return (
       <SoftwareApplicationRedirect
@@ -972,6 +1063,15 @@ export function NIP19Page() {
       const decoded = nip19.decode(identifier);
       if (decoded.type === "naddr") {
         const { kind, pubkey, identifier: dTag, relays } = decoded.data;
+        if (kind === CI_RUN_KIND && dTag) {
+          return (
+            <CIProgressRedirect
+              pubkey={pubkey}
+              runId={dTag}
+              hintRelays={relays ?? []}
+            />
+          );
+        }
         if (kind === REPO_KIND) {
           return (
             <RepoPathRedirect

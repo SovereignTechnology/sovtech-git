@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Open CI workflow and job permalinks at the corresponding event on the repository Actions page.
+
 - Reduce timer churn during repository history negotiation and event downloads while preserving inactivity deadlines and stalled-source fallback.
 
 - Keep software application and release publication checks active after initial rendering instead of permanently reporting every relay as stopped.
